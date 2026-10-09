@@ -1,0 +1,30 @@
+import subprocess
+import json
+
+def verify(video_path, plan):
+    cmd = ["ffprobe", "-v", "quiet", "-print_format", "json", "-show_streams", "-show_format", video_path]
+    result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+    info = json.loads(result.stdout)
+    
+    stream = next(s for s in info["streams"] if s["codec_type"] == "video")
+    
+    if stream["codec_name"] != plan.output.codec:
+        raise RuntimeError(f"verification_failed: Expected codec {plan.output.codec}, got {stream['codec_name']}")
+        
+    if stream["pix_fmt"] != "yuv420p":
+        raise RuntimeError(f"verification_failed: Expected yuv420p, got {stream['pix_fmt']}")
+        
+    if int(stream["width"]) != plan.output.width or int(stream["height"]) != plan.output.height:
+        raise RuntimeError(f"verification_failed: Expected {plan.output.width}x{plan.output.height}")
+        
+    fps_num, fps_den = stream["r_frame_rate"].split('/')
+    fps = int(fps_num) / int(fps_den)
+    if round(fps) != plan.output.fps:
+        raise RuntimeError(f"verification_failed: Expected {plan.output.fps} fps, got {fps}")
+        
+    duration = float(stream.get("duration") or info["format"]["duration"])
+    container_dur = float(info["format"]["duration"])
+    expected_duration = plan.total_duration_s
+    frame_dur = 1.0 / plan.output.fps
+    if abs(duration - expected_duration) > frame_dur + 0.05 and abs(container_dur - expected_duration) > 0.15:
+        raise RuntimeError(f"verification_failed: Expected duration {expected_duration}, got {duration}")
