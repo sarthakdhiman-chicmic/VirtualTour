@@ -108,9 +108,32 @@ def check_bounds(plan: Plan):
             if left < -eps or right > 1+eps or top < -eps or bottom > 1+eps:
                 raise ValueError(f"Camera window out of bounds in shot {shot.shot_id}")
 
+def check_transitions(plan: Plan):
+    if plan.plan_version not in ("1.0", "1.1"):
+        raise ValueError(f"unsupported plan version: {plan.plan_version}")
+    
+    if not plan.shots:
+        return
+
+    first_trans = plan.shots[0].transition_in
+    if first_trans.type != "cut" or first_trans.duration_s != 0.0:
+        raise ValueError("First shot must have cut transition with 0.0 duration")
+
+    for shot in plan.shots:
+        if plan.plan_version == "1.0":
+            if shot.transition_in.type != "cut":
+                raise ValueError("plan_version 1.0 only supports cut transitions")
+        elif plan.plan_version == "1.1":
+            t = shot.transition_in
+            if t.type not in ("cut", "fade"):
+                raise ValueError(f"Unsupported transition type: {t.type}")
+            if t.type == "fade" and t.duration_s > shot.duration_s * 0.5:
+                raise ValueError("fade duration cannot exceed 50% of shot duration")
+
 def parse_plan(data: dict) -> Plan:
     validate_plan_hash(data)
     plan = Plan(**data)
     check_bounds(plan)
     check_camera_type(plan)
+    check_transitions(plan)
     return plan

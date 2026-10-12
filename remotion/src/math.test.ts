@@ -30,3 +30,35 @@ describe('windowToTransform', () => {
     expect(res.translateY).toBeCloseTo(-270);
   });
 });
+
+import { smoothstep, fadeOpacity } from './math';
+
+describe('opacity functions', () => {
+  it('smoothstep values', () => {
+    expect(smoothstep(0)).toBeCloseTo(0);
+    expect(smoothstep(0.5)).toBeCloseTo(0.5);
+    expect(smoothstep(1)).toBeCloseTo(1);
+    expect(smoothstep(-0.5)).toBeCloseTo(0);
+    expect(smoothstep(1.5)).toBeCloseTo(1);
+  });
+  
+  it('fadeOpacity bounds', () => {
+    const D_k = 10;
+    // first overlap frame strictly between 0 and 1
+    const first = fadeOpacity(0, D_k);
+    expect(first).toBeGreaterThan(0);
+    expect(first).toBeLessThan(1);
+    
+    // last overlap frame strictly below 1
+    const last = fadeOpacity(D_k - 1, D_k);
+    expect(last).toBeGreaterThan(0);
+    expect(last).toBeLessThan(1);
+    
+    // frame D_k is exactly 1
+    expect(fadeOpacity(D_k, D_k)).toBe(1);
+    
+    // negative frames are exactly 0
+    expect(fadeOpacity(-1, D_k)).toBe(0);
+    expect(fadeOpacity(-5, D_k)).toBe(0);
+  });
+});

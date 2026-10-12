@@ -1,6 +1,7 @@
 import os
 import json
 import subprocess
+from modules.timeline import compute_timeline
 
 def render(plan, workdir, scale=1.0, concurrency=2):
     # build props
@@ -8,20 +9,15 @@ def render(plan, workdir, scale=1.0, concurrency=2):
     out_path = os.path.join(workdir, "out.mp4")
     
     # Calculate frames
+    timeline = compute_timeline(plan)
     shots = []
-    cumulative = 0
     fps = plan.output.fps
-    for shot in plan.shots:
-        start_frame = round(cumulative * fps / 100)
-        cumulative += int(round(shot.duration_s * 100))
-        end_frame = round(cumulative * fps / 100)
-        duration_frames = end_frame - start_frame
-        
+    
+    for i, shot in enumerate(plan.shots):
         basename = shot.image_uri.split("/")[-1]
         
         shots.append({
             "id": shot.shot_id,
-            "durationFrames": duration_frames,
             "image": basename,
             "source": {"width": shot.source.width, "height": shot.source.height},
             "camera": {
@@ -34,9 +30,11 @@ def render(plan, workdir, scale=1.0, concurrency=2):
         
     props = {
         "shots": shots,
+        "timeline": timeline,
         "fps": fps,
         "width": plan.output.width,
-        "height": plan.output.height
+        "height": plan.output.height,
+        "total_frames": total_frames
     }
     
     with open(props_path, "w") as f:
@@ -56,7 +54,7 @@ def render(plan, workdir, scale=1.0, concurrency=2):
         "--codec", plan.output.codec,
         "--pixel-format", "yuv420p",
         "--crf", "18",
-        "--timeout", "180000",
+        "--timeout", "600000",
         "--concurrency", str(concurrency),
         "--log", "verbose"
     ]
