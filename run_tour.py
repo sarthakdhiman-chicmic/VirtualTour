@@ -6,6 +6,7 @@ import time
 from modules.plan_io import parse_plan
 from modules.storage import LocalMapStorage, S3Storage
 from modules.images import fetch_and_prepare
+from modules.depth import build_depth_maps
 from modules.remotion_render import render
 from modules.probe import verify
 
@@ -16,12 +17,25 @@ def run_tour(request, storage, workdir, scale=1.0):
         try:
             plan = parse_plan(plan_dict)
         except ValueError as e:
+            msg = str(e)
+            if "unsupported_camera_type" in msg:
+                return {"status": "failed", "error": {"code": "unsupported_camera_type", "message": msg}}
+            if "unsupported_easing" in msg:
+                return {"status": "failed", "error": {"code": "unsupported_easing", "message": msg}}
             return {"status": "failed", "error": {"code": "invalid_plan", "message": str(e)}}
             
         image_urls = request.get("image_urls", {})
         warnings = fetch_and_prepare(plan, storage, workdir, image_urls)
-        
-        out_path = render(plan, workdir, scale)
+
+        # Depth parallax is experimental and opt-in (TOUR_PARALLAX=1): the per-pixel warp bends
+        # straight lines and rigid objects near depth edges. Shots without depth render as Ken Burns.
+        depth_maps = None
+        if os.environ.get("TOUR_PARALLAX", "0") == "1":
+            names = [shot.image_uri.split("/")[-1] for shot in plan.shots]
+            depth_maps, depth_warnings = build_depth_maps(os.path.join(workdir, "images"), names)
+            warnings.extend(depth_warnings)
+
+        out_path = render(plan, workdir, scale, depth_maps=depth_maps)
         
         verify(out_path, plan)
         

@@ -40,7 +40,7 @@ def test_fade_no_dip():
                 "source": {"width": 320, "height": 180},
                 "room_key": "k", "room_type": "r", "narrative_stage": "n", "role": "h",
                 "duration_s": 1.0,
-                "camera": {"type": "ken_burns", "easing": "linear", "start": {"cx": 0.5, "cy": 0.5, "zoom": 1.0}, "end": {"cx": 0.5, "cy": 0.5, "zoom": 1.0}},
+                "camera": {"type": "ken_burns", "easing": "ease_in_out", "start": {"cx": 0.5, "cy": 0.5, "zoom": 1.0}, "end": {"cx": 0.5, "cy": 0.5, "zoom": 1.0}},
                 "transition_in": {"type": "cut", "duration_s": 0.0}
             },
             {
@@ -48,7 +48,7 @@ def test_fade_no_dip():
                 "source": {"width": 320, "height": 180},
                 "room_key": "k", "room_type": "r", "narrative_stage": "n", "role": "h",
                 "duration_s": 1.0,
-                "camera": {"type": "ken_burns", "easing": "linear", "start": {"cx": 0.5, "cy": 0.5, "zoom": 1.0}, "end": {"cx": 0.5, "cy": 0.5, "zoom": 1.0}},
+                "camera": {"type": "ken_burns", "easing": "ease_in_out", "start": {"cx": 0.5, "cy": 0.5, "zoom": 1.0}, "end": {"cx": 0.5, "cy": 0.5, "zoom": 1.0}},
                 "transition_in": {"type": "fade", "duration_s": 0.4}
             }
         ]
@@ -86,7 +86,7 @@ def test_fade_formula_and_identity():
                 "source": {"width": 320, "height": 180},
                 "room_key": "k", "room_type": "r", "narrative_stage": "n", "role": "h",
                 "duration_s": 1.0,
-                "camera": {"type": "ken_burns", "easing": "linear", "start": {"cx": 0.5, "cy": 0.5, "zoom": 1.0}, "end": {"cx": 0.5, "cy": 0.5, "zoom": 1.0}},
+                "camera": {"type": "ken_burns", "easing": "ease_in_out", "start": {"cx": 0.5, "cy": 0.5, "zoom": 1.0}, "end": {"cx": 0.5, "cy": 0.5, "zoom": 1.0}},
                 "transition_in": {"type": "cut", "duration_s": 0.0}
             },
             {
@@ -94,7 +94,7 @@ def test_fade_formula_and_identity():
                 "source": {"width": 320, "height": 180},
                 "room_key": "k", "room_type": "r", "narrative_stage": "n", "role": "h",
                 "duration_s": 1.0,
-                "camera": {"type": "ken_burns", "easing": "linear", "start": {"cx": 0.5, "cy": 0.5, "zoom": 1.0}, "end": {"cx": 0.5, "cy": 0.5, "zoom": 1.0}},
+                "camera": {"type": "ken_burns", "easing": "ease_in_out", "start": {"cx": 0.5, "cy": 0.5, "zoom": 1.0}, "end": {"cx": 0.5, "cy": 0.5, "zoom": 1.0}},
                 "transition_in": {"type": "fade", "duration_s": 0.5}
             }
         ]
@@ -163,7 +163,7 @@ def test_fade_determinism():
                 "source": {"width": 320, "height": 180},
                 "room_key": "k", "room_type": "r", "narrative_stage": "n", "role": "h",
                 "duration_s": 1.0,
-                "camera": {"type": "ken_burns", "easing": "linear", "start": {"cx": 0.5, "cy": 0.5, "zoom": 1.0}, "end": {"cx": 0.5, "cy": 0.5, "zoom": 1.0}},
+                "camera": {"type": "ken_burns", "easing": "ease_in_out", "start": {"cx": 0.5, "cy": 0.5, "zoom": 1.0}, "end": {"cx": 0.5, "cy": 0.5, "zoom": 1.0}},
                 "transition_in": {"type": "cut", "duration_s": 0.0}
             },
             {
@@ -171,7 +171,7 @@ def test_fade_determinism():
                 "source": {"width": 320, "height": 180},
                 "room_key": "k", "room_type": "r", "narrative_stage": "n", "role": "h",
                 "duration_s": 1.0,
-                "camera": {"type": "ken_burns", "easing": "linear", "start": {"cx": 0.5, "cy": 0.5, "zoom": 1.0}, "end": {"cx": 0.5, "cy": 0.5, "zoom": 1.0}},
+                "camera": {"type": "ken_burns", "easing": "ease_in_out", "start": {"cx": 0.5, "cy": 0.5, "zoom": 1.0}, "end": {"cx": 0.5, "cy": 0.5, "zoom": 1.0}},
                 "transition_in": {"type": "fade", "duration_s": 0.4}
             }
         ]

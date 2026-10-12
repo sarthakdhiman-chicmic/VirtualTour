@@ -1,5 +1,4 @@
-import { windowToTransform } from './math';
-
+import { windowToTransform, smoothstep, fadeOpacity, easeLinear, easeIn, easeOut, easeInOut, interpolateEasing, interpolateZoom, rollFitScale, parallaxAt } from './math';
 describe('windowToTransform', () => {
   it('correctly maps 16:9 source to 16:9 output', () => {
     // Zoom 1.0, center
@@ -31,8 +30,6 @@ describe('windowToTransform', () => {
   });
 });
 
-import { smoothstep, fadeOpacity } from './math';
-
 describe('opacity functions', () => {
   it('smoothstep values', () => {
     expect(smoothstep(0)).toBeCloseTo(0);
@@ -60,5 +57,89 @@ describe('opacity functions', () => {
     // negative frames are exactly 0
     expect(fadeOpacity(-1, D_k)).toBe(0);
     expect(fadeOpacity(-5, D_k)).toBe(0);
+  });
+});
+
+describe('easing functions', () => {
+  it('linear values at 0, 0.25, 0.5, 0.75, 1', () => {
+    expect(easeLinear(0)).toBeCloseTo(0);
+    expect(easeLinear(0.25)).toBeCloseTo(0.25);
+    expect(easeLinear(0.5)).toBeCloseTo(0.5);
+    expect(easeLinear(0.75)).toBeCloseTo(0.75);
+    expect(easeLinear(1)).toBeCloseTo(1);
+  });
+
+  it('ease_in values at 0, 0.25, 0.5, 0.75, 1', () => {
+    expect(easeIn(0)).toBeCloseTo(0);
+    expect(easeIn(0.25)).toBeCloseTo(0.0625);
+    expect(easeIn(0.5)).toBeCloseTo(0.25);
+    expect(easeIn(0.75)).toBeCloseTo(0.5625);
+    expect(easeIn(1)).toBeCloseTo(1);
+  });
+
+  it('ease_out values at 0, 0.25, 0.5, 0.75, 1', () => {
+    expect(easeOut(0)).toBeCloseTo(0);
+    expect(easeOut(0.25)).toBeCloseTo(0.4375);
+    expect(easeOut(0.5)).toBeCloseTo(0.75);
+    expect(easeOut(0.75)).toBeCloseTo(0.9375);
+    expect(easeOut(1)).toBeCloseTo(1);
+  });
+
+  it('ease_in_out values at 0, 0.25, 0.5, 0.75, 1', () => {
+    expect(easeInOut(0)).toBeCloseTo(0);
+    expect(easeInOut(0.25)).toBeCloseTo(0.15625);
+    expect(easeInOut(0.5)).toBeCloseTo(0.5);
+    expect(easeInOut(0.75)).toBeCloseTo(0.84375);
+    expect(easeInOut(1)).toBeCloseTo(1);
+  });
+
+  it('interpolateEasing delegates properly', () => {
+    expect(interpolateEasing(0.25, 'linear')).toBeCloseTo(0.25);
+    expect(interpolateEasing(0.25, 'ease_in')).toBeCloseTo(0.0625);
+    expect(interpolateEasing(0.25, 'ease_out')).toBeCloseTo(0.4375);
+    expect(interpolateEasing(0.25, 'ease_in_out')).toBeCloseTo(0.15625);
+    expect(interpolateEasing(0.25)).toBeCloseTo(0.15625); // default ease_in_out
+  });
+});
+
+describe('interpolateZoom', () => {
+  it('hits the endpoints', () => {
+    expect(interpolateZoom(1.0, 1.22, 0)).toBeCloseTo(1.0);
+    expect(interpolateZoom(1.0, 1.22, 1)).toBeCloseTo(1.22);
+  });
+  it('interpolates in log space (constant ratio per step)', () => {
+    expect(interpolateZoom(1.0, 1.21, 0.5)).toBeCloseTo(1.1);
+    expect(interpolateZoom(1.2, 1.0, 0.5)).toBeCloseTo(Math.sqrt(1.2));
+  });
+});
+
+describe('rollFitScale', () => {
+  it('is 1 with no roll', () => {
+    expect(rollFitScale(0, 1920, 1080)).toBeCloseTo(1);
+  });
+  it('covers the rolled 16:9 frame', () => {
+    const r = (1.5 * Math.PI) / 180;
+    // rolled frame's bounding box must fit in the window scaled by k
+    const k = rollFitScale(r, 1920, 1080);
+    const bw = 1920 * Math.cos(r) + 1080 * Math.sin(r);
+    const bh = 1920 * Math.sin(r) + 1080 * Math.cos(r);
+    expect(bw / k).toBeLessThanOrEqual(1920 + 1e-6);
+    expect(bh / k).toBeLessThanOrEqual(1080 + 1e-6);
+  });
+});
+
+describe('parallaxAt', () => {
+  const a = { cx: 0.4, cy: 0.5, zoom: 1.25 };
+  const b = { cx: 0.57, cy: 0.5, zoom: 1.15 };
+  it('is centred on the shot when both ends have spare image', () => {
+    expect(parallaxAt(a, b, 0.5, 1920, 1280, 0.025).lateral[0]).toBeCloseTo(0);
+    expect(parallaxAt(a, b, 1, 1920, 1280, 0.025).lateral[0]).toBeCloseTo(0.0125);
+  });
+  it('starts from zero at a zoom-1.0 end', () => {
+    const z = { cx: 0.5, cy: 0.5, zoom: 1.0 };
+    const e = { cx: 0.55, cy: 0.5, zoom: 1.2 };
+    const r = parallaxAt(z, e, 0, 1920, 1280, 0.025);
+    expect(r.lateral[0]).toBeCloseTo(0);
+    expect(r.radial).toBeCloseTo(0);
   });
 });

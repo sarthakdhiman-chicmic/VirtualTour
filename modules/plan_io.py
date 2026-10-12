@@ -19,11 +19,14 @@ class CameraTransform(BaseModel):
     cx: float
     cy: float
     zoom: float
+    # gimbal roll; the renderer fits the rolled frame inside the (cx, cy, zoom) window
+    roll_deg: float = 0.0
     model_config = ConfigDict(extra='ignore')
 
 class Camera(BaseModel):
     type: str
-    easing: str
+    easing: str = "ease_in_out"
+    preset: Optional[str] = None
     start: CameraTransform
     end: CameraTransform
     model_config = ConfigDict(extra='ignore')
@@ -108,8 +111,16 @@ def check_bounds(plan: Plan):
             if left < -eps or right > 1+eps or top < -eps or bottom > 1+eps:
                 raise ValueError(f"Camera window out of bounds in shot {shot.shot_id}")
 
+def check_easing(plan: Plan):
+    valid_easings = {"linear", "ease_in", "ease_out", "ease_in_out"}
+    for shot in plan.shots:
+        if shot.camera.easing not in valid_easings:
+            raise ValueError(f"unsupported_easing: {shot.camera.easing}")
+        if plan.plan_version in ("1.0", "1.1") and shot.camera.easing != "ease_in_out":
+            raise ValueError(f"invalid_plan: non-default easing '{shot.camera.easing}' not allowed in plan_version {plan.plan_version}")
+
 def check_transitions(plan: Plan):
-    if plan.plan_version not in ("1.0", "1.1"):
+    if plan.plan_version not in ("1.0", "1.1", "1.2"):
         raise ValueError(f"unsupported plan version: {plan.plan_version}")
     
     if not plan.shots:
@@ -123,7 +134,7 @@ def check_transitions(plan: Plan):
         if plan.plan_version == "1.0":
             if shot.transition_in.type != "cut":
                 raise ValueError("plan_version 1.0 only supports cut transitions")
-        elif plan.plan_version == "1.1":
+        elif plan.plan_version in ("1.1", "1.2"):
             t = shot.transition_in
             if t.type not in ("cut", "fade"):
                 raise ValueError(f"Unsupported transition type: {t.type}")
@@ -135,5 +146,6 @@ def parse_plan(data: dict) -> Plan:
     plan = Plan(**data)
     check_bounds(plan)
     check_camera_type(plan)
+    check_easing(plan)
     check_transitions(plan)
     return plan

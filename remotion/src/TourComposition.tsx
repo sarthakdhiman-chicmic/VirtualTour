@@ -1,6 +1,7 @@
 import { Composition, Sequence, getInputProps, AbsoluteFill, useCurrentFrame } from 'remotion';
 import React from 'react';
 import { KenBurnsShot } from './KenBurnsShot';
+import { ParallaxShot } from './ParallaxShot';
 import { fadeOpacity } from './math';
 
 export const TourComposition: React.FC = () => {
@@ -24,14 +25,26 @@ export const TourComposition: React.FC = () => {
         return (
           <Sequence key={shot.id} from={t.render_from} durationInFrames={t.render_frames}>
             <div style={{ opacity, width: '100%', height: '100%', position: 'absolute' }}>
-              <KenBurnsShot 
-                durationFrames={t.render_frames}
-                image={shot.image}
-                source={shot.source}
-                camera={shot.camera}
-                width={props.width as number}
-                height={props.height as number}
-              />
+              {shot.depth ? (
+                <ParallaxShot
+                  durationFrames={t.render_frames}
+                  image={shot.image}
+                  depth={shot.depth}
+                  source={shot.source}
+                  camera={shot.camera}
+                  width={props.width as number}
+                  height={props.height as number}
+                />
+              ) : (
+                <KenBurnsShot
+                  durationFrames={t.render_frames}
+                  image={shot.image}
+                  source={shot.source}
+                  camera={shot.camera}
+                  width={props.width as number}
+                  height={props.height as number}
+                />
+              )}
             </div>
           </Sequence>
         );

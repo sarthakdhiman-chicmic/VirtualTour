@@ -10,14 +10,18 @@
   "license": "ISC",
   "description": "",
   "dependencies": {
+    "@react-three/fiber": "9.1.2",
     "@remotion/cli": "^4.0.141",
+    "@remotion/three": "4.0.141",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
-    "remotion": "^4.0.141"
+    "remotion": "^4.0.141",
+    "three": "0.170.0"
   },
   "devDependencies": {
     "@types/jest": "^30.0.0",
     "@types/react": "^19.3.0",
+    "@types/three": "0.170.0",
     "jest": "^30.5.2",
     "ts-jest": "^29.4.14",
     "ts-node": "^10.9.2",
