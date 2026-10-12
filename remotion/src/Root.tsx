@@ -7,8 +7,7 @@ export const Root: React.FC = () => {
   const fps = (props.fps as number) || 30;
   const width = (props.width as number) || 1920;
   const height = (props.height as number) || 1080;
-  const duration = props.shots ? 
-    (props.shots as any[]).reduce((a, b) => a + b.durationFrames, 0) : 30;
+  const duration = props.total_frames ? (props.total_frames as number) : 30;
 
   return (
     <Composition

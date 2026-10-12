@@ -35,3 +35,16 @@ export function windowToTransform(
   
   return { scale, translateX, translateY };
 }
+
+export function smoothstep(x: number): number {
+  if (x <= 0) return 0;
+  if (x >= 1) return 1;
+  return x * x * (3 - 2 * x);
+}
+
+export function fadeOpacity(f: number, D_k: number): number {
+  if (D_k <= 0) return 1;
+  if (f >= D_k) return 1;
+  if (f < 0) return 0;
+  return smoothstep((f + 1) / (D_k + 1));
+}
