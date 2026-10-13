@@ -1,6 +1,7 @@
 import { AbsoluteFill, Img, useCurrentFrame, staticFile } from 'remotion';
 import React from 'react';
-import { windowToTransform, interpolateEasing, cameraAt, rollFitScale, keyframePathAt, CameraPoint, Keyframe } from './math';
+import { windowToTransform, interpolateEasing, cameraAt, rollFitScale, keyframePathAt, CameraPoint, Keyframe,
+  rotateHomography, invert3, homographyToMatrix3d, DEFAULT_HFOV_DEG } from './math';
 
 export const KenBurnsShot: React.FC<{
   durationFrames: number;
@@ -15,6 +16,8 @@ export const KenBurnsShot: React.FC<{
     // keyframe_path (plan 1.3)
     move?: string;
     keyframes?: Keyframe[];
+    projection?: string; // 'crop' (default) | 'rotate' (addendum 1.3.1)
+    hfov_deg?: number;
   };
   width: number;
   height: number;
@@ -26,6 +29,27 @@ export const KenBurnsShot: React.FC<{
     ? keyframePathAt(camera.keyframes as Keyframe[], t)
     : cameraAt(camera.start as CameraPoint, camera.end as CameraPoint,
         interpolateEasing(t, camera.easing ?? 'ease_in_out'));
+
+  if (camera.type === 'keyframe_path' && camera.projection === 'rotate') {
+    // camera turning in place: the photo reprojected onto a camera aimed at (cx, cy).
+    // NOT deterministic: two full renders differed in ~300 of 2100 frames (one render chunk,
+    // mean abs diff 1-2.4 levels); will-change: transform did not fix it (out/tour_v3/report.md)
+    const toSource = rotateHomography(cx, cy, zoom, source.width, source.height, width, height,
+      camera.hfov_deg ?? DEFAULT_HFOV_DEG);
+    return (
+      <AbsoluteFill style={{ overflow: 'hidden' }}>
+        <div style={{
+          position: 'absolute',
+          width: source.width,
+          height: source.height,
+          transformOrigin: '0 0',
+          transform: homographyToMatrix3d(invert3(toSource)),
+        }}>
+          <Img src={staticFile(image)} style={{ width: '100%', height: '100%' }} />
+        </div>
+      </AbsoluteFill>
+    );
+  }
 
   const { scale, translateX, translateY } = windowToTransform(
     source.width, source.height, width, height, cx, cy, zoom

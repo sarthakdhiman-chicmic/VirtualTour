@@ -1,7 +1,7 @@
 import hashlib
 import json
 
-from modules.camera_path import KeyframePath, base_window, margin_out_px, validate_keyframes
+from modules.camera_path import PROJECTIONS, KeyframePath, base_window, frame_margin_out_px, validate_keyframes
 from typing import List, Optional, Literal, Dict, Any
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -42,6 +42,10 @@ class Camera(BaseModel):
     # keyframe_path (plan 1.3)
     move: Optional[str] = None
     keyframes: Optional[List[Keyframe]] = None
+    # keyframe_path, addendum 1.3.1 (optional): "crop" (default) or "rotate"; hfov_deg is the
+    # photo's assumed horizontal field of view for "rotate" (modules/camera_path.py)
+    projection: Optional[str] = None
+    hfov_deg: Optional[float] = None
     model_config = ConfigDict(extra='ignore')
 
 class Transition(BaseModel):
@@ -113,6 +117,16 @@ def check_camera_type(plan: Plan):
             if not shot.camera.move:
                 raise ValueError(f"invalid_plan: keyframe_path camera in shot {shot.shot_id} needs a move name")
             validate_keyframes([k.model_dump() for k in (shot.camera.keyframes or [])])
+            if shot.camera.projection is not None and shot.camera.projection not in PROJECTIONS:
+                raise ValueError(f"unsupported_projection: {shot.camera.projection}")
+            if shot.camera.hfov_deg is not None and not 20 <= shot.camera.hfov_deg <= 120:
+                raise ValueError(f"invalid_plan: hfov_deg in shot {shot.shot_id} must be 20-120")
+
+def _projection_kwargs(camera) -> dict:
+    kw = {"projection": camera.projection or "crop"}
+    if camera.hfov_deg is not None:
+        kw["hfov_deg"] = camera.hfov_deg
+    return kw
 
 def check_path_bounds(plan: Plan):
     """keyframe_path: the window must stay inside the image at every rendered frame (the planner
@@ -124,8 +138,8 @@ def check_path_bounds(plan: Plan):
             continue
         path = KeyframePath([k.model_dump() for k in shot.camera.keyframes])
         for cx, cy, z in path.frames(tl["render_frames"]):
-            m = margin_out_px(cx, cy, z, shot.source.width, shot.source.height,
-                              plan.output.width, plan.output.height)
+            m = frame_margin_out_px(cx, cy, z, shot.source.width, shot.source.height,
+                                    plan.output.width, plan.output.height, **_projection_kwargs(shot.camera))
             if m < -0.01:
                 raise ValueError(f"Camera window out of bounds in shot {shot.shot_id}")
 

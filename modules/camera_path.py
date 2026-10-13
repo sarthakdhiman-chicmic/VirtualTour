@@ -137,3 +137,75 @@ def margin_out_px(cx: float, cy: float, zoom: float, src_w: int, src_h: int, out
 def source_px_per_output_px(zoom: float, src_w: int, src_h: int, out_w: int, out_h: int) -> float:
     bw, _ = base_window(src_w, src_h, out_w, out_h)
     return bw * src_w / zoom / out_w
+
+
+# ---------------------------------------------------------------------------------------------
+# projection "rotate" (addendum 1.3.1, optional, keyframe_path only)
+#
+# "crop" (the default) slides and scales a window over the photo. "rotate" treats the same
+# (cx, cy, zoom) as a camera that turns in place: it points at the photo pixel (cx, cy) with a
+# field of view narrowed by zoom, and the frame is the photo reprojected onto that camera. A pure
+# rotation about the lens is exactly a homography of a single photo, so it needs no depth and
+# keeps straight lines straight; moving to look higher or lower is a real tilt (verticals lean as
+# they do through a tilted lens), left or right a real pan, with no roll. At the photo centre it
+# equals "crop". The photo's horizontal field of view is not known; hfov_deg assumes one.
+# ---------------------------------------------------------------------------------------------
+PROJECTIONS = ("crop", "rotate")
+DEFAULT_HFOV_DEG = 75.0
+
+
+def rotate_homography(cx: float, cy: float, zoom: float, src_w: int, src_h: int, out_w: int, out_h: int,
+                      hfov_deg: float = DEFAULT_HFOV_DEG) -> list[list[float]]:
+    """Row-major 3x3 homography mapping OUTPUT px to SOURCE px."""
+    f = (src_w / 2) / math.tan(math.radians(hfov_deg) / 2)
+    bw, _ = base_window(src_w, src_h, out_w, out_h)
+    fv = f * zoom * out_w / (bw * src_w)          # virtual focal length, output px
+    x0, y0 = cx * src_w - src_w / 2, cy * src_h - src_h / 2
+    yaw = math.atan2(x0, f)
+    pitch = math.atan2(y0, math.hypot(x0, f))
+    cyw, syw, cp, sp = math.cos(yaw), math.sin(yaw), math.cos(pitch), math.sin(pitch)
+    # R = Ry(yaw) @ Rx(pitch): virtual-camera ray -> source-camera ray (camera x stays level)
+    r = [[cyw, -syw * sp, syw * cp],
+         [0.0, cp, sp],
+         [-syw, -cyw * sp, cyw * cp]]
+    # M = Ks @ R @ inv(Kv)
+    kv_inv = [[1 / fv, 0.0, -out_w / 2 / fv], [0.0, 1 / fv, -out_h / 2 / fv], [0.0, 0.0, 1.0]]
+    ks = [[f, 0.0, src_w / 2], [0.0, f, src_h / 2], [0.0, 0.0, 1.0]]
+    return _matmul(ks, _matmul(r, kv_inv))
+
+
+def _matmul(a, b):
+    return [[sum(a[i][k] * b[k][j] for k in range(3)) for j in range(3)] for i in range(3)]
+
+
+def apply_homography(m, x: float, y: float) -> tuple[float, float]:
+    w = m[2][0] * x + m[2][1] * y + m[2][2]
+    return (m[0][0] * x + m[0][1] * y + m[0][2]) / w, (m[1][0] * x + m[1][1] * y + m[1][2]) / w
+
+
+def frame_margin_out_px(cx, cy, zoom, src_w, src_h, out_w, out_h, projection="crop",
+                        hfov_deg=DEFAULT_HFOV_DEG) -> float:
+    """margin_out_px for either projection. For "rotate" the frame is a quadrilateral on the photo
+    (straight edges), so it is inside iff its four corners are."""
+    if projection != "rotate":
+        return margin_out_px(cx, cy, zoom, src_w, src_h, out_w, out_h)
+    m = rotate_homography(cx, cy, zoom, src_w, src_h, out_w, out_h, hfov_deg)
+    worst = min(min(u, src_w - u, v, src_h - v)
+                for u, v in (apply_homography(m, x, y) for x, y in ((0, 0), (out_w, 0), (0, out_h), (out_w, out_h))))
+    bw, _ = base_window(src_w, src_h, out_w, out_h)
+    return worst * out_w / (bw * src_w / zoom)
+
+
+def frame_spp(cx, cy, zoom, src_w, src_h, out_w, out_h, projection="crop", hfov_deg=DEFAULT_HFOV_DEG) -> float:
+    """Smallest source px per output px over the frame. For "rotate", the local linear scale
+    (sqrt of the Jacobian determinant) at the centre and the four corners."""
+    if projection != "rotate":
+        return source_px_per_output_px(zoom, src_w, src_h, out_w, out_h)
+    m = rotate_homography(cx, cy, zoom, src_w, src_h, out_w, out_h, hfov_deg)
+    out = []
+    for x, y in ((out_w / 2, out_h / 2), (0, 0), (out_w, 0), (0, out_h), (out_w, out_h)):
+        u0, v0 = apply_homography(m, x, y)
+        ux, vx = apply_homography(m, x + 1, y)
+        uy, vy = apply_homography(m, x, y + 1)
+        out.append(math.sqrt(abs((ux - u0) * (vy - v0) - (uy - u0) * (vx - v0))))
+    return min(out)

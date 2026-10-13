@@ -2,6 +2,9 @@
 
   v1: baseline ken_burns moves, every transition a hard cut (plan 1.2)
   v2: multi-step keyframe_path moves aimed with image saliency, hard cuts (plan 1.3)
+  v3 (--v3): wide rooms get tilt_reveal (start tight, pan and tilt across the room, finish
+      zoomed out on its full coverage); --projection rotate renders the pans and tilts as a
+      camera turning in place (addendum 1.3.1) instead of a sliding crop
 
 There is no room context (no object, walkway or doorway data): moves are aimed only with the
 saliency targets in fixtures/downing/saliency.json. Selection, geometry, direction continuity,
@@ -19,7 +22,7 @@ import math
 import os
 import statistics
 
-from modules.camera_path import KeyframePath, base_window, margin_out_px, source_px_per_output_px
+from modules.camera_path import DEFAULT_HFOV_DEG, KeyframePath, base_window, frame_margin_out_px, frame_spp
 from modules.plan_io import compute_plan_hash, parse_plan
 from modules.timeline import compute_timeline
 
@@ -35,7 +38,9 @@ SHOT_RANGE_S = (3.0, 8.0)
 FINAL_MIN_S = 5.0
 SETTLE_BELOW_S = 4.0
 CONTINUITY_OVERRIDE_RATIO = 1.5
-LATERAL_MOVES = {"reveal_sweep", "push_to_subject", "slide"}
+TILT_MAX_FRACTION = 0.40
+TILT_DURATION_S = 7.5
+LATERAL_MOVES = {"reveal_sweep", "tilt_reveal", "push_to_subject", "slide"}
 
 # move parameters (each inside the brief's range)
 REVEAL = {"z0": 1.035, "t1": 0.35, "z1": 1.28, "t2": 0.70, "z3": 1.08, "peak_inset": 0.8}
@@ -44,11 +49,14 @@ SLIDE = {"travel": 0.10, "push": 1.04}
 PULL = {"z0": 1.175, "z1": 1.02}
 RISE = {"z0": 1.01, "gain": 1.065, "x_toward_peak": 0.5}
 SETTLE = {"z0": 1.02, "gain": 1.07, "toward_peak": 0.35}
+# tilt_reveal: K0 tight on the far-low corner, K1 pan + tilt up to the salient side, K2 zoomed out
+TILT = {"z0": 1.32, "t1": 0.62, "z1": 1.24, "z2": 1.012}
 
 
 class Geometry:
-    def __init__(self, src_w, src_h, out_w, out_h):
+    def __init__(self, src_w, src_h, out_w, out_h, projection="crop", hfov_deg=DEFAULT_HFOV_DEG):
         self.src_w, self.src_h, self.out_w, self.out_h = src_w, src_h, out_w, out_h
+        self.projection, self.hfov_deg = projection, hfov_deg
         self.bw, self.bh = base_window(src_w, src_h, out_w, out_h)
         # zoom at which source px per output px reaches MIN_SPP
         self.zoom_cap = self.bw * src_w / (MIN_SPP * out_w)
@@ -61,6 +69,28 @@ class Geometry:
     def clamp(self, cx, cy, z):
         hw, hh = self.half(z)
         return min(max(cx, hw), 1 - hw), min(max(cy, hh), 1 - hh)
+
+    def margin(self, cx, cy, z):
+        return frame_margin_out_px(cx, cy, z, self.src_w, self.src_h, self.out_w, self.out_h,
+                                   self.projection, self.hfov_deg)
+
+    def spp(self, cx, cy, z):
+        return frame_spp(cx, cy, z, self.src_w, self.src_h, self.out_w, self.out_h, self.projection, self.hfov_deg)
+
+    def fit(self, cx, cy, z):
+        """Crop clamp, then (for "rotate", whose reach is smaller) the furthest point on the line
+        to the photo centre that keeps the plan margin."""
+        cx, cy = self.clamp(cx, cy, z)
+        if self.margin(cx, cy, z) >= PLAN_MARGIN_OUT_PX:
+            return cx, cy
+        lo, hi = 0.0, 1.0
+        for _ in range(40):
+            m = (lo + hi) / 2
+            if self.margin(0.5 + (cx - 0.5) * m, 0.5 + (cy - 0.5) * m, z) >= PLAN_MARGIN_OUT_PX:
+                lo = m
+            else:
+                hi = m
+        return 0.5 + (cx - 0.5) * lo, 0.5 + (cy - 0.5) * lo
 
     def width(self, z):
         return self.bw / z
@@ -99,6 +129,20 @@ def move_reveal_sweep(g, sal, d):
     cy3 = edge_y - v * h3 / 2
     cx3, cy3 = g.clamp(cx3, cy3, p["z3"])
     return [kf(0, *k0), kf(p["t1"], cx1, cy1, p["z1"]), kf(p["t2"], cx2, cy1, p["z1"]), kf(1, cx3, cy3, p["z3"])]
+
+
+def move_tilt_reveal(g, sal, d):
+    """Start tight and low on the side away from the scroll (d), pan across while tilting up to
+    the salient height on side d, then zoom out to the room's full coverage keeping that side's
+    window edge where it is (pulling back from that corner). Every channel is monotone except cx
+    at K1, where zoom is moving, so the camera never stops."""
+    p = TILT
+    py = sal["peak"]["y"]
+    cx0, cy0 = g.fit(0.5 - d * 0.5, 1.0, p["z0"])          # far side, looking low
+    cx1, cy1 = g.fit(0.5 + d * 0.5, min(py, 0.5), p["z1"])  # salient side, tilted up
+    edge_x = cx1 + d * g.width(p["z1"]) / 2
+    cx2, cy2 = g.fit(edge_x - d * g.width(p["z2"]) / 2, 0.5, p["z2"])
+    return [kf(0, cx0, cy0, p["z0"]), kf(p["t1"], cx1, cy1, p["z1"]), kf(1, cx2, cy2, p["z2"])]
 
 
 def push_target(g, sal, z):
@@ -167,14 +211,14 @@ def move_settle(g, sal, d):
     return [kf(0, cx0, cy0, z0), kf(1, cx1, cy1, z1)]
 
 
-MOVES = {"reveal_sweep": move_reveal_sweep, "push_to_subject": move_push_to_subject, "slide": move_slide,
+MOVES = {"tilt_reveal": move_tilt_reveal, "reveal_sweep": move_reveal_sweep, "push_to_subject": move_push_to_subject, "slide": move_slide,
          "pull_back_reveal": move_pull_back_reveal, "rise": move_rise, "settle": move_settle}
 
 
 def natural_direction(move, sal, g=None):
     side = 1 if sal["side"] == "right" else -1
-    if move == "slide":
-        return side                     # slide toward the salient side
+    if move in ("slide", "tilt_reveal"):
+        return side                     # travel toward the salient side
     if move == "reveal_sweep":
         return -side                    # push toward the salient side, then scroll away from it
     if move == "push_to_subject":
@@ -246,6 +290,34 @@ def select_moves(shots, sal, notes):
     return moves, thr
 
 
+def select_moves_v3(shots, sal, notes):
+    """v2 selection, then tilt_reveal replaces the move of the widest rooms (spread above the plan
+    median; not the first or last shot, exteriors or bathrooms), at most 40% of shots, never two
+    in a row. reveal_sweep is not used."""
+    moves, thr = select_moves(shots, sal, notes)
+    n = len(shots)
+    spreads = [sal[s["image_uri"].split("/")[-1]]["spread"] for s in shots]
+    cand = sorted((i for i in range(1, n - 1) if spreads[i] > thr and not is_exterior(shots[i])
+                   and not is_bathroom(shots[i])), key=lambda i: -spreads[i])
+    kept = []
+    for i in cand:
+        if len(kept) < math.floor(TILT_MAX_FRACTION * n) and all(abs(i - j) > 1 for j in kept):
+            kept.append(i)
+    for i in range(n):
+        if i in kept:
+            notes[i]["selection"] = f"wide room, spread {spreads[i]:.3f} > median {thr:.3f} -> tilt_reveal"
+            moves[i] = "tilt_reveal"
+        elif moves[i] == "reveal_sweep":
+            moves[i] = "push_to_subject"
+            notes[i]["selection"] += "; reveal_sweep not used in v3 -> push_to_subject"
+    # neighbours of tilt_reveal shots: keep slide / push alternating around them
+    for i in range(1, n):
+        if moves[i] == moves[i - 1] and moves[i] in ("slide", "push_to_subject") and i != n - 1:
+            moves[i] = "slide" if moves[i] == "push_to_subject" else "push_to_subject"
+            notes[i]["selection"] += "; flipped to avoid a repeat"
+    return moves, thr
+
+
 def allocate_durations(shots, moves, total):
     """reveal_sweep gets REVEAL_DURATION_S; the rest are scaled to keep the total, clamped to
     3..8 s (final >= 5 s) and re-scaled until stable; integer centiseconds, total preserved."""
@@ -254,6 +326,7 @@ def allocate_durations(shots, moves, total):
     hi = [SHOT_RANGE_S[1]] * n
     lo[-1] = max(lo[-1], FINAL_MIN_S)
     fixed = {i: REVEAL_DURATION_S for i in range(n) if moves[i] == "reveal_sweep"}
+    fixed.update({i: TILT_DURATION_S for i in range(n) if moves[i] == "tilt_reveal"})
     d = [fixed.get(i, shots[i]["duration_s"]) for i in range(n)]
     for _ in range(20):
         free = [i for i in range(n) if i not in fixed]
@@ -309,19 +382,33 @@ def stage_directions(shots, moves, sal, notes):
 
 def frame_stats(keyframes, n, g):
     frames = KeyframePath(keyframes).frames(n)
-    margins = [margin_out_px(cx, cy, z, g.src_w, g.src_h, g.out_w, g.out_h) for cx, cy, z in frames]
-    spp = [source_px_per_output_px(z, g.src_w, g.src_h, g.out_w, g.out_h) for _, _, z in frames]
+    margins = [g.margin(cx, cy, z) for cx, cy, z in frames]
+    spp = [g.spp(cx, cy, z) for cx, cy, z in frames]
     return frames, margins, spp
 
 
 def enforce(keyframes, n, g, note):
+    # keyframes designed with the crop clamp: pull each back inside the projection's reach
+    for k in keyframes:
+        k["cx"], k["cy"] = (round(v, 6) for v in g.fit(k["cx"], k["cy"], k["zoom"]))
     # zoom cap: lower the zoom (not the direction); monotone interpolation never exceeds keyframes
     capped = []
     for k in keyframes:
         if k["zoom"] > g.zoom_cap:
             capped.append({"t": k["t"], "from": k["zoom"], "to": round(g.zoom_cap, 6)})
             k["zoom"] = round(g.zoom_cap, 6)
-            k["cx"], k["cy"] = (round(v, 6) for v in g.clamp(k["cx"], k["cy"], k["zoom"]))
+            k["cx"], k["cy"] = (round(v, 6) for v in g.fit(k["cx"], k["cy"], k["zoom"]))
+    # "rotate" is softer off-centre than its centre zoom says: lower the zooms (1% steps) until
+    # every frame keeps MIN_SPP
+    for _ in range(40):
+        _, _, spp = frame_stats(keyframes, n, g)
+        if min(spp) >= MIN_SPP - 1e-9:
+            break
+        for k in keyframes:
+            if k["zoom"] > 1.05:
+                capped.append({"t": k["t"], "from": k["zoom"], "to": round(k["zoom"] * 0.99, 6), "why": "spp"})
+                k["zoom"] = round(k["zoom"] * 0.99, 6)
+                k["cx"], k["cy"] = (round(v, 6) for v in g.fit(k["cx"], k["cy"], k["zoom"]))
     note["zoom_capped"] = capped
     scale, base = 1.0, copy.deepcopy(keyframes)
     while True:
@@ -348,7 +435,7 @@ def finish(plan):
     return plan
 
 
-def build(baseline, saliency):
+def build(baseline, saliency, v3=False, projection="crop", hfov_deg=DEFAULT_HFOV_DEG):
     base = copy.deepcopy(baseline.get("plan", baseline))
     out_w, out_h = base["output"]["width"], base["output"]["height"]
 
@@ -366,7 +453,7 @@ def build(baseline, saliency):
     sal = saliency["photos"]
     notes = [{"shot_id": s["shot_id"], "role": s["role"], "room_type": s["room_type"],
               "narrative_stage": s["narrative_stage"], "baseline_duration_s": s["duration_s"]} for s in shots]
-    moves, thr = select_moves(shots, sal, notes)
+    moves, thr = (select_moves_v3 if v3 else select_moves)(shots, sal, notes)
     durations = allocate_durations(shots, moves, base["total_duration_s"])
     # shots that ended under 4 s become settle
     for i, d in enumerate(durations):
@@ -381,13 +468,17 @@ def build(baseline, saliency):
     timeline = compute_timeline(parse_plan_loose(v2))
     for i, s in enumerate(shots):
         p = sal[s["image_uri"].split("/")[-1]]
-        g = Geometry(s["source"]["width"], s["source"]["height"], out_w, out_h)
+        proj = projection if v3 else "crop"
+        g = Geometry(s["source"]["width"], s["source"]["height"], out_w, out_h, proj, hfov_deg)
         keys = MOVES[moves[i]](g, p, directions[i])
         notes[i]["keyframes_designed"] = copy.deepcopy(keys)
         keys = enforce(keys, timeline[i]["render_frames"], g, notes[i])
         s["camera"] = {"type": "keyframe_path", "move": moves[i], "keyframes": keys}
+        if proj == "rotate":
+            s["camera"].update({"projection": "rotate", "hfov_deg": hfov_deg})
         # direction the path actually travels (reveal_sweep: its scroll K1 -> K2)
-        a, b = (keys[1], keys[2]) if moves[i] == "reveal_sweep" else (keys[0], keys[-1])
+        a, b = ((keys[1], keys[2]) if moves[i] == "reveal_sweep" else
+                (keys[0], keys[1]) if moves[i] == "tilt_reveal" else (keys[0], keys[-1]))
         dx = b["cx"] - a["cx"]
         achieved = (dx > 1e-6) - (dx < -1e-6)
         notes[i]["direction"]["achieved"] = achieved
@@ -401,10 +492,12 @@ def build(baseline, saliency):
                          timeline[i]["render_from"] + timeline[i]["render_frames"]],
                          "keyframes": keys, "zoom_cap": round(g.zoom_cap, 6),
                          "saliency": {k: p[k] for k in ("peak", "side", "mass_ratio", "spread")}})
-    v2["provenance"]["planner_config_version"] = f"{PLANNER_VERSION}/v2_moves"
+    v2["provenance"]["planner_config_version"] = (
+        f"{PLANNER_VERSION}/v3_tilt_reveal/{projection}" + (f"/hfov{hfov_deg:g}" if projection == "rotate" else "")
+        if v3 else f"{PLANNER_VERSION}/v2_moves")
     finish(v2)
     summary = {"spread_median_threshold": thr, "moves": moves,
-               "reveal_sweep_count": moves.count("reveal_sweep"), "total_duration_s": v2["total_duration_s"],
+               "reveal_sweep_count": moves.count("reveal_sweep"), "tilt_reveal_count": moves.count("tilt_reveal"), "total_duration_s": v2["total_duration_s"],
                "baseline_total_s": base["total_duration_s"]}
     return v1, v2, {"summary": summary, "shots": notes}
 
@@ -424,10 +517,18 @@ def main():
     ap.add_argument("--baseline", required=True)
     ap.add_argument("--saliency", required=True)
     ap.add_argument("--out-dir", required=True)
+    ap.add_argument("--v3", action="store_true", help="tilt_reveal on wide rooms")
+    ap.add_argument("--projection", choices=("crop", "rotate"), default="crop")
+    ap.add_argument("--hfov", type=float, default=DEFAULT_HFOV_DEG)
+    ap.add_argument("--name", default=None, help="v3 output name (default v3_<projection>)")
     args = ap.parse_args()
-    v1, v2, notes = build(json.load(open(args.baseline)), json.load(open(args.saliency)))
+    v1, v2, notes = build(json.load(open(args.baseline)), json.load(open(args.saliency)),
+                          args.v3, args.projection, args.hfov)
     os.makedirs(args.out_dir, exist_ok=True)
-    for name, obj in (("v1_cuts.plan.json", v1), ("v2_moves.plan.json", v2), ("v2_plan_notes.json", notes)):
+    name = args.name or f"v3_{args.projection}"
+    outputs = (((f"{name}.plan.json", v2), (f"{name}_plan_notes.json", notes)) if args.v3 else
+               (("v1_cuts.plan.json", v1), ("v2_moves.plan.json", v2), ("v2_plan_notes.json", notes)))
+    for name, obj in outputs:
         json.dump(obj, open(os.path.join(args.out_dir, name), "w"), indent=1)
     print(json.dumps(notes["summary"]))
     for n in notes["shots"]:

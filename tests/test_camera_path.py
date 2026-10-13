@@ -118,3 +118,64 @@ def test_path_leaving_image_between_keyframes_rejected():
         {"t": 1, "cx": 0.70, "cy": 0.5, "zoom": 1.7}]}
     with pytest.raises(ValueError, match="out of bounds"):
         parse_plan(_plan_13(cam))
+
+
+# ---- projection "rotate" (addendum 1.3.1) ----------------------------------------------------
+from modules.camera_path import apply_homography, frame_margin_out_px, frame_spp, rotate_homography  # noqa: E402
+
+ROT_CASES = [(0.5, 0.5, 1.2, 75), (0.56, 0.62, 1.25, 75), (0.43, 0.41, 1.1, 60), (0.6, 0.5, 1.3, 90)]
+
+
+def test_rotate_equals_crop_at_centre():
+    for z in (1.01, 1.2, 1.33):
+        assert abs(frame_margin_out_px(0.5, 0.5, z, 1920, 1280, 1920, 1080, "rotate")
+                   - frame_margin_out_px(0.5, 0.5, z, 1920, 1280, 1920, 1080)) < 1e-9
+        assert abs(frame_spp(0.5, 0.5, z, 1920, 1280, 1920, 1080, "rotate")
+                   - frame_spp(0.5, 0.5, z, 1920, 1280, 1920, 1080)) < 1e-6
+
+
+@pytest.mark.parametrize("cx, cy, z, hfov", ROT_CASES)
+def test_rotate_aims_at_target_and_keeps_horizon_level(cx, cy, z, hfov):
+    m = rotate_homography(cx, cy, z, 1920, 1280, 1920, 1080, hfov)
+    u, v = apply_homography(m, 960, 540)
+    assert abs(u - cx * 1920) < 1e-6 and abs(v - cy * 1280) < 1e-6
+    # no roll: the output's horizontal centre line maps to a line through the principal row
+    # only when pitch is 0; with pitch, verticals lean but the frame's centre column stays vertical
+    # in the source when yaw is 0
+    if abs(cx - 0.5) < 1e-12:
+        top, bottom = apply_homography(m, 960, 0), apply_homography(m, 960, 1080)
+        assert abs(top[0] - bottom[0]) < 1e-6
+
+
+def test_rotate_python_typescript_parity():
+    with tempfile.TemporaryDirectory() as td:
+        bundle = os.path.join(td, "math.cjs")
+        subprocess.run([os.path.join(REMOTION, "node_modules", ".bin", "esbuild"), "src/math.ts", "--bundle",
+                        "--format=cjs", "--platform=node", f"--outfile={bundle}"], cwd=REMOTION, check=True,
+                       capture_output=True)
+        script = (f"const m=require({json.dumps(bundle)});const C={json.dumps(ROT_CASES)};"
+                  "console.log(JSON.stringify(C.map(([cx,cy,z,h])=>{const M=m.rotateHomography(cx,cy,z,1920,1280,1920,1080,h);"
+                  "const I=m.invert3(m.invert3(M));return [M,I]})))")
+        out = json.loads(subprocess.run(["node", "-e", script], check=True, capture_output=True, text=True).stdout)
+    for (cx, cy, z, h), (js, js_round_trip) in zip(ROT_CASES, out):
+        py = rotate_homography(cx, cy, z, 1920, 1280, 1920, 1080, h)
+        for i in range(3):
+            for j in range(3):
+                assert abs(py[i][j] - js[i][j]) <= 1e-9 * max(1.0, abs(py[i][j]))
+                assert abs(js[i][j] - js_round_trip[i][j]) <= 1e-9 * max(1.0, abs(js[i][j]))
+
+
+def test_unknown_projection_rejected():
+    cam = dict(KP, projection="fisheye")
+    with pytest.raises(ValueError, match="unsupported_projection"):
+        parse_plan(_plan_13(cam))
+
+
+def test_rotate_path_bounds_checked():
+    # inside as a crop, outside once the camera turns toward the corner
+    cam = {"type": "keyframe_path", "move": "x", "projection": "rotate", "keyframes": [
+        {"t": 0, "cx": 0.5, "cy": 0.5, "zoom": 1.3}, {"t": 1, "cx": 0.62, "cy": 0.66, "zoom": 1.3}]}
+    parse_plan(_plan_13(dict(cam, projection="crop", keyframes=[dict(k, cx=0.6, cy=0.6) if k["t"] else k
+                                                                   for k in cam["keyframes"]])))
+    with pytest.raises(ValueError, match="out of bounds"):
+        parse_plan(_plan_13(cam))

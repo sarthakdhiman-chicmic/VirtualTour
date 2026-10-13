@@ -203,3 +203,55 @@ export function keyframePathAt(keyframes: Keyframe[], t: number) {
   };
   return { cx: channel('cx'), cy: channel('cy'), zoom: channel('zoom'), roll: 0 };
 }
+
+// ---------------------------------------------------------------------------------------------
+// Projection "rotate" (addendum 1.3.1). Mirrors rotate_homography in modules/camera_path.py: the
+// camera turns in place to point at photo pixel (cx, cy); a pure rotation is exactly a homography
+// of one photo, so straight lines stay straight. Row-major 3x3, OUTPUT px -> SOURCE px.
+// ---------------------------------------------------------------------------------------------
+export const DEFAULT_HFOV_DEG = 75;
+export type Mat3 = number[][];
+
+const mul3 = (a: Mat3, b: Mat3): Mat3 =>
+  [0, 1, 2].map((i) => [0, 1, 2].map((j) => a[i][0] * b[0][j] + a[i][1] * b[1][j] + a[i][2] * b[2][j]));
+
+export function baseWindow(sourceW: number, sourceH: number, outW: number, outH: number): [number, number] {
+  const aSrc = sourceW / sourceH;
+  const aOut = outW / outH;
+  return aSrc >= aOut ? [aOut / aSrc, 1] : [1, aSrc / aOut];
+}
+
+export function rotateHomography(
+  cx: number, cy: number, zoom: number, sourceW: number, sourceH: number, outW: number, outH: number,
+  hfovDeg: number = DEFAULT_HFOV_DEG
+): Mat3 {
+  const f = (sourceW / 2) / Math.tan((hfovDeg * Math.PI) / 180 / 2);
+  const [bw] = baseWindow(sourceW, sourceH, outW, outH);
+  const fv = (f * zoom * outW) / (bw * sourceW);
+  const x0 = cx * sourceW - sourceW / 2;
+  const y0 = cy * sourceH - sourceH / 2;
+  const yaw = Math.atan2(x0, f);
+  const pitch = Math.atan2(y0, Math.hypot(x0, f));
+  const cyw = Math.cos(yaw), syw = Math.sin(yaw), cp = Math.cos(pitch), sp = Math.sin(pitch);
+  const r: Mat3 = [[cyw, -syw * sp, syw * cp], [0, cp, sp], [-syw, -cyw * sp, cyw * cp]];
+  const kvInv: Mat3 = [[1 / fv, 0, -outW / 2 / fv], [0, 1 / fv, -outH / 2 / fv], [0, 0, 1]];
+  const ks: Mat3 = [[f, 0, sourceW / 2], [0, f, sourceH / 2], [0, 0, 1]];
+  return mul3(ks, mul3(r, kvInv));
+}
+
+export function invert3(m: Mat3): Mat3 {
+  const [[a, b, c], [d, e, f], [g, h, i]] = m;
+  const A = e * i - f * h, B = -(d * i - f * g), C = d * h - e * g;
+  const det = a * A + b * B + c * C;
+  return [
+    [A / det, -(b * i - c * h) / det, (b * f - c * e) / det],
+    [B / det, (a * i - c * g) / det, -(a * f - c * d) / det],
+    [C / det, -(a * h - b * g) / det, (a * e - b * d) / det],
+  ];
+}
+
+// CSS matrix3d (column-major) for a 2D homography h mapping element px -> output px.
+export function homographyToMatrix3d(h: Mat3): string {
+  const n = h.map((row) => row.map((v) => v / h[2][2]));
+  return `matrix3d(${[n[0][0], n[1][0], 0, n[2][0], n[0][1], n[1][1], 0, n[2][1], 0, 0, 1, 0, n[0][2], n[1][2], 0, n[2][2]].join(',')})`;
+}
