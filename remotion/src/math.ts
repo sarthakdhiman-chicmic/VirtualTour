@@ -128,3 +128,78 @@ export function parallaxAt(
   const radial = strength * 2.5 * Math.sign(Math.log(end.zoom / start.zoom)) * anchored;
   return { lateral, radial };
 }
+
+// ---------------------------------------------------------------------------------------------
+// Plan 1.3 keyframe_path. Mirrors modules/camera_path.py (tests/test_camera_path.py checks parity).
+// ---------------------------------------------------------------------------------------------
+export const PROFILE_S0 = 1.6;
+export const PROFILE_S1 = 0.8;
+
+// Global time profile: cubic Hermite, p(0)=0, p(1)=1, start slope 1.6, end slope 0.8.
+export function hermiteProfile(t: number, s0: number = PROFILE_S0, s1: number = PROFILE_S1): number {
+  const x = Math.min(1, Math.max(0, t));
+  const x2 = x * x;
+  const x3 = x2 * x;
+  return (x3 - 2 * x2 + x) * s0 + (-2 * x3 + 3 * x2) + (x3 - x2) * s1;
+}
+
+// Fritsch-Carlson monotone cubic tangents.
+export function monotoneSlopes(ts: number[], ys: number[]): number[] {
+  const n = ts.length;
+  if (n === 2) {
+    const d = (ys[1] - ys[0]) / (ts[1] - ts[0]);
+    return [d, d];
+  }
+  const delta: number[] = [];
+  for (let k = 0; k < n - 1; k++) delta.push((ys[k + 1] - ys[k]) / (ts[k + 1] - ts[k]));
+  const m: number[] = new Array(n).fill(0);
+  m[0] = delta[0];
+  m[n - 1] = delta[n - 2];
+  for (let k = 1; k < n - 1; k++) {
+    m[k] = delta[k - 1] * delta[k] <= 0 ? 0 : (delta[k - 1] + delta[k]) / 2;
+  }
+  for (let k = 0; k < n - 1; k++) {
+    if (delta[k] === 0) {
+      m[k] = 0;
+      m[k + 1] = 0;
+      continue;
+    }
+    let a = m[k] / delta[k];
+    let b = m[k + 1] / delta[k];
+    if (a < 0) { m[k] = 0; a = 0; }
+    if (b < 0) { m[k + 1] = 0; b = 0; }
+    const s = a * a + b * b;
+    if (s > 9) {
+      const tau = 3 / Math.sqrt(s);
+      m[k] = tau * a * delta[k];
+      m[k + 1] = tau * b * delta[k];
+    }
+  }
+  return m;
+}
+
+export function monotoneEval(ts: number[], ys: number[], ms: number[], x: number): number {
+  if (x <= ts[0]) return ys[0];
+  if (x >= ts[ts.length - 1]) return ys[ys.length - 1];
+  let k = 0;
+  while (k < ts.length - 2 && x > ts[k + 1]) k++;
+  const h = ts[k + 1] - ts[k];
+  const s = (x - ts[k]) / h;
+  const s2 = s * s;
+  const s3 = s2 * s;
+  return (2 * s3 - 3 * s2 + 1) * ys[k] + (s3 - 2 * s2 + s) * h * ms[k]
+    + (-2 * s3 + 3 * s2) * ys[k + 1] + (s3 - s2) * h * ms[k + 1];
+}
+
+export type Keyframe = { t: number; cx: number; cy: number; zoom: number };
+
+// Camera at raw shot progress t (0..1): time profile first, then per-channel monotone cubic.
+export function keyframePathAt(keyframes: Keyframe[], t: number) {
+  const u = hermiteProfile(t);
+  const ts = keyframes.map((k) => k.t);
+  const channel = (c: 'cx' | 'cy' | 'zoom') => {
+    const ys = keyframes.map((k) => k[c]);
+    return monotoneEval(ts, ys, monotoneSlopes(ts, ys), u);
+  };
+  return { cx: channel('cx'), cy: channel('cy'), zoom: channel('zoom'), roll: 0 };
+}

@@ -5,6 +5,10 @@ import cv2
 import numpy as np
 import pytest
 
+# feat/tour-v2: depth parallax is not in the render path (render() takes no depth maps); the
+# parallax work and these tests live on park/m3-and-retune-2026-10-12
+pytestmark = pytest.mark.skip(reason="parallax is out of the render path on feat/tour-v2")
+
 from modules import depth
 from modules.remotion_render import render
 from tools.motion_lab import create_one_shot_plan, check_black_edges

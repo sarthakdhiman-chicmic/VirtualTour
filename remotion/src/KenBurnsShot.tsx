@@ -1,15 +1,20 @@
 import { AbsoluteFill, Img, useCurrentFrame, staticFile } from 'remotion';
 import React from 'react';
-import { windowToTransform, interpolateEasing, cameraAt, rollFitScale, CameraPoint } from './math';
+import { windowToTransform, interpolateEasing, cameraAt, rollFitScale, keyframePathAt, CameraPoint, Keyframe } from './math';
 
 export const KenBurnsShot: React.FC<{
   durationFrames: number;
   image: string;
   source: { width: number; height: number };
   camera: {
-    start: CameraPoint;
-    end: CameraPoint;
+    type?: string;
+    // ken_burns
+    start?: CameraPoint;
+    end?: CameraPoint;
     easing?: string;
+    // keyframe_path (plan 1.3)
+    move?: string;
+    keyframes?: Keyframe[];
   };
   width: number;
   height: number;
@@ -17,9 +22,10 @@ export const KenBurnsShot: React.FC<{
   const frame = useCurrentFrame();
   const rawT = frame / Math.max(1, durationFrames - 1);
   const t = Math.max(0, Math.min(1, rawT));
-  const smoothT = interpolateEasing(t, camera.easing ?? 'ease_in_out');
-
-  const { cx, cy, zoom, roll } = cameraAt(camera.start, camera.end, smoothT);
+  const { cx, cy, zoom, roll } = camera.type === 'keyframe_path'
+    ? keyframePathAt(camera.keyframes as Keyframe[], t)
+    : cameraAt(camera.start as CameraPoint, camera.end as CameraPoint,
+        interpolateEasing(t, camera.easing ?? 'ease_in_out'));
 
   const { scale, translateX, translateY } = windowToTransform(
     source.width, source.height, width, height, cx, cy, zoom

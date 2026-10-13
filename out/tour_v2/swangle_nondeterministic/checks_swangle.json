@@ -1,0 +1,3248 @@
+{
+ "renders": {
+  "v0_baseline": {
+   "plan_hash": "50e29ed9ada88e23dda14509d00a5a1e8052fe8f793689d2b03c90547ecb2fbb",
+   "ffprobe": {
+    "duration_s": 70.059,
+    "frames": 2100,
+    "fps": "30/1",
+    "resolution": "1920x1080",
+    "codec": "h264",
+    "pix_fmt": "yuv420p",
+    "audio": [
+     {
+      "codec": "aac",
+      "sample_rate": "48000",
+      "channels": 2
+     }
+    ]
+   },
+   "audio_level": "mean_volume: -91.0 dB max_volume: -91.0 dB",
+   "min_margin_out_px": -0.133,
+   "min_margin_where": 1451,
+   "frames_checked": 2280,
+   "min_spp": 0.7967,
+   "shots": [
+    {
+     "shot": "s01",
+     "move": "recovered",
+     "type": "ken_burns",
+     "frames": [
+      0,
+      172
+     ],
+     "duration_s": 5.5,
+     "zoom_range": [
+      1.035,
+      1.1592
+     ],
+     "min_margin_out_px": 0.0,
+     "min_margin_frame": 0,
+     "min_spp": 0.8627,
+     "min_spp_frame": 172,
+     "speed_start_px_f": 0.994,
+     "speed_end_px_f": 1.106,
+     "min_speed_inside_px_f": 0.9955,
+     "min_speed_frame": 2,
+     "max_speed_px_f": 1.106,
+     "keyframes": null,
+     "speed_profile_every_5": [
+      0.994,
+      0.997,
+      1.0,
+      1.004,
+      1.007,
+      1.01,
+      1.013,
+      1.016,
+      1.019,
+      1.022,
+      1.026,
+      1.029,
+      1.032,
+      1.035,
+      1.039,
+      1.042,
+      1.045,
+      1.048,
+      1.052,
+      1.055,
+      1.058,
+      1.061,
+      1.065,
+      1.068,
+      1.071,
+      1.075,
+      1.078,
+      1.082,
+      1.085,
+      1.088,
+      1.092,
+      1.095,
+      1.099,
+      1.102,
+      1.106
+     ]
+    },
+    {
+     "shot": "s02",
+     "move": "recovered",
+     "type": "ken_burns",
+     "frames": [
+      158,
+      337
+     ],
+     "duration_s": 5.5,
+     "zoom_range": [
+      1.1546,
+      1.2549
+     ],
+     "min_margin_out_px": 0.043,
+     "min_margin_frame": 337,
+     "min_spp": 0.7969,
+     "min_spp_frame": 158,
+     "speed_start_px_f": 2.243,
+     "speed_end_px_f": 2.065,
+     "min_speed_inside_px_f": 2.0671,
+     "min_speed_frame": 334,
+     "max_speed_px_f": 2.243,
+     "keyframes": null,
+     "speed_profile_every_5": [
+      2.243,
+      2.237,
+      2.232,
+      2.227,
+      2.222,
+      2.217,
+      2.212,
+      2.207,
+      2.201,
+      2.196,
+      2.191,
+      2.186,
+      2.181,
+      2.176,
+      2.171,
+      2.166,
+      2.161,
+      2.156,
+      2.151,
+      2.146,
+      2.141,
+      2.136,
+      2.131,
+      2.126,
+      2.121,
+      2.116,
+      2.112,
+      2.107,
+      2.102,
+      2.097,
+      2.092,
+      2.087,
+      2.082,
+      2.078,
+      2.073,
+      2.068
+     ]
+    },
+    {
+     "shot": "s03",
+     "move": "recovered",
+     "type": "ken_burns",
+     "frames": [
+      323,
+      493
+     ],
+     "duration_s": 5.2,
+     "zoom_range": [
+      1.035,
+      1.1592
+     ],
+     "min_margin_out_px": -0.001,
+     "min_margin_frame": 323,
+     "min_spp": 0.8627,
+     "min_spp_frame": 493,
+     "speed_start_px_f": 1.006,
+     "speed_end_px_f": 1.12,
+     "min_speed_inside_px_f": 1.0076,
+     "min_speed_frame": 325,
+     "max_speed_px_f": 1.12,
+     "keyframes": null,
+     "speed_profile_every_5": [
+      1.006,
+      1.01,
+      1.013,
+      1.016,
+      1.019,
+      1.022,
+      1.025,
+      1.029,
+      1.032,
+      1.035,
+      1.038,
+      1.042,
+      1.045,
+      1.048,
+      1.052,
+      1.055,
+      1.058,
+      1.062,
+      1.065,
+      1.068,
+      1.072,
+      1.075,
+      1.079,
+      1.082,
+      1.085,
+      1.089,
+      1.092,
+      1.096,
+      1.099,
+      1.103,
+      1.106,
+      1.11,
+      1.113,
+      1.117
+     ]
+    },
+    {
+     "shot": "s04",
+     "move": "recovered",
+     "type": "ken_burns",
+     "frames": [
+      479,
+      649
+     ],
+     "duration_s": 5.2,
+     "zoom_range": [
+      1.13,
+      1.243
+     ],
+     "min_margin_out_px": 0.0,
+     "min_margin_frame": 649,
+     "min_spp": 0.8045,
+     "min_spp_frame": 649,
+     "speed_start_px_f": 1.953,
+     "speed_end_px_f": 2.146,
+     "min_speed_inside_px_f": 1.9555,
+     "min_speed_frame": 481,
+     "max_speed_px_f": 2.146,
+     "keyframes": null,
+     "speed_profile_every_5": [
+      1.953,
+      1.959,
+      1.964,
+      1.97,
+      1.975,
+      1.981,
+      1.986,
+      1.992,
+      1.997,
+      2.003,
+      2.008,
+      2.014,
+      2.02,
+      2.025,
+      2.031,
+      2.036,
+      2.042,
+      2.048,
+      2.054,
+      2.059,
+      2.065,
+      2.071,
+      2.077,
+      2.082,
+      2.088,
+      2.094,
+      2.1,
+      2.106,
+      2.111,
+      2.117,
+      2.123,
+      2.129,
+      2.135,
+      2.141
+     ]
+    },
+    {
+     "shot": "s05",
+     "move": "recovered",
+     "type": "ken_burns",
+     "frames": [
+      635,
+      814
+     ],
+     "duration_s": 5.5,
+     "zoom_range": [
+      0.9999,
+      1.2001
+     ],
+     "min_margin_out_px": -0.118,
+     "min_margin_frame": 635,
+     "min_spp": 0.8332,
+     "min_spp_frame": 814,
+     "speed_start_px_f": 0.875,
+     "speed_end_px_f": 0.987,
+     "min_speed_inside_px_f": 0.8758,
+     "min_speed_frame": 637,
+     "max_speed_px_f": 0.987,
+     "keyframes": null,
+     "speed_profile_every_5": [
+      0.875,
+      0.877,
+      0.88,
+      0.883,
+      0.886,
+      0.888,
+      0.891,
+      0.894,
+      0.897,
+      0.9,
+      0.903,
+      0.906,
+      0.909,
+      0.912,
+      0.915,
+      0.918,
+      0.921,
+      0.924,
+      0.927,
+      0.93,
+      0.933,
+      0.937,
+      0.94,
+      0.943,
+      0.947,
+      0.95,
+      0.953,
+      0.957,
+      0.96,
+      0.963,
+      0.967,
+      0.97,
+      0.974,
+      0.977,
+      0.981,
+      0.985
+     ]
+    },
+    {
+     "shot": "s06",
+     "move": "recovered",
+     "type": "ken_burns",
+     "frames": [
+      800,
+      979
+     ],
+     "duration_s": 5.5,
+     "zoom_range": [
+      1.1545,
+      1.2552
+     ],
+     "min_margin_out_px": -0.0,
+     "min_margin_frame": 979,
+     "min_spp": 0.7967,
+     "min_spp_frame": 800,
+     "speed_start_px_f": 2.243,
+     "speed_end_px_f": 2.064,
+     "min_speed_inside_px_f": 2.0663,
+     "min_speed_frame": 976,
+     "max_speed_px_f": 2.243,
+     "keyframes": null,
+     "speed_profile_every_5": [
+      2.243,
+      2.237,
+      2.232,
+      2.227,
+      2.222,
+      2.217,
+      2.211,
+      2.206,
+      2.201,
+      2.196,
+      2.191,
+      2.186,
+      2.181,
+      2.176,
+      2.171,
+      2.166,
+      2.161,
+      2.156,
+      2.151,
+      2.146,
+      2.141,
+      2.136,
+      2.131,
+      2.126,
+      2.121,
+      2.116,
+      2.111,
+      2.106,
+      2.101,
+      2.096,
+      2.091,
+      2.087,
+      2.082,
+      2.077,
+      2.072,
+      2.067
+     ]
+    },
+    {
+     "shot": "s07",
+     "move": "recovered",
+     "type": "ken_burns",
+     "frames": [
+      965,
+      1135
+     ],
+     "duration_s": 5.2,
+     "zoom_range": [
+      1.0351,
+      1.1589
+     ],
+     "min_margin_out_px": 0.044,
+     "min_margin_frame": 965,
+     "min_spp": 0.8629,
+     "min_spp_frame": 1135,
+     "speed_start_px_f": 1.007,
+     "speed_end_px_f": 1.12,
+     "min_speed_inside_px_f": 1.0081,
+     "min_speed_frame": 967,
+     "max_speed_px_f": 1.12,
+     "keyframes": null,
+     "speed_profile_every_5": [
+      1.007,
+      1.01,
+      1.013,
+      1.016,
+      1.02,
+      1.023,
+      1.026,
+      1.029,
+      1.032,
+      1.036,
+      1.039,
+      1.042,
+      1.045,
+      1.049,
+      1.052,
+      1.055,
+      1.059,
+      1.062,
+      1.065,
+      1.069,
+      1.072,
+      1.075,
+      1.079,
+      1.082,
+      1.086,
+      1.089,
+      1.093,
+      1.096,
+      1.1,
+      1.103,
+      1.106,
+      1.11,
+      1.114,
+      1.117
+     ]
+    },
+    {
+     "shot": "s08",
+     "move": "recovered",
+     "type": "ken_burns",
+     "frames": [
+      1121,
+      1300
+     ],
+     "duration_s": 5.5,
+     "zoom_range": [
+      1.13,
+      1.2431
+     ],
+     "min_margin_out_px": 0.022,
+     "min_margin_frame": 1121,
+     "min_spp": 0.8044,
+     "min_spp_frame": 1300,
+     "speed_start_px_f": 1.855,
+     "speed_end_px_f": 2.039,
+     "min_speed_inside_px_f": 1.8573,
+     "min_speed_frame": 1123,
+     "max_speed_px_f": 2.039,
+     "keyframes": null,
+     "speed_profile_every_5": [
+      1.855,
+      1.86,
+      1.865,
+      1.87,
+      1.875,
+      1.88,
+      1.885,
+      1.89,
+      1.895,
+      1.9,
+      1.905,
+      1.91,
+      1.915,
+      1.92,
+      1.925,
+      1.93,
+      1.935,
+      1.941,
+      1.946,
+      1.951,
+      1.956,
+      1.961,
+      1.966,
+      1.972,
+      1.977,
+      1.982,
+      1.987,
+      1.993,
+      1.998,
+      2.003,
+      2.009,
+      2.014,
+      2.019,
+      2.025,
+      2.03,
+      2.035
+     ]
+    },
+    {
+     "shot": "s09",
+     "move": "recovered",
+     "type": "ken_burns",
+     "frames": [
+      1286,
+      1465
+     ],
+     "duration_s": 5.5,
+     "zoom_range": [
+      1.0,
+      1.2
+     ],
+     "min_margin_out_px": -0.0,
+     "min_margin_frame": 1286,
+     "min_spp": 0.8333,
+     "min_spp_frame": 1465,
+     "speed_start_px_f": 0.874,
+     "speed_end_px_f": 0.986,
+     "min_speed_inside_px_f": 0.8754,
+     "min_speed_frame": 1288,
+     "max_speed_px_f": 0.986,
+     "keyframes": null,
+     "speed_profile_every_5": [
+      0.874,
+      0.877,
+      0.88,
+      0.883,
+      0.885,
+      0.888,
+      0.891,
+      0.894,
+      0.897,
+      0.9,
+      0.902,
+      0.905,
+      0.908,
+      0.911,
+      0.914,
+      0.917,
+      0.921,
+      0.924,
+      0.927,
+      0.93,
+      0.933,
+      0.936,
+      0.94,
+      0.943,
+      0.946,
+      0.949,
+      0.953,
+      0.956,
+      0.96,
+      0.963,
+      0.967,
+      0.97,
+      0.974,
+      0.977,
+      0.981,
+      0.984
+     ]
+    },
+    {
+     "shot": "s10",
+     "move": "recovered",
+     "type": "ken_burns",
+     "frames": [
+      1451,
+      1630
+     ],
+     "duration_s": 5.5,
+     "zoom_range": [
+      0.9999,
+      1.0601
+     ],
+     "min_margin_out_px": -0.133,
+     "min_margin_frame": 1451,
+     "min_spp": 0.9433,
+     "min_spp_frame": 1630,
+     "speed_start_px_f": 0.841,
+     "speed_end_px_f": 0.889,
+     "min_speed_inside_px_f": 0.8417,
+     "min_speed_frame": 1453,
+     "max_speed_px_f": 0.889,
+     "keyframes": null,
+     "speed_profile_every_5": [
+      0.841,
+      0.842,
+      0.844,
+      0.845,
+      0.846,
+      0.848,
+      0.849,
+      0.85,
+      0.852,
+      0.853,
+      0.854,
+      0.856,
+      0.857,
+      0.858,
+      0.86,
+      0.861,
+      0.862,
+      0.864,
+      0.865,
+      0.866,
+      0.868,
+      0.869,
+      0.87,
+      0.872,
+      0.873,
+      0.875,
+      0.876,
+      0.877,
+      0.879,
+      0.88,
+      0.881,
+      0.883,
+      0.884,
+      0.886,
+      0.887,
+      0.888
+     ]
+    },
+    {
+     "shot": "s11",
+     "move": "recovered",
+     "type": "ken_burns",
+     "frames": [
+      1616,
+      1795
+     ],
+     "duration_s": 5.5,
+     "zoom_range": [
+      1.0,
+      1.2
+     ],
+     "min_margin_out_px": 0.001,
+     "min_margin_frame": 1616,
+     "min_spp": 0.8334,
+     "min_spp_frame": 1795,
+     "speed_start_px_f": 0.874,
+     "speed_end_px_f": 0.986,
+     "min_speed_inside_px_f": 0.8752,
+     "min_speed_frame": 1618,
+     "max_speed_px_f": 0.986,
+     "keyframes": null,
+     "speed_profile_every_5": [
+      0.874,
+      0.877,
+      0.88,
+      0.882,
+      0.885,
+      0.888,
+      0.891,
+      0.894,
+      0.896,
+      0.899,
+      0.902,
+      0.905,
+      0.908,
+      0.911,
+      0.914,
+      0.917,
+      0.92,
+      0.923,
+      0.927,
+      0.93,
+      0.933,
+      0.936,
+      0.939,
+      0.943,
+      0.946,
+      0.949,
+      0.953,
+      0.956,
+      0.959,
+      0.963,
+      0.966,
+      0.97,
+      0.973,
+      0.977,
+      0.98,
+      0.984
+     ]
+    },
+    {
+     "shot": "s12",
+     "move": "recovered",
+     "type": "ken_burns",
+     "frames": [
+      1781,
+      1951
+     ],
+     "duration_s": 5.2,
+     "zoom_range": [
+      1.1546,
+      1.2551
+     ],
+     "min_margin_out_px": -0.001,
+     "min_margin_frame": 1951,
+     "min_spp": 0.7968,
+     "min_spp_frame": 1781,
+     "speed_start_px_f": 2.36,
+     "speed_end_px_f": 2.173,
+     "min_speed_inside_px_f": 2.1752,
+     "min_speed_frame": 1948,
+     "max_speed_px_f": 2.36,
+     "keyframes": null,
+     "speed_profile_every_5": [
+      2.36,
+      2.354,
+      2.349,
+      2.343,
+      2.337,
+      2.332,
+      2.326,
+      2.32,
+      2.314,
+      2.309,
+      2.303,
+      2.298,
+      2.292,
+      2.286,
+      2.281,
+      2.275,
+      2.27,
+      2.264,
+      2.259,
+      2.253,
+      2.248,
+      2.242,
+      2.237,
+      2.231,
+      2.226,
+      2.22,
+      2.215,
+      2.209,
+      2.204,
+      2.199,
+      2.193,
+      2.188,
+      2.183,
+      2.177
+     ]
+    },
+    {
+     "shot": "s13",
+     "move": "recovered",
+     "type": "ken_burns",
+     "frames": [
+      1937,
+      2099
+     ],
+     "duration_s": 5.2,
+     "zoom_range": [
+      1.0309,
+      1.1852
+     ],
+     "min_margin_out_px": -0.001,
+     "min_margin_frame": 2099,
+     "min_spp": 0.8438,
+     "min_spp_frame": 1937,
+     "speed_start_px_f": 1.339,
+     "speed_end_px_f": 1.176,
+     "min_speed_inside_px_f": 1.1783,
+     "min_speed_frame": 2096,
+     "max_speed_px_f": 1.339,
+     "keyframes": null,
+     "speed_profile_every_5": [
+      1.339,
+      1.333,
+      1.328,
+      1.323,
+      1.317,
+      1.312,
+      1.307,
+      1.301,
+      1.296,
+      1.291,
+      1.286,
+      1.281,
+      1.275,
+      1.27,
+      1.265,
+      1.26,
+      1.255,
+      1.25,
+      1.245,
+      1.24,
+      1.235,
+      1.23,
+      1.225,
+      1.22,
+      1.215,
+      1.211,
+      1.206,
+      1.201,
+      1.196,
+      1.192,
+      1.187,
+      1.182,
+      1.177
+     ]
+    }
+   ]
+  },
+  "v1_cuts": {
+   "plan_hash": "73c991926fb9e44d65b11e4f537ffae0c0cf344711dd8c72f0da9cb9de77172e",
+   "ffprobe": {
+    "duration_s": 70.059,
+    "frames": 2100,
+    "fps": "30/1",
+    "resolution": "1920x1080",
+    "codec": "h264",
+    "pix_fmt": "yuv420p",
+    "audio": [
+     {
+      "codec": "aac",
+      "sample_rate": "48000",
+      "channels": 2
+     }
+    ]
+   },
+   "audio_level": "mean_volume: -91.0 dB max_volume: -91.0 dB",
+   "min_margin_out_px": -0.133,
+   "min_margin_where": 1458,
+   "frames_checked": 2100,
+   "min_spp": 0.7967,
+   "shots": [
+    {
+     "shot": "s01",
+     "move": "recovered",
+     "type": "ken_burns",
+     "frames": [
+      0,
+      164
+     ],
+     "duration_s": 5.5,
+     "zoom_range": [
+      1.035,
+      1.1592
+     ],
+     "min_margin_out_px": 0.0,
+     "min_margin_frame": 0,
+     "min_spp": 0.8627,
+     "min_spp_frame": 164,
+     "speed_start_px_f": 1.043,
+     "speed_end_px_f": 1.16,
+     "min_speed_inside_px_f": 1.0442,
+     "min_speed_frame": 2,
+     "max_speed_px_f": 1.16,
+     "keyframes": null,
+     "speed_profile_every_5": [
+      1.043,
+      1.046,
+      1.05,
+      1.053,
+      1.056,
+      1.06,
+      1.063,
+      1.067,
+      1.07,
+      1.074,
+      1.077,
+      1.081,
+      1.084,
+      1.088,
+      1.092,
+      1.095,
+      1.099,
+      1.102,
+      1.106,
+      1.11,
+      1.113,
+      1.117,
+      1.121,
+      1.124,
+      1.128,
+      1.132,
+      1.135,
+      1.139,
+      1.143,
+      1.147,
+      1.15,
+      1.154,
+      1.158
+     ]
+    },
+    {
+     "shot": "s02",
+     "move": "recovered",
+     "type": "ken_burns",
+     "frames": [
+      165,
+      329
+     ],
+     "duration_s": 5.5,
+     "zoom_range": [
+      1.1546,
+      1.2549
+     ],
+     "min_margin_out_px": 0.043,
+     "min_margin_frame": 329,
+     "min_spp": 0.7969,
+     "min_spp_frame": 165,
+     "speed_start_px_f": 2.448,
+     "speed_end_px_f": 2.254,
+     "min_speed_inside_px_f": 2.2563,
+     "min_speed_frame": 326,
+     "max_speed_px_f": 2.448,
+     "keyframes": null,
+     "speed_profile_every_5": [
+      2.448,
+      2.441,
+      2.435,
+      2.429,
+      2.423,
+      2.417,
+      2.411,
+      2.405,
+      2.399,
+      2.393,
+      2.387,
+      2.381,
+      2.375,
+      2.369,
+      2.363,
+      2.357,
+      2.351,
+      2.345,
+      2.339,
+      2.333,
+      2.327,
+      2.321,
+      2.315,
+      2.309,
+      2.304,
+      2.298,
+      2.292,
+      2.286,
+      2.28,
+      2.275,
+      2.269,
+      2.263,
+      2.257
+     ]
+    },
+    {
+     "shot": "s03",
+     "move": "recovered",
+     "type": "ken_burns",
+     "frames": [
+      330,
+      485
+     ],
+     "duration_s": 5.2,
+     "zoom_range": [
+      1.035,
+      1.1592
+     ],
+     "min_margin_out_px": -0.001,
+     "min_margin_frame": 330,
+     "min_spp": 0.8627,
+     "min_spp_frame": 485,
+     "speed_start_px_f": 1.104,
+     "speed_end_px_f": 1.228,
+     "min_speed_inside_px_f": 1.1053,
+     "min_speed_frame": 332,
+     "max_speed_px_f": 1.228,
+     "keyframes": null,
+     "speed_profile_every_5": [
+      1.104,
+      1.108,
+      1.111,
+      1.115,
+      1.119,
+      1.123,
+      1.127,
+      1.131,
+      1.135,
+      1.139,
+      1.143,
+      1.146,
+      1.15,
+      1.154,
+      1.158,
+      1.162,
+      1.166,
+      1.171,
+      1.175,
+      1.179,
+      1.183,
+      1.187,
+      1.191,
+      1.195,
+      1.199,
+      1.203,
+      1.208,
+      1.212,
+      1.216,
+      1.22,
+      1.225
+     ]
+    },
+    {
+     "shot": "s04",
+     "move": "recovered",
+     "type": "ken_burns",
+     "frames": [
+      486,
+      641
+     ],
+     "duration_s": 5.2,
+     "zoom_range": [
+      1.13,
+      1.243
+     ],
+     "min_margin_out_px": 0.0,
+     "min_margin_frame": 641,
+     "min_spp": 0.8045,
+     "min_spp_frame": 641,
+     "speed_start_px_f": 2.142,
+     "speed_end_px_f": 2.354,
+     "min_speed_inside_px_f": 2.1451,
+     "min_speed_frame": 488,
+     "max_speed_px_f": 2.354,
+     "keyframes": null,
+     "speed_profile_every_5": [
+      2.142,
+      2.149,
+      2.156,
+      2.162,
+      2.169,
+      2.175,
+      2.182,
+      2.189,
+      2.195,
+      2.202,
+      2.209,
+      2.216,
+      2.222,
+      2.229,
+      2.236,
+      2.243,
+      2.25,
+      2.256,
+      2.263,
+      2.27,
+      2.277,
+      2.284,
+      2.291,
+      2.298,
+      2.305,
+      2.312,
+      2.319,
+      2.326,
+      2.333,
+      2.341,
+      2.348
+     ]
+    },
+    {
+     "shot": "s05",
+     "move": "recovered",
+     "type": "ken_burns",
+     "frames": [
+      642,
+      806
+     ],
+     "duration_s": 5.5,
+     "zoom_range": [
+      0.9999,
+      1.2001
+     ],
+     "min_margin_out_px": -0.118,
+     "min_margin_frame": 642,
+     "min_spp": 0.8332,
+     "min_spp_frame": 806,
+     "speed_start_px_f": 0.955,
+     "speed_end_px_f": 1.077,
+     "min_speed_inside_px_f": 0.956,
+     "min_speed_frame": 644,
+     "max_speed_px_f": 1.077,
+     "keyframes": null,
+     "speed_profile_every_5": [
+      0.955,
+      0.958,
+      0.961,
+      0.965,
+      0.968,
+      0.971,
+      0.975,
+      0.978,
+      0.981,
+      0.985,
+      0.988,
+      0.992,
+      0.996,
+      0.999,
+      1.003,
+      1.006,
+      1.01,
+      1.014,
+      1.018,
+      1.022,
+      1.025,
+      1.029,
+      1.033,
+      1.037,
+      1.041,
+      1.045,
+      1.049,
+      1.053,
+      1.058,
+      1.062,
+      1.066,
+      1.07,
+      1.075
+     ]
+    },
+    {
+     "shot": "s06",
+     "move": "recovered",
+     "type": "ken_burns",
+     "frames": [
+      807,
+      971
+     ],
+     "duration_s": 5.5,
+     "zoom_range": [
+      1.1545,
+      1.2552
+     ],
+     "min_margin_out_px": -0.0,
+     "min_margin_frame": 971,
+     "min_spp": 0.7967,
+     "min_spp_frame": 807,
+     "speed_start_px_f": 2.448,
+     "speed_end_px_f": 2.253,
+     "min_speed_inside_px_f": 2.2555,
+     "min_speed_frame": 968,
+     "max_speed_px_f": 2.448,
+     "keyframes": null,
+     "speed_profile_every_5": [
+      2.448,
+      2.441,
+      2.435,
+      2.429,
+      2.423,
+      2.417,
+      2.411,
+      2.404,
+      2.398,
+      2.392,
+      2.386,
+      2.38,
+      2.374,
+      2.368,
+      2.362,
+      2.356,
+      2.35,
+      2.344,
+      2.338,
+      2.332,
+      2.326,
+      2.321,
+      2.315,
+      2.309,
+      2.303,
+      2.297,
+      2.291,
+      2.285,
+      2.28,
+      2.274,
+      2.268,
+      2.262,
+      2.257
+     ]
+    },
+    {
+     "shot": "s07",
+     "move": "recovered",
+     "type": "ken_burns",
+     "frames": [
+      972,
+      1127
+     ],
+     "duration_s": 5.2,
+     "zoom_range": [
+      1.0351,
+      1.1589
+     ],
+     "min_margin_out_px": 0.044,
+     "min_margin_frame": 972,
+     "min_spp": 0.8629,
+     "min_spp_frame": 1127,
+     "speed_start_px_f": 1.104,
+     "speed_end_px_f": 1.228,
+     "min_speed_inside_px_f": 1.1059,
+     "min_speed_frame": 974,
+     "max_speed_px_f": 1.228,
+     "keyframes": null,
+     "speed_profile_every_5": [
+      1.104,
+      1.108,
+      1.112,
+      1.116,
+      1.12,
+      1.123,
+      1.127,
+      1.131,
+      1.135,
+      1.139,
+      1.143,
+      1.147,
+      1.151,
+      1.155,
+      1.159,
+      1.163,
+      1.167,
+      1.171,
+      1.175,
+      1.179,
+      1.183,
+      1.187,
+      1.191,
+      1.195,
+      1.2,
+      1.204,
+      1.208,
+      1.212,
+      1.216,
+      1.221,
+      1.225
+     ]
+    },
+    {
+     "shot": "s08",
+     "move": "recovered",
+     "type": "ken_burns",
+     "frames": [
+      1128,
+      1292
+     ],
+     "duration_s": 5.5,
+     "zoom_range": [
+      1.13,
+      1.2431
+     ],
+     "min_margin_out_px": 0.022,
+     "min_margin_frame": 1128,
+     "min_spp": 0.8044,
+     "min_spp_frame": 1292,
+     "speed_start_px_f": 2.025,
+     "speed_end_px_f": 2.225,
+     "min_speed_inside_px_f": 2.0274,
+     "min_speed_frame": 1130,
+     "max_speed_px_f": 2.225,
+     "keyframes": null,
+     "speed_profile_every_5": [
+      2.025,
+      2.031,
+      2.037,
+      2.043,
+      2.049,
+      2.055,
+      2.06,
+      2.066,
+      2.072,
+      2.078,
+      2.084,
+      2.09,
+      2.096,
+      2.103,
+      2.109,
+      2.115,
+      2.121,
+      2.127,
+      2.133,
+      2.139,
+      2.145,
+      2.152,
+      2.158,
+      2.164,
+      2.17,
+      2.177,
+      2.183,
+      2.189,
+      2.196,
+      2.202,
+      2.208,
+      2.215,
+      2.221
+     ]
+    },
+    {
+     "shot": "s09",
+     "move": "recovered",
+     "type": "ken_burns",
+     "frames": [
+      1293,
+      1457
+     ],
+     "duration_s": 5.5,
+     "zoom_range": [
+      1.0,
+      1.2
+     ],
+     "min_margin_out_px": -0.0,
+     "min_margin_frame": 1293,
+     "min_spp": 0.8333,
+     "min_spp_frame": 1457,
+     "speed_start_px_f": 0.954,
+     "speed_end_px_f": 1.077,
+     "min_speed_inside_px_f": 0.9557,
+     "min_speed_frame": 1295,
+     "max_speed_px_f": 1.077,
+     "keyframes": null,
+     "speed_profile_every_5": [
+      0.954,
+      0.958,
+      0.961,
+      0.964,
+      0.967,
+      0.971,
+      0.974,
+      0.978,
+      0.981,
+      0.985,
+      0.988,
+      0.992,
+      0.995,
+      0.999,
+      1.002,
+      1.006,
+      1.01,
+      1.014,
+      1.017,
+      1.021,
+      1.025,
+      1.029,
+      1.033,
+      1.037,
+      1.041,
+      1.045,
+      1.049,
+      1.053,
+      1.057,
+      1.061,
+      1.066,
+      1.07,
+      1.074
+     ]
+    },
+    {
+     "shot": "s10",
+     "move": "recovered",
+     "type": "ken_burns",
+     "frames": [
+      1458,
+      1622
+     ],
+     "duration_s": 5.5,
+     "zoom_range": [
+      0.9999,
+      1.0601
+     ],
+     "min_margin_out_px": -0.133,
+     "min_margin_frame": 1458,
+     "min_spp": 0.9433,
+     "min_spp_frame": 1622,
+     "speed_start_px_f": 0.918,
+     "speed_end_px_f": 0.97,
+     "min_speed_inside_px_f": 0.9187,
+     "min_speed_frame": 1460,
+     "max_speed_px_f": 0.97,
+     "keyframes": null,
+     "speed_profile_every_5": [
+      0.918,
+      0.92,
+      0.921,
+      0.923,
+      0.924,
+      0.926,
+      0.928,
+      0.929,
+      0.931,
+      0.932,
+      0.934,
+      0.935,
+      0.937,
+      0.939,
+      0.94,
+      0.942,
+      0.943,
+      0.945,
+      0.947,
+      0.948,
+      0.95,
+      0.951,
+      0.953,
+      0.955,
+      0.956,
+      0.958,
+      0.96,
+      0.961,
+      0.963,
+      0.965,
+      0.966,
+      0.968,
+      0.969
+     ]
+    },
+    {
+     "shot": "s11",
+     "move": "recovered",
+     "type": "ken_burns",
+     "frames": [
+      1623,
+      1787
+     ],
+     "duration_s": 5.5,
+     "zoom_range": [
+      1.0,
+      1.2
+     ],
+     "min_margin_out_px": 0.001,
+     "min_margin_frame": 1623,
+     "min_spp": 0.8334,
+     "min_spp_frame": 1787,
+     "speed_start_px_f": 0.954,
+     "speed_end_px_f": 1.076,
+     "min_speed_inside_px_f": 0.9555,
+     "min_speed_frame": 1625,
+     "max_speed_px_f": 1.076,
+     "keyframes": null,
+     "speed_profile_every_5": [
+      0.954,
+      0.957,
+      0.961,
+      0.964,
+      0.967,
+      0.971,
+      0.974,
+      0.977,
+      0.981,
+      0.984,
+      0.988,
+      0.991,
+      0.995,
+      0.999,
+      1.002,
+      1.006,
+      1.01,
+      1.013,
+      1.017,
+      1.021,
+      1.025,
+      1.029,
+      1.033,
+      1.037,
+      1.041,
+      1.045,
+      1.049,
+      1.053,
+      1.057,
+      1.061,
+      1.065,
+      1.07,
+      1.074
+     ]
+    },
+    {
+     "shot": "s12",
+     "move": "recovered",
+     "type": "ken_burns",
+     "frames": [
+      1788,
+      1943
+     ],
+     "duration_s": 5.2,
+     "zoom_range": [
+      1.1546,
+      1.2551
+     ],
+     "min_margin_out_px": -0.001,
+     "min_margin_frame": 1943,
+     "min_spp": 0.7968,
+     "min_spp_frame": 1788,
+     "speed_start_px_f": 2.588,
+     "speed_end_px_f": 2.383,
+     "min_speed_inside_px_f": 2.386,
+     "min_speed_frame": 1940,
+     "max_speed_px_f": 2.588,
+     "keyframes": null,
+     "speed_profile_every_5": [
+      2.588,
+      2.582,
+      2.575,
+      2.568,
+      2.561,
+      2.554,
+      2.547,
+      2.54,
+      2.534,
+      2.527,
+      2.52,
+      2.513,
+      2.507,
+      2.5,
+      2.493,
+      2.486,
+      2.48,
+      2.473,
+      2.467,
+      2.46,
+      2.453,
+      2.447,
+      2.44,
+      2.434,
+      2.427,
+      2.421,
+      2.414,
+      2.408,
+      2.401,
+      2.395,
+      2.389
+     ]
+    },
+    {
+     "shot": "s13",
+     "move": "recovered",
+     "type": "ken_burns",
+     "frames": [
+      1944,
+      2099
+     ],
+     "duration_s": 5.2,
+     "zoom_range": [
+      1.0309,
+      1.1852
+     ],
+     "min_margin_out_px": -0.001,
+     "min_margin_frame": 2099,
+     "min_spp": 0.8438,
+     "min_spp_frame": 1944,
+     "speed_start_px_f": 1.399,
+     "speed_end_px_f": 1.23,
+     "min_speed_inside_px_f": 1.2316,
+     "min_speed_frame": 2096,
+     "max_speed_px_f": 1.399,
+     "keyframes": null,
+     "speed_profile_every_5": [
+      1.399,
+      1.393,
+      1.387,
+      1.382,
+      1.376,
+      1.37,
+      1.364,
+      1.358,
+      1.353,
+      1.347,
+      1.341,
+      1.336,
+      1.33,
+      1.324,
+      1.319,
+      1.313,
+      1.308,
+      1.302,
+      1.297,
+      1.292,
+      1.286,
+      1.281,
+      1.275,
+      1.27,
+      1.265,
+      1.26,
+      1.254,
+      1.249,
+      1.244,
+      1.239,
+      1.234
+     ]
+    }
+   ]
+  },
+  "v2_moves": {
+   "plan_hash": "e313972cbb77528df663ff5ba15b49774bee1a930767e8ff2af582819421a221",
+   "ffprobe": {
+    "duration_s": 70.059,
+    "frames": 2100,
+    "fps": "30/1",
+    "resolution": "1920x1080",
+    "codec": "h264",
+    "pix_fmt": "yuv420p",
+    "audio": [
+     {
+      "codec": "aac",
+      "sample_rate": "48000",
+      "channels": 2
+     }
+    ]
+   },
+   "audio_level": "mean_volume: -91.0 dB max_volume: -91.0 dB",
+   "min_margin_out_px": 1.999,
+   "min_margin_where": 369,
+   "frames_checked": 2100,
+   "min_spp": 0.7812,
+   "shots": [
+    {
+     "shot": "s01",
+     "move": "rise",
+     "type": "keyframe_path",
+     "frames": [
+      0,
+      144
+     ],
+     "duration_s": 4.84,
+     "zoom_range": [
+      1.01,
+      1.0756
+     ],
+     "min_margin_out_px": 2.0,
+     "min_margin_frame": 144,
+     "min_spp": 0.9297,
+     "min_spp_frame": 144,
+     "speed_start_px_f": 2.734,
+     "speed_end_px_f": 1.455,
+     "min_speed_inside_px_f": 1.3861,
+     "min_speed_frame": 117,
+     "max_speed_px_f": 2.734,
+     "keyframes": [
+      {
+       "t": 0.0,
+       "cx": 0.496081,
+       "cy": 0.580755,
+       "zoom": 1.01
+      },
+      {
+       "t": 1.0,
+       "cx": 0.4783,
+       "cy": 0.393657,
+       "zoom": 1.07565
+      }
+     ],
+     "speed_profile_every_5": [
+      2.734,
+      2.627,
+      2.523,
+      2.424,
+      2.328,
+      2.237,
+      2.15,
+      2.067,
+      1.989,
+      1.915,
+      1.846,
+      1.781,
+      1.721,
+      1.666,
+      1.616,
+      1.57,
+      1.53,
+      1.494,
+      1.464,
+      1.438,
+      1.418,
+      1.402,
+      1.392,
+      1.387,
+      1.387,
+      1.392,
+      1.403,
+      1.419,
+      1.44
+     ]
+    },
+    {
+     "shot": "s02",
+     "move": "reveal_sweep",
+     "type": "keyframe_path",
+     "frames": [
+      145,
+      369
+     ],
+     "duration_s": 7.5,
+     "zoom_range": [
+      1.035,
+      1.28
+     ],
+     "min_margin_out_px": 1.999,
+     "min_margin_frame": 369,
+     "min_spp": 0.7812,
+     "min_spp_frame": 205,
+     "speed_start_px_f": 5.009,
+     "speed_end_px_f": 2.28,
+     "min_speed_inside_px_f": 0.0528,
+     "min_speed_frame": 283,
+     "max_speed_px_f": 10.006,
+     "keyframes": [
+      {
+       "t": 0.0,
+       "cx": 0.5,
+       "cy": 0.53935,
+       "zoom": 1.035
+      },
+      {
+       "t": 0.35,
+       "cx": 0.608561,
+       "cy": 0.5787,
+       "zoom": 1.28
+      },
+      {
+       "t": 0.7,
+       "cx": 0.391439,
+       "cy": 0.5787,
+       "zoom": 1.28
+      },
+      {
+       "t": 1.0,
+       "cx": 0.463927,
+       "cy": 0.517665,
+       "zoom": 1.08
+      }
+     ],
+     "speed_profile_every_5": [
+      5.009,
+      5.75,
+      6.189,
+      6.351,
+      6.26,
+      5.936,
+      5.401,
+      4.676,
+      3.788,
+      2.764,
+      1.632,
+      0.423,
+      2.173,
+      4.854,
+      6.884,
+      8.345,
+      9.31,
+      9.845,
+      10.006,
+      9.843,
+      9.398,
+      8.709,
+      7.808,
+      6.721,
+      5.47,
+      4.073,
+      2.545,
+      0.896,
+      0.3,
+      0.86,
+      1.342,
+      1.751,
+      2.095,
+      2.377,
+      2.603,
+      2.777,
+      2.904,
+      2.985,
+      3.024,
+      3.022,
+      2.981,
+      2.901,
+      2.782,
+      2.624,
+      2.423
+     ]
+    },
+    {
+     "shot": "s03",
+     "move": "push_to_subject",
+     "type": "keyframe_path",
+     "frames": [
+      370,
+      507
+     ],
+     "duration_s": 4.58,
+     "zoom_range": [
+      1.02,
+      1.1985
+     ],
+     "min_margin_out_px": 1.999,
+     "min_margin_frame": 507,
+     "min_spp": 0.8344,
+     "min_spp_frame": 507,
+     "speed_start_px_f": 1.899,
+     "speed_end_px_f": 1.001,
+     "min_speed_inside_px_f": 0.9389,
+     "min_speed_frame": 480,
+     "max_speed_px_f": 1.899,
+     "keyframes": [
+      {
+       "t": 0.0,
+       "cx": 0.491217,
+       "cy": 0.5,
+       "zoom": 1.02
+      },
+      {
+       "t": 0.5,
+       "cx": 0.453163,
+       "cy": 0.502786,
+       "zoom": 1.105654
+      },
+      {
+       "t": 1.0,
+       "cx": 0.418057,
+       "cy": 0.506966,
+       "zoom": 1.1985
+      }
+     ],
+     "speed_profile_every_5": [
+      1.899,
+      1.831,
+      1.762,
+      1.693,
+      1.625,
+      1.558,
+      1.493,
+      1.429,
+      1.369,
+      1.31,
+      1.255,
+      1.204,
+      1.156,
+      1.114,
+      1.077,
+      1.045,
+      1.016,
+      0.993,
+      0.973,
+      0.958,
+      0.947,
+      0.941,
+      0.939,
+      0.941,
+      0.948,
+      0.959,
+      0.975,
+      0.996
+     ]
+    },
+    {
+     "shot": "s04",
+     "move": "slide",
+     "type": "keyframe_path",
+     "frames": [
+      508,
+      644
+     ],
+     "duration_s": 4.58,
+     "zoom_range": [
+      1.105,
+      1.1492
+     ],
+     "min_margin_out_px": 7.6,
+     "min_margin_frame": 508,
+     "min_spp": 0.8702,
+     "min_spp_frame": 644,
+     "speed_start_px_f": 2.254,
+     "speed_end_px_f": 1.175,
+     "min_speed_inside_px_f": 1.1221,
+     "min_speed_frame": 620,
+     "max_speed_px_f": 2.254,
+     "keyframes": [
+      {
+       "t": 0.0,
+       "cx": 0.543929,
+       "cy": 0.6072,
+       "zoom": 1.105
+      },
+      {
+       "t": 1.0,
+       "cx": 0.453431,
+       "cy": 0.6072,
+       "zoom": 1.1492
+      }
+     ],
+     "speed_profile_every_5": [
+      2.254,
+      2.158,
+      2.065,
+      1.977,
+      1.892,
+      1.812,
+      1.736,
+      1.664,
+      1.597,
+      1.534,
+      1.475,
+      1.42,
+      1.37,
+      1.325,
+      1.284,
+      1.248,
+      1.216,
+      1.189,
+      1.166,
+      1.148,
+      1.135,
+      1.126,
+      1.122,
+      1.123,
+      1.129,
+      1.139,
+      1.155,
+      1.175
+     ]
+    },
+    {
+     "shot": "s05",
+     "move": "push_to_subject",
+     "type": "keyframe_path",
+     "frames": [
+      645,
+      789
+     ],
+     "duration_s": 4.84,
+     "zoom_range": [
+      1.02,
+      1.1985
+     ],
+     "min_margin_out_px": 1.999,
+     "min_margin_frame": 789,
+     "min_spp": 0.8344,
+     "min_spp_frame": 789,
+     "speed_start_px_f": 1.805,
+     "speed_end_px_f": 0.95,
+     "min_speed_inside_px_f": 0.8905,
+     "min_speed_frame": 761,
+     "max_speed_px_f": 1.805,
+     "keyframes": [
+      {
+       "t": 0.0,
+       "cx": 0.508783,
+       "cy": 0.5,
+       "zoom": 1.02
+      },
+      {
+       "t": 0.5,
+       "cx": 0.546837,
+       "cy": 0.500706,
+       "zoom": 1.105654
+      },
+      {
+       "t": 1.0,
+       "cx": 0.581943,
+       "cy": 0.501766,
+       "zoom": 1.1985
+      }
+     ],
+     "speed_profile_every_5": [
+      1.805,
+      1.743,
+      1.681,
+      1.619,
+      1.558,
+      1.497,
+      1.437,
+      1.379,
+      1.323,
+      1.269,
+      1.218,
+      1.169,
+      1.124,
+      1.083,
+      1.046,
+      1.014,
+      0.985,
+      0.96,
+      0.939,
+      0.922,
+      0.909,
+      0.899,
+      0.893,
+      0.89,
+      0.892,
+      0.897,
+      0.907,
+      0.92,
+      0.937
+     ]
+    },
+    {
+     "shot": "s06",
+     "move": "reveal_sweep",
+     "type": "keyframe_path",
+     "frames": [
+      790,
+      1014
+     ],
+     "duration_s": 7.5,
+     "zoom_range": [
+      1.035,
+      1.28
+     ],
+     "min_margin_out_px": 1.999,
+     "min_margin_frame": 1014,
+     "min_spp": 0.7812,
+     "min_spp_frame": 850,
+     "speed_start_px_f": 4.883,
+     "speed_end_px_f": 2.28,
+     "min_speed_inside_px_f": 0.0528,
+     "min_speed_frame": 928,
+     "max_speed_px_f": 10.006,
+     "keyframes": [
+      {
+       "t": 0.0,
+       "cx": 0.5,
+       "cy": 0.5013,
+       "zoom": 1.035
+      },
+      {
+       "t": 0.35,
+       "cx": 0.608561,
+       "cy": 0.5026,
+       "zoom": 1.28
+      },
+      {
+       "t": 0.7,
+       "cx": 0.391439,
+       "cy": 0.5026,
+       "zoom": 1.28
+      },
+      {
+       "t": 1.0,
+       "cx": 0.463927,
+       "cy": 0.441565,
+       "zoom": 1.08
+      }
+     ],
+     "speed_profile_every_5": [
+      4.883,
+      5.601,
+      6.024,
+      6.179,
+      6.088,
+      5.771,
+      5.249,
+      4.544,
+      3.681,
+      2.685,
+      1.586,
+      0.411,
+      2.173,
+      4.854,
+      6.884,
+      8.345,
+      9.31,
+      9.845,
+      10.006,
+      9.843,
+      9.398,
+      8.709,
+      7.808,
+      6.721,
+      5.47,
+      4.073,
+      2.545,
+      0.896,
+      0.3,
+      0.86,
+      1.342,
+      1.751,
+      2.095,
+      2.377,
+      2.603,
+      2.777,
+      2.904,
+      2.985,
+      3.024,
+      3.022,
+      2.981,
+      2.901,
+      2.782,
+      2.624,
+      2.423
+     ]
+    },
+    {
+     "shot": "s07",
+     "move": "push_to_subject",
+     "type": "keyframe_path",
+     "frames": [
+      1015,
+      1151
+     ],
+     "duration_s": 4.57,
+     "zoom_range": [
+      1.02,
+      1.1985
+     ],
+     "min_margin_out_px": 1.999,
+     "min_margin_frame": 1151,
+     "min_spp": 0.8344,
+     "min_spp_frame": 1151,
+     "speed_start_px_f": 2.345,
+     "speed_end_px_f": 1.557,
+     "min_speed_inside_px_f": 1.5076,
+     "min_speed_frame": 1125,
+     "max_speed_px_f": 2.345,
+     "keyframes": [
+      {
+       "t": 0.0,
+       "cx": 0.508783,
+       "cy": 0.5,
+       "zoom": 1.02
+      },
+      {
+       "t": 0.5,
+       "cx": 0.546837,
+       "cy": 0.457346,
+       "zoom": 1.105654
+      },
+      {
+       "t": 1.0,
+       "cx": 0.581943,
+       "cy": 0.393366,
+       "zoom": 1.1985
+      }
+     ],
+     "speed_profile_every_5": [
+      2.345,
+      2.226,
+      2.125,
+      2.038,
+      1.963,
+      1.899,
+      1.842,
+      1.794,
+      1.754,
+      1.721,
+      1.695,
+      1.674,
+      1.654,
+      1.633,
+      1.611,
+      1.59,
+      1.57,
+      1.552,
+      1.537,
+      1.524,
+      1.515,
+      1.509,
+      1.508,
+      1.51,
+      1.516,
+      1.526,
+      1.54,
+      1.557
+     ]
+    },
+    {
+     "shot": "s08",
+     "move": "reveal_sweep",
+     "type": "keyframe_path",
+     "frames": [
+      1152,
+      1376
+     ],
+     "duration_s": 7.5,
+     "zoom_range": [
+      1.035,
+      1.28
+     ],
+     "min_margin_out_px": 1.999,
+     "min_margin_frame": 1376,
+     "min_spp": 0.7812,
+     "min_spp_frame": 1212,
+     "speed_start_px_f": 5.375,
+     "speed_end_px_f": 2.282,
+     "min_speed_inside_px_f": 0.0528,
+     "min_speed_frame": 1290,
+     "max_speed_px_f": 10.006,
+     "keyframes": [
+      {
+       "t": 0.0,
+       "cx": 0.5,
+       "cy": 0.590882,
+       "zoom": 1.035
+      },
+      {
+       "t": 0.35,
+       "cx": 0.608561,
+       "cy": 0.669189,
+       "zoom": 1.28
+      },
+      {
+       "t": 0.7,
+       "cx": 0.391439,
+       "cy": 0.669189,
+       "zoom": 1.28
+      },
+      {
+       "t": 1.0,
+       "cx": 0.463927,
+       "cy": 0.607928,
+       "zoom": 1.08
+      }
+     ],
+     "speed_profile_every_5": [
+      5.375,
+      6.18,
+      6.66,
+      6.842,
+      6.749,
+      6.402,
+      5.826,
+      5.045,
+      4.088,
+      2.983,
+      1.762,
+      0.456,
+      2.173,
+      4.854,
+      6.884,
+      8.345,
+      9.31,
+      9.845,
+      10.006,
+      9.843,
+      9.398,
+      8.709,
+      7.808,
+      6.721,
+      5.47,
+      4.073,
+      2.545,
+      0.896,
+      0.3,
+      0.861,
+      1.343,
+      1.753,
+      2.096,
+      2.379,
+      2.605,
+      2.78,
+      2.906,
+      2.987,
+      3.026,
+      3.025,
+      2.984,
+      2.904,
+      2.784,
+      2.626,
+      2.425
+     ]
+    },
+    {
+     "shot": "s09",
+     "move": "push_to_subject",
+     "type": "keyframe_path",
+     "frames": [
+      1377,
+      1521
+     ],
+     "duration_s": 4.84,
+     "zoom_range": [
+      1.02,
+      1.1985
+     ],
+     "min_margin_out_px": 1.999,
+     "min_margin_frame": 1521,
+     "min_spp": 0.8344,
+     "min_spp_frame": 1521,
+     "speed_start_px_f": 1.838,
+     "speed_end_px_f": 0.999,
+     "min_speed_inside_px_f": 0.9414,
+     "min_speed_frame": 1492,
+     "max_speed_px_f": 1.838,
+     "keyframes": [
+      {
+       "t": 0.0,
+       "cx": 0.491217,
+       "cy": 0.5,
+       "zoom": 1.02
+      },
+      {
+       "t": 0.5,
+       "cx": 0.453163,
+       "cy": 0.488334,
+       "zoom": 1.105654
+      },
+      {
+       "t": 1.0,
+       "cx": 0.418057,
+       "cy": 0.470834,
+       "zoom": 1.1985
+      }
+     ],
+     "speed_profile_every_5": [
+      1.838,
+      1.772,
+      1.708,
+      1.644,
+      1.582,
+      1.522,
+      1.463,
+      1.406,
+      1.352,
+      1.3,
+      1.251,
+      1.205,
+      1.163,
+      1.125,
+      1.09,
+      1.06,
+      1.032,
+      1.009,
+      0.989,
+      0.972,
+      0.959,
+      0.949,
+      0.944,
+      0.941,
+      0.943,
+      0.948,
+      0.957,
+      0.97,
+      0.987
+     ]
+    },
+    {
+     "shot": "s10",
+     "move": "settle",
+     "type": "keyframe_path",
+     "frames": [
+      1522,
+      1667
+     ],
+     "duration_s": 4.84,
+     "zoom_range": [
+      1.02,
+      1.0914
+     ],
+     "min_margin_out_px": 19.2,
+     "min_margin_frame": 1522,
+     "min_spp": 0.9163,
+     "min_spp_frame": 1667,
+     "speed_start_px_f": 0.631,
+     "speed_end_px_f": 0.319,
+     "min_speed_inside_px_f": 0.3053,
+     "min_speed_frame": 1642,
+     "max_speed_px_f": 0.631,
+     "keyframes": [
+      {
+       "t": 0.0,
+       "cx": 0.5,
+       "cy": 0.5,
+       "zoom": 1.02
+      },
+      {
+       "t": 1.0,
+       "cx": 0.492265,
+       "cy": 0.530135,
+       "zoom": 1.0914
+      }
+     ],
+     "speed_profile_every_5": [
+      0.631,
+      0.604,
+      0.579,
+      0.555,
+      0.531,
+      0.509,
+      0.489,
+      0.469,
+      0.45,
+      0.433,
+      0.416,
+      0.401,
+      0.387,
+      0.374,
+      0.362,
+      0.351,
+      0.342,
+      0.333,
+      0.326,
+      0.319,
+      0.314,
+      0.31,
+      0.308,
+      0.306,
+      0.305,
+      0.306,
+      0.308,
+      0.31,
+      0.314
+     ]
+    },
+    {
+     "shot": "s11",
+     "move": "push_to_subject",
+     "type": "keyframe_path",
+     "frames": [
+      1668,
+      1812
+     ],
+     "duration_s": 4.84,
+     "zoom_range": [
+      1.02,
+      1.1985
+     ],
+     "min_margin_out_px": 1.999,
+     "min_margin_frame": 1668,
+     "min_spp": 0.8344,
+     "min_spp_frame": 1812,
+     "speed_start_px_f": 1.401,
+     "speed_end_px_f": 0.945,
+     "min_speed_inside_px_f": 0.9349,
+     "min_speed_frame": 1791,
+     "max_speed_px_f": 1.401,
+     "keyframes": [
+      {
+       "t": 0.0,
+       "cx": 0.491217,
+       "cy": 0.5,
+       "zoom": 1.02
+      },
+      {
+       "t": 0.5,
+       "cx": 0.488641,
+       "cy": 0.531706,
+       "zoom": 1.105654
+      },
+      {
+       "t": 1.0,
+       "cx": 0.487537,
+       "cy": 0.579266,
+       "zoom": 1.1985
+      }
+     ],
+     "speed_profile_every_5": [
+      1.401,
+      1.31,
+      1.236,
+      1.176,
+      1.128,
+      1.089,
+      1.06,
+      1.038,
+      1.022,
+      1.011,
+      1.006,
+      1.004,
+      1.005,
+      1.002,
+      0.997,
+      0.99,
+      0.982,
+      0.973,
+      0.965,
+      0.957,
+      0.95,
+      0.944,
+      0.94,
+      0.937,
+      0.935,
+      0.935,
+      0.936,
+      0.939,
+      0.943
+     ]
+    },
+    {
+     "shot": "s12",
+     "move": "slide",
+     "type": "keyframe_path",
+     "frames": [
+      1813,
+      1949
+     ],
+     "duration_s": 4.57,
+     "zoom_range": [
+      1.105,
+      1.1492
+     ],
+     "min_margin_out_px": 1.999,
+     "min_margin_frame": 1813,
+     "min_spp": 0.8702,
+     "min_spp_frame": 1949,
+     "speed_start_px_f": 2.268,
+     "speed_end_px_f": 1.182,
+     "min_speed_inside_px_f": 1.1288,
+     "min_speed_frame": 1925,
+     "max_speed_px_f": 2.268,
+     "keyframes": [
+      {
+       "t": 0.0,
+       "cx": 0.453431,
+       "cy": 0.616799,
+       "zoom": 1.105
+      },
+      {
+       "t": 1.0,
+       "cx": 0.543929,
+       "cy": 0.631537,
+       "zoom": 1.1492
+      }
+     ],
+     "speed_profile_every_5": [
+      2.268,
+      2.171,
+      2.078,
+      1.989,
+      1.904,
+      1.823,
+      1.746,
+      1.674,
+      1.606,
+      1.543,
+      1.483,
+      1.429,
+      1.378,
+      1.333,
+      1.291,
+      1.255,
+      1.223,
+      1.196,
+      1.173,
+      1.155,
+      1.141,
+      1.133,
+      1.129,
+      1.13,
+      1.136,
+      1.146,
+      1.161,
+      1.182
+     ]
+    },
+    {
+     "shot": "s13",
+     "move": "pull_back_reveal",
+     "type": "keyframe_path",
+     "frames": [
+      1950,
+      2099
+     ],
+     "duration_s": 5.0,
+     "zoom_range": [
+      1.02,
+      1.175
+     ],
+     "min_margin_out_px": 11.667,
+     "min_margin_frame": 1950,
+     "min_spp": 0.8511,
+     "min_spp_frame": 1950,
+     "speed_start_px_f": 2.29,
+     "speed_end_px_f": 1.042,
+     "min_speed_inside_px_f": 1.0117,
+     "min_speed_frame": 2077,
+     "max_speed_px_f": 2.29,
+     "keyframes": [
+      {
+       "t": 0.0,
+       "cx": 0.4911,
+       "cy": 0.6332,
+       "zoom": 1.175
+      },
+      {
+       "t": 1.0,
+       "cx": 0.5,
+       "cy": 0.5,
+       "zoom": 1.02
+      }
+     ],
+     "speed_profile_every_5": [
+      2.29,
+      2.185,
+      2.084,
+      1.989,
+      1.899,
+      1.814,
+      1.734,
+      1.658,
+      1.587,
+      1.521,
+      1.459,
+      1.401,
+      1.348,
+      1.298,
+      1.253,
+      1.212,
+      1.175,
+      1.142,
+      1.112,
+      1.087,
+      1.065,
+      1.047,
+      1.033,
+      1.022,
+      1.015,
+      1.012,
+      1.012,
+      1.016,
+      1.023,
+      1.034
+     ]
+    }
+   ]
+  }
+ },
+ "reference": {
+  "ffprobe": {
+   "duration_s": 70.059,
+   "frames": 2100,
+   "fps": "30/1",
+   "resolution": "1920x1080",
+   "codec": "h264",
+   "pix_fmt": "yuv420p",
+   "audio": [
+    {
+     "codec": "aac",
+     "sample_rate": "48000",
+     "channels": 2
+    }
+   ]
+  },
+  "audio_level": "mean_volume: -91.0 dB max_volume: -91.0 dB"
+ },
+ "determinism_v2": {
+  "frames": [
+   2100,
+   2100
+  ],
+  "identical": false,
+  "n_differing": 690,
+  "digest": "cea49bc11f120f0c"
+ },
+ "v0_vs_reference_ssim": {
+  "frames_compared": [
+   15,
+   45,
+   75,
+   105,
+   135,
+   165,
+   195,
+   225,
+   255,
+   285,
+   315,
+   345,
+   375,
+   405,
+   435,
+   465,
+   495,
+   525,
+   555,
+   585,
+   615,
+   645,
+   675,
+   705,
+   735,
+   765,
+   795,
+   825,
+   855,
+   885,
+   915,
+   945,
+   975,
+   1005,
+   1035,
+   1065,
+   1095,
+   1125,
+   1155,
+   1185,
+   1215,
+   1245,
+   1275,
+   1305,
+   1335,
+   1365,
+   1395,
+   1425,
+   1455,
+   1485,
+   1515,
+   1545,
+   1575,
+   1605,
+   1635,
+   1665,
+   1695,
+   1725,
+   1755,
+   1785,
+   1815,
+   1845,
+   1875,
+   1905,
+   1935,
+   1965,
+   1995,
+   2025,
+   2055,
+   2085
+  ],
+  "per_second": [
+   0.9686,
+   0.9712,
+   0.9715,
+   0.9723,
+   0.9727,
+   0.9682,
+   0.9787,
+   0.979,
+   0.9807,
+   0.9796,
+   0.9789,
+   0.9752,
+   0.9756,
+   0.9753,
+   0.9758,
+   0.9741,
+   0.9763,
+   0.9771,
+   0.9766,
+   0.976,
+   0.9758,
+   0.9706,
+   0.9762,
+   0.978,
+   0.978,
+   0.9787,
+   0.978,
+   0.9801,
+   0.9799,
+   0.9798,
+   0.9801,
+   0.9787,
+   0.9745,
+   0.9767,
+   0.9777,
+   0.9772,
+   0.9759,
+   0.9685,
+   0.9812,
+   0.981,
+   0.981,
+   0.9808,
+   0.9798,
+   0.9776,
+   0.9788,
+   0.9797,
+   0.9794,
+   0.9797,
+   0.977,
+   0.9768,
+   0.9781,
+   0.9767,
+   0.9782,
+   0.9758,
+   0.9765,
+   0.9762,
+   0.9782,
+   0.9788,
+   0.9761,
+   0.9664,
+   0.9752,
+   0.9763,
+   0.9742,
+   0.9741,
+   0.9687,
+   0.977,
+   0.9762,
+   0.9762,
+   0.9748,
+   0.9732
+  ],
+  "mean": 0.9764,
+  "min": 0.9664
+ },
+ "boundaries": {
+  "reference": [
+   {
+    "boundary": 165,
+    "expected": [
+     "s01",
+     "s02"
+    ],
+    "before": "s01",
+    "before_matches": {
+     "s01": 304,
+     "s02": 10
+    },
+    "after": "s02",
+    "after_matches": {
+     "s01": 10,
+     "s02": 390
+    },
+    "ok": true
+   },
+   {
+    "boundary": 330,
+    "expected": [
+     "s02",
+     "s03"
+    ],
+    "before": "s02",
+    "before_matches": {
+     "s02": 361,
+     "s03": 15
+    },
+    "after": "s03",
+    "after_matches": {
+     "s02": 15,
+     "s03": 562
+    },
+    "ok": true
+   },
+   {
+    "boundary": 486,
+    "expected": [
+     "s03",
+     "s04"
+    ],
+    "before": "s03",
+    "before_matches": {
+     "s03": 334,
+     "s04": 14
+    },
+    "after": "s04",
+    "after_matches": {
+     "s03": 16,
+     "s04": 356
+    },
+    "ok": true
+   },
+   {
+    "boundary": 642,
+    "expected": [
+     "s04",
+     "s05"
+    ],
+    "before": "s04",
+    "before_matches": {
+     "s04": 401,
+     "s05": 14
+    },
+    "after": "s05",
+    "after_matches": {
+     "s04": 23,
+     "s05": 598
+    },
+    "ok": true
+   },
+   {
+    "boundary": 807,
+    "expected": [
+     "s05",
+     "s06"
+    ],
+    "before": "s05",
+    "before_matches": {
+     "s05": 373,
+     "s06": 33
+    },
+    "after": "s06",
+    "after_matches": {
+     "s05": 15,
+     "s06": 375
+    },
+    "ok": true
+   },
+   {
+    "boundary": 972,
+    "expected": [
+     "s06",
+     "s07"
+    ],
+    "before": "s06",
+    "before_matches": {
+     "s06": 375,
+     "s07": 36
+    },
+    "after": "s07",
+    "after_matches": {
+     "s06": 17,
+     "s07": 602
+    },
+    "ok": true
+   },
+   {
+    "boundary": 1128,
+    "expected": [
+     "s07",
+     "s08"
+    ],
+    "before": "s07",
+    "before_matches": {
+     "s07": 355,
+     "s08": 10
+    },
+    "after": "s08",
+    "after_matches": {
+     "s07": 13,
+     "s08": 350
+    },
+    "ok": true
+   },
+   {
+    "boundary": 1293,
+    "expected": [
+     "s08",
+     "s09"
+    ],
+    "before": "s08",
+    "before_matches": {
+     "s08": 396,
+     "s09": 10
+    },
+    "after": "s09",
+    "after_matches": {
+     "s08": 11,
+     "s09": 517
+    },
+    "ok": true
+   },
+   {
+    "boundary": 1458,
+    "expected": [
+     "s09",
+     "s10"
+    ],
+    "before": "s09",
+    "before_matches": {
+     "s09": 365,
+     "s10": 9
+    },
+    "after": "s10",
+    "after_matches": {
+     "s09": 8,
+     "s10": 516
+    },
+    "ok": true
+   },
+   {
+    "boundary": 1623,
+    "expected": [
+     "s10",
+     "s11"
+    ],
+    "before": "s10",
+    "before_matches": {
+     "s10": 550,
+     "s11": 15
+    },
+    "after": "s11",
+    "after_matches": {
+     "s10": 20,
+     "s11": 520
+    },
+    "ok": true
+   },
+   {
+    "boundary": 1788,
+    "expected": [
+     "s11",
+     "s12"
+    ],
+    "before": "s11",
+    "before_matches": {
+     "s11": 378,
+     "s12": 13
+    },
+    "after": "s12",
+    "after_matches": {
+     "s11": 10,
+     "s12": 377
+    },
+    "ok": true
+   },
+   {
+    "boundary": 1944,
+    "expected": [
+     "s12",
+     "s13"
+    ],
+    "before": "s12",
+    "before_matches": {
+     "s12": 364,
+     "s13": 11
+    },
+    "after": "s13",
+    "after_matches": {
+     "s12": 10,
+     "s13": 349
+    },
+    "ok": true
+   }
+  ],
+  "v0_baseline": [
+   {
+    "boundary": 165,
+    "expected": [
+     "s01",
+     "s02"
+    ],
+    "before": "s01",
+    "before_matches": {
+     "s01": 299,
+     "s02": 3
+    },
+    "after": "s02",
+    "after_matches": {
+     "s01": 12,
+     "s02": 384
+    },
+    "ok": true
+   },
+   {
+    "boundary": 330,
+    "expected": [
+     "s02",
+     "s03"
+    ],
+    "before": "s02",
+    "before_matches": {
+     "s02": 360,
+     "s03": 18
+    },
+    "after": "s03",
+    "after_matches": {
+     "s02": 19,
+     "s03": 568
+    },
+    "ok": true
+   },
+   {
+    "boundary": 486,
+    "expected": [
+     "s03",
+     "s04"
+    ],
+    "before": "s03",
+    "before_matches": {
+     "s03": 333,
+     "s04": 16
+    },
+    "after": "s04",
+    "after_matches": {
+     "s03": 12,
+     "s04": 352
+    },
+    "ok": true
+   },
+   {
+    "boundary": 642,
+    "expected": [
+     "s04",
+     "s05"
+    ],
+    "before": "s04",
+    "before_matches": {
+     "s04": 394,
+     "s05": 9
+    },
+    "after": "s05",
+    "after_matches": {
+     "s04": 23,
+     "s05": 625
+    },
+    "ok": true
+   },
+   {
+    "boundary": 807,
+    "expected": [
+     "s05",
+     "s06"
+    ],
+    "before": "s05",
+    "before_matches": {
+     "s05": 386,
+     "s06": 29
+    },
+    "after": "s06",
+    "after_matches": {
+     "s05": 23,
+     "s06": 364
+    },
+    "ok": true
+   },
+   {
+    "boundary": 972,
+    "expected": [
+     "s06",
+     "s07"
+    ],
+    "before": "s06",
+    "before_matches": {
+     "s06": 375,
+     "s07": 30
+    },
+    "after": "s07",
+    "after_matches": {
+     "s06": 14,
+     "s07": 601
+    },
+    "ok": true
+   },
+   {
+    "boundary": 1128,
+    "expected": [
+     "s07",
+     "s08"
+    ],
+    "before": "s07",
+    "before_matches": {
+     "s07": 373,
+     "s08": 12
+    },
+    "after": "s08",
+    "after_matches": {
+     "s07": 15,
+     "s08": 356
+    },
+    "ok": true
+   },
+   {
+    "boundary": 1293,
+    "expected": [
+     "s08",
+     "s09"
+    ],
+    "before": "s08",
+    "before_matches": {
+     "s08": 387,
+     "s09": 10
+    },
+    "after": "s09",
+    "after_matches": {
+     "s08": 10,
+     "s09": 523
+    },
+    "ok": true
+   },
+   {
+    "boundary": 1458,
+    "expected": [
+     "s09",
+     "s10"
+    ],
+    "before": "s09",
+    "before_matches": {
+     "s09": 366,
+     "s10": 6
+    },
+    "after": "s10",
+    "after_matches": {
+     "s09": 14,
+     "s10": 524
+    },
+    "ok": true
+   },
+   {
+    "boundary": 1623,
+    "expected": [
+     "s10",
+     "s11"
+    ],
+    "before": "s10",
+    "before_matches": {
+     "s10": 541,
+     "s11": 13
+    },
+    "after": "s11",
+    "after_matches": {
+     "s10": 16,
+     "s11": 547
+    },
+    "ok": true
+   },
+   {
+    "boundary": 1788,
+    "expected": [
+     "s11",
+     "s12"
+    ],
+    "before": "s11",
+    "before_matches": {
+     "s11": 359,
+     "s12": 10
+    },
+    "after": "s12",
+    "after_matches": {
+     "s11": 13,
+     "s12": 359
+    },
+    "ok": true
+   },
+   {
+    "boundary": 1944,
+    "expected": [
+     "s12",
+     "s13"
+    ],
+    "before": "s12",
+    "before_matches": {
+     "s12": 354,
+     "s13": 12
+    },
+    "after": "s13",
+    "after_matches": {
+     "s12": 8,
+     "s13": 363
+    },
+    "ok": true
+   }
+  ]
+ },
+ "compare_grid": {
+  "duration_s": 70.0,
+  "frames": 2100,
+  "fps": "30/1",
+  "resolution": "960x1620",
+  "codec": "h264",
+  "pix_fmt": "yuv420p",
+  "audio": []
+ },
+ "contact_sheet": "out/tour_v2/v2_contact_sheet.png"
+}

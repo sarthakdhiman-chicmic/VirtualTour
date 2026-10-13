@@ -3,10 +3,11 @@ import json
 import subprocess
 from modules.timeline import compute_timeline
 
-def render(plan, workdir, scale=1.0, concurrency=2, depth_maps=None):
-    """depth_maps: {image basename: {"image": depth png, "focus": float}} from modules.depth.
-    Shots with a depth map render through the WebGL parallax shader."""
-    depth_maps = depth_maps or {}
+def render(plan, workdir, scale=1.0, concurrency=2, jpeg_quality=95, gl=None):
+    """jpeg_quality: frame capture quality, None = Remotion's default (80). gl: Chrome GL backend
+    (--gl), None = Remotion's default. Tour v2 renders use jpeg_quality=None, gl=None (the liked
+    baseline's sharpness matches default JPEG quality). Passing --gl angle or swangle made two
+    renders of the same plan differ (out/tour_v2/report.md), so leave gl unset."""
     # build props
     props_path = os.path.join(workdir, "props.json")
     out_path = os.path.join(workdir, "out.mp4")
@@ -23,12 +24,16 @@ def render(plan, workdir, scale=1.0, concurrency=2, depth_maps=None):
             "id": shot.shot_id,
             "image": basename,
             "source": {"width": shot.source.width, "height": shot.source.height},
-            "camera": {
+            "camera": ({
+                "type": "keyframe_path",
+                "move": shot.camera.move,
+                "keyframes": [k.model_dump() for k in shot.camera.keyframes],
+            } if shot.camera.type == "keyframe_path" else {
+                "type": "ken_burns",
                 "start": shot.camera.start.model_dump(),
                 "end": shot.camera.end.model_dump(),
                 "easing": shot.camera.easing
-            },
-            "depth": depth_maps.get(basename),
+            }),
         })
         
     total_frames = round((plan.total_duration_s * 100) * fps / 100)
@@ -61,15 +66,14 @@ def render(plan, workdir, scale=1.0, concurrency=2, depth_maps=None):
         "--crf", "18",
         # frames are captured as JPEG before encoding; the default quality (80) adds
         # per-frame compression noise that crawls on fine texture as the camera moves
-        "--jpeg-quality", "95",
         "--timeout", "600000",
         "--concurrency", str(concurrency),
         "--log", "verbose"
     ]
-    if any(s["depth"] for s in shots):
-        # three.js needs ANGLE: "swangle" is software (CPU), "angle-egl" uses a Linux GPU
-        cmd += ["--gl", os.environ.get("REMOTION_GL", "swangle")]
-    
+    if jpeg_quality is not None:
+        cmd += ["--jpeg-quality", str(jpeg_quality)]
+    if gl is not None:
+        cmd += ["--gl", gl]
     try:
         res = subprocess.run(cmd, cwd=remotion_dir, check=True, capture_output=True, text=True, timeout=1800)
         print("REMOTION OUT:", res.stdout)

@@ -6,7 +6,6 @@ import time
 from modules.plan_io import parse_plan
 from modules.storage import LocalMapStorage, S3Storage
 from modules.images import fetch_and_prepare
-from modules.depth import build_depth_maps
 from modules.remotion_render import render
 from modules.probe import verify
 
@@ -27,15 +26,9 @@ def run_tour(request, storage, workdir, scale=1.0):
         image_urls = request.get("image_urls", {})
         warnings = fetch_and_prepare(plan, storage, workdir, image_urls)
 
-        # Depth parallax is experimental and opt-in (TOUR_PARALLAX=1): the per-pixel warp bends
-        # straight lines and rigid objects near depth edges. Shots without depth render as Ken Burns.
-        depth_maps = None
-        if os.environ.get("TOUR_PARALLAX", "0") == "1":
-            names = [shot.image_uri.split("/")[-1] for shot in plan.shots]
-            depth_maps, depth_warnings = build_depth_maps(os.path.join(workdir, "images"), names)
-            warnings.extend(depth_warnings)
-
-        out_path = render(plan, workdir, scale, depth_maps=depth_maps)
+        # tour v2: depth parallax is not in the render path (modules/depth.py and ParallaxShot.tsx
+        # are unreferenced on this branch; the work lives on park/m3-and-retune-2026-10-12)
+        out_path = render(plan, workdir, scale)
         
         verify(out_path, plan)
         
