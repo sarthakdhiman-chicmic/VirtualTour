@@ -255,3 +255,95 @@ export function homographyToMatrix3d(h: Mat3): string {
   const n = h.map((row) => row.map((v) => v / h[2][2]));
   return `matrix3d(${[n[0][0], n[1][0], 0, n[2][0], n[0][1], n[1][1], 0, n[2][1], 0, 0, 1, 0, n[0][2], n[1][2], 0, n[2][2]].join(',')})`;
 }
+
+// ---------------------------------------------------------------------------------------------
+// Camera type "compound" (addendum 1.3.2). Mirrors CompoundPath in modules/camera_path.py.
+// ---------------------------------------------------------------------------------------------
+export const ARC_SAMPLES = 512;
+export type Segment = { t0: number; t1: number; cx: number; cy: number; zoom: number };
+export type CompoundCamera = {
+  start: { cx: number; cy: number; zoom: number };
+  segments: Segment[];
+  timing: { s0: number; s1: number };
+};
+
+export function smootherstep(x: number): number {
+  const v = Math.min(1, Math.max(0, x));
+  return v * v * v * (v * (6 * v - 15) + 10);
+}
+
+export function cornerRmsPx(
+  a: number[], b: number[], sourceW: number, sourceH: number, outW: number, outH: number
+): number {
+  const [bw, bh] = baseWindow(sourceW, sourceH, outW, outH);
+  let acc = 0;
+  const wa = bw / a[2], ha = bh / a[2], wb = bw / b[2], hb = bh / b[2];
+  const scale = 0.5 * (outW / (wa * sourceW) + outW / (wb * sourceW));
+  for (const sx of [-0.5, 0.5]) {
+    for (const sy of [-0.5, 0.5]) {
+      const dx = ((b[0] + sx * wb) - (a[0] + sx * wa)) * sourceW;
+      const dy = ((b[1] + sy * hb) - (a[1] + sy * ha)) * sourceH;
+      acc += dx * dx + dy * dy;
+    }
+  }
+  return Math.sqrt(acc / 4) * scale;
+}
+
+export class CompoundPath {
+  c0: number[];
+  segs: { t0: number; t1: number; d: number[] }[];
+  s0: number;
+  s1: number;
+  table: number[];
+  distance: number;
+
+  constructor(cam: CompoundCamera, sourceW: number, sourceH: number, outW: number, outH: number) {
+    this.c0 = [cam.start.cx, cam.start.cy, Math.log(cam.start.zoom)];
+    let prev = this.c0;
+    this.segs = cam.segments.map((s) => {
+      const tgt = [s.cx, s.cy, Math.log(s.zoom)];
+      const seg = { t0: s.t0, t1: s.t1, d: [tgt[0] - prev[0], tgt[1] - prev[1], tgt[2] - prev[2]] };
+      prev = tgt;
+      return seg;
+    });
+    this.s0 = cam.timing.s0;
+    this.s1 = cam.timing.s1;
+    this.table = [0];
+    let last = this.atU(0);
+    for (let j = 1; j <= ARC_SAMPLES; j++) {
+      const cur = this.atU(j / ARC_SAMPLES);
+      this.table.push(this.table[j - 1] + cornerRmsPx(last, cur, sourceW, sourceH, outW, outH));
+      last = cur;
+    }
+    this.distance = this.table[ARC_SAMPLES];
+  }
+
+  atU(u: number): number[] {
+    let [cx, cy, lz] = this.c0;
+    for (const s of this.segs) {
+      const w = smootherstep((u - s.t0) / (s.t1 - s.t0));
+      cx += s.d[0] * w;
+      cy += s.d[1] * w;
+      lz += s.d[2] * w;
+    }
+    return [cx, cy, Math.exp(lz)];
+  }
+
+  uAt(t: number): number {
+    if (this.distance <= 0) return 0;
+    const target = hermiteProfile(t, this.s0, this.s1) * this.distance;
+    let lo = 0, hi = ARC_SAMPLES;
+    while (hi - lo > 1) {
+      const mid = Math.floor((lo + hi) / 2);
+      if (this.table[mid] <= target) lo = mid; else hi = mid;
+    }
+    const seg = this.table[hi] - this.table[lo];
+    const frac = seg <= 0 ? 0 : (target - this.table[lo]) / seg;
+    return Math.min(1, (lo + frac) / ARC_SAMPLES);
+  }
+
+  at(t: number) {
+    const [cx, cy, zoom] = this.atU(this.uAt(t));
+    return { cx, cy, zoom, roll: 0 };
+  }
+}

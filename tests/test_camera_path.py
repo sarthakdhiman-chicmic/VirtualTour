@@ -179,3 +179,94 @@ def test_rotate_path_bounds_checked():
                                                                    for k in cam["keyframes"]])))
     with pytest.raises(ValueError, match="out of bounds"):
         parse_plan(_plan_13(cam))
+
+
+# ---- camera type "compound" (addendum 1.3.2) ---------------------------------------------------
+from modules.camera_path import CompoundPath, corner_rms_px, hermite_slope_max  # noqa: E402
+
+COMPOUNDS = [
+    ({"cx": 0.5, "cy": 0.5, "zoom": 1.1}, [{"t0": 0, "t1": 0.4, "cx": 0.39, "cy": 0.6, "zoom": 1.3},
+     {"t0": 0.26, "t1": 0.76, "cx": 0.61, "cy": 0.6, "zoom": 1.3}, {"t0": 0.62, "t1": 1, "cx": 0.5, "cy": 0.5, "zoom": 1.012}],
+     {"s0": 0.5, "s1": 0.5}),
+    ({"cx": 0.4, "cy": 0.66, "zoom": 1.32}, [{"t0": 0, "t1": 0.68, "cx": 0.6, "cy": 0.5, "zoom": 1.24},
+     {"t0": 0.56, "t1": 1, "cx": 0.5, "cy": 0.5, "zoom": 1.012}], {"s0": 0.4, "s1": 0.7}),
+    ({"cx": 0.5, "cy": 0.5, "zoom": 1.03}, [{"t0": 0, "t1": 1, "cx": 0.52, "cy": 0.48, "zoom": 1.14}], {"s0": 1, "s1": 1}),
+]
+
+
+def _frame_speeds(path, n=200):
+    fr = path.frames(n)
+    return [corner_rms_px(a, b, 1920, 1280, 1920, 1080) for a, b in zip(fr, fr[1:])]
+
+
+@pytest.mark.parametrize("start, segs, timing", COMPOUNDS)
+def test_compound_endpoints_and_speed_profile(start, segs, timing):
+    p = CompoundPath(start, segs, timing, 1920, 1280, 1920, 1080)
+    a, b = p.at(0), p.at(1)
+    assert max(abs(x - y) for x, y in zip(a, (start["cx"], start["cy"], start["zoom"]))) < 1e-12
+    assert max(abs(x - y) for x, y in zip(b, (segs[-1]["cx"], segs[-1]["cy"], segs[-1]["zoom"]))) < 1e-9
+    sp = _frame_speeds(p)
+    mean = p.distance / 199
+    # the speed on screen follows the timing curve: s0 * mean at the start, s1 * mean at the cut,
+    # never above max(hermite') * mean, and never zero in between (no stop mid-shot)
+    assert abs(sp[0] - timing["s0"] * mean) < 0.05 * mean + 0.02
+    assert abs(sp[-1] - timing["s1"] * mean) < 0.05 * mean + 0.02
+    assert max(sp) <= hermite_slope_max(timing["s0"], timing["s1"]) * mean * 1.03
+    assert min(sp) > 0.25 * mean
+
+
+def test_compound_slope_above_1_slows_the_middle():
+    # why the planner caps s0, s1 at 1: at 3 the timing curve stops dead mid-shot
+    start, segs, _ = COMPOUNDS[2]
+    sp = _frame_speeds(CompoundPath(start, segs, {"s0": 3, "s1": 3}, 1920, 1280, 1920, 1080))
+    assert min(sp) < 0.01 * max(sp)
+
+
+def test_compound_python_typescript_parity():
+    with tempfile.TemporaryDirectory() as td:
+        bundle = os.path.join(td, "math.cjs")
+        subprocess.run([os.path.join(REMOTION, "node_modules", ".bin", "esbuild"), "src/math.ts", "--bundle",
+                        "--format=cjs", "--platform=node", f"--outfile={bundle}"], cwd=REMOTION, check=True,
+                       capture_output=True)
+        cams = [{"start": a, "segments": b, "timing": c} for a, b, c in COMPOUNDS]
+        script = (f"const m=require({json.dumps(bundle)});const C={json.dumps(cams)};const T={json.dumps(T_SAMPLES)};"
+                  "console.log(JSON.stringify(C.map(c=>{const p=new m.CompoundPath(c,1920,1280,1920,1080);"
+                  "return T.map(t=>{const s=p.at(t);return [s.cx,s.cy,s.zoom]})})))")
+        out = json.loads(subprocess.run(["node", "-e", script], check=True, capture_output=True, text=True).stdout)
+    worst = 0.0
+    for (a, b, c), js in zip(COMPOUNDS, out):
+        p = CompoundPath(a, b, c, 1920, 1280, 1920, 1080)
+        for t, v in zip(T_SAMPLES, js):
+            worst = max(worst, max(abs(x - y) for x, y in zip(p.at(t), v)))
+    assert worst < 1e-9, worst
+
+
+CP = {"type": "compound", "move": "swoop", "start": COMPOUNDS[0][0], "segments": COMPOUNDS[0][1],
+      "timing": COMPOUNDS[0][2]}
+
+
+def test_compound_accepted_in_13_and_rejected_before():
+    assert parse_plan(_plan_13(CP)).shots[0].camera.type == "compound"
+    with pytest.raises(ValueError, match="unsupported_camera_type"):
+        parse_plan(_plan_13(CP, "1.2"))
+
+
+@pytest.mark.parametrize("mutate, msg", [
+    (lambda c: dict(c, segments=[]), "1-4 segments"),
+    (lambda c: dict(c, segments=[dict(c["segments"][0], t0=0.1)] + c["segments"][1:]), "first segment t0"),
+    (lambda c: dict(c, segments=c["segments"][:-1] + [dict(c["segments"][-1], t1=0.9)]), "last t1"),
+    (lambda c: dict(c, segments=[c["segments"][0], dict(c["segments"][1], t1=0.3), c["segments"][2]]),
+     "non-decreasing"),
+    (lambda c: dict(c, timing={"s0": 3.5, "s1": 1}), "timing s0"),
+    (lambda c: {k: v for k, v in c.items() if k != "timing"}, "needs start, segments and timing"),
+])
+def test_compound_rules(mutate, msg):
+    with pytest.raises(ValueError, match=msg):
+        parse_plan(_plan_13(mutate(copy.deepcopy(CP))))
+
+
+def test_compound_out_of_bounds_rejected():
+    cam = copy.deepcopy(CP)
+    cam["segments"][0].update(cx=0.2, zoom=1.3)   # window leaves the left edge
+    with pytest.raises(ValueError, match="out of bounds"):
+        parse_plan(_plan_13(cam))

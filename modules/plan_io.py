@@ -1,7 +1,7 @@
 import hashlib
 import json
 
-from modules.camera_path import PROJECTIONS, KeyframePath, base_window, frame_margin_out_px, validate_keyframes
+from modules.camera_path import PROJECTIONS, CompoundPath, KeyframePath, validate_compound, base_window, frame_margin_out_px, validate_keyframes
 from typing import List, Optional, Literal, Dict, Any
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -32,6 +32,19 @@ class Keyframe(BaseModel):
     zoom: float
     model_config = ConfigDict(extra='ignore')
 
+class Segment(BaseModel):
+    t0: float
+    t1: float
+    cx: float
+    cy: float
+    zoom: float
+    model_config = ConfigDict(extra='ignore')
+
+class Timing(BaseModel):
+    s0: float
+    s1: float
+    model_config = ConfigDict(extra='ignore')
+
 class Camera(BaseModel):
     type: str
     easing: str = "ease_in_out"
@@ -46,6 +59,9 @@ class Camera(BaseModel):
     # photo's assumed horizontal field of view for "rotate" (modules/camera_path.py)
     projection: Optional[str] = None
     hfov_deg: Optional[float] = None
+    # compound (addendum 1.3.2): start + segments + timing (modules/camera_path.py)
+    segments: Optional[List[Segment]] = None
+    timing: Optional[Timing] = None
     model_config = ConfigDict(extra='ignore')
 
 class Transition(BaseModel):
@@ -104,7 +120,7 @@ def validate_plan_hash(original_dict: dict):
         raise ValueError(f"plan_hash mismatch: expected {computed}, got {expected}")
 
 CAMERA_TYPES = {"1.0": {"ken_burns"}, "1.1": {"ken_burns"}, "1.2": {"ken_burns"},
-                "1.3": {"ken_burns", "keyframe_path"}}
+                "1.3": {"ken_burns", "keyframe_path", "compound"}}
 
 def check_camera_type(plan: Plan):
     allowed = CAMERA_TYPES.get(plan.plan_version, {"ken_burns"})
@@ -117,6 +133,13 @@ def check_camera_type(plan: Plan):
             if not shot.camera.move:
                 raise ValueError(f"invalid_plan: keyframe_path camera in shot {shot.shot_id} needs a move name")
             validate_keyframes([k.model_dump() for k in (shot.camera.keyframes or [])])
+        if shot.camera.type == "compound":
+            if not shot.camera.move:
+                raise ValueError(f"invalid_plan: compound camera in shot {shot.shot_id} needs a move name")
+            validate_compound(shot.camera.start.model_dump() if shot.camera.start else None,
+                              [s.model_dump() for s in (shot.camera.segments or [])],
+                              shot.camera.timing.model_dump() if shot.camera.timing else None)
+        if shot.camera.type in ("keyframe_path", "compound"):
             if shot.camera.projection is not None and shot.camera.projection not in PROJECTIONS:
                 raise ValueError(f"unsupported_projection: {shot.camera.projection}")
             if shot.camera.hfov_deg is not None and not 20 <= shot.camera.hfov_deg <= 120:
@@ -128,15 +151,23 @@ def _projection_kwargs(camera) -> dict:
         kw["hfov_deg"] = camera.hfov_deg
     return kw
 
+def compound_path(shot, out_w: int, out_h: int) -> CompoundPath:
+    c = shot.camera
+    return CompoundPath(c.start.model_dump(), [s.model_dump() for s in c.segments], c.timing.model_dump(),
+                        shot.source.width, shot.source.height, out_w, out_h)
+
 def check_path_bounds(plan: Plan):
     """keyframe_path: the window must stay inside the image at every rendered frame (the planner
     adds its own 1 px margin on top). Frames are the shot's render span, as in modules.timeline."""
     from modules.timeline import compute_timeline
     timeline = compute_timeline(plan)
     for shot, tl in zip(plan.shots, timeline):
-        if shot.camera.type != "keyframe_path":
+        if shot.camera.type == "compound":
+            path = compound_path(shot, plan.output.width, plan.output.height)
+        elif shot.camera.type == "keyframe_path":
+            path = KeyframePath([k.model_dump() for k in shot.camera.keyframes])
+        else:
             continue
-        path = KeyframePath([k.model_dump() for k in shot.camera.keyframes])
         for cx, cy, z in path.frames(tl["render_frames"]):
             m = frame_margin_out_px(cx, cy, z, shot.source.width, shot.source.height,
                                     plan.output.width, plan.output.height, **_projection_kwargs(shot.camera))
@@ -154,7 +185,9 @@ def check_bounds(plan: Plan):
             rect_w = 1.0
             rect_h = src_ratio / out_ratio
 
-        if shot.camera.type == "keyframe_path":
+        if shot.camera.type == "compound":
+            points = [shot.camera.start] + list(shot.camera.segments or [])
+        elif shot.camera.type == "keyframe_path":
             points = shot.camera.keyframes or []
         else:
             points = [p for p in (shot.camera.start, shot.camera.end) if p is not None]
@@ -172,7 +205,7 @@ def check_bounds(plan: Plan):
 def check_easing(plan: Plan):
     valid_easings = {"linear", "ease_in", "ease_out", "ease_in_out"}
     for shot in plan.shots:
-        if shot.camera.type == "keyframe_path":
+        if shot.camera.type in ("keyframe_path", "compound"):
             continue  # fixed global time profile (modules/camera_path.py)
         if shot.camera.easing not in valid_easings:
             raise ValueError(f"unsupported_easing: {shot.camera.easing}")

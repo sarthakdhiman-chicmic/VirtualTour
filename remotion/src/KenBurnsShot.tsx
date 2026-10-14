@@ -1,7 +1,8 @@
 import { AbsoluteFill, Img, useCurrentFrame, staticFile } from 'remotion';
-import React from 'react';
+import React, { useMemo } from 'react';
 import { windowToTransform, interpolateEasing, cameraAt, rollFitScale, keyframePathAt, CameraPoint, Keyframe,
-  rotateHomography, invert3, homographyToMatrix3d, DEFAULT_HFOV_DEG } from './math';
+  rotateHomography, invert3, homographyToMatrix3d, DEFAULT_HFOV_DEG,
+  CompoundPath, CompoundCamera } from './math';
 
 export const KenBurnsShot: React.FC<{
   durationFrames: number;
@@ -18,6 +19,9 @@ export const KenBurnsShot: React.FC<{
     keyframes?: Keyframe[];
     projection?: string; // 'crop' (default) | 'rotate' (addendum 1.3.1)
     hfov_deg?: number;
+    // compound (addendum 1.3.2): start + segments + timing
+    segments?: CompoundCamera['segments'];
+    timing?: CompoundCamera['timing'];
   };
   width: number;
   height: number;
@@ -25,12 +29,20 @@ export const KenBurnsShot: React.FC<{
   const frame = useCurrentFrame();
   const rawT = frame / Math.max(1, durationFrames - 1);
   const t = Math.max(0, Math.min(1, rawT));
-  const { cx, cy, zoom, roll } = camera.type === 'keyframe_path'
+  const compound = useMemo(
+    () => (camera.type === 'compound'
+      ? new CompoundPath(camera as unknown as CompoundCamera, source.width, source.height, width, height)
+      : null),
+    [camera, source.width, source.height, width, height]
+  );
+  const { cx, cy, zoom, roll } = compound
+    ? compound.at(t)
+    : camera.type === 'keyframe_path'
     ? keyframePathAt(camera.keyframes as Keyframe[], t)
     : cameraAt(camera.start as CameraPoint, camera.end as CameraPoint,
         interpolateEasing(t, camera.easing ?? 'ease_in_out'));
 
-  if (camera.type === 'keyframe_path' && camera.projection === 'rotate') {
+  if ((camera.type === 'keyframe_path' || camera.type === 'compound') && camera.projection === 'rotate') {
     // camera turning in place: the photo reprojected onto a camera aimed at (cx, cy).
     // NOT deterministic: two full renders differed in ~300 of 2100 frames (one render chunk,
     // mean abs diff 1-2.4 levels); will-change: transform did not fix it (out/tour_v3/report.md)

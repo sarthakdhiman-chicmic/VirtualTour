@@ -209,3 +209,122 @@ def frame_spp(cx, cy, zoom, src_w, src_h, out_w, out_h, projection="crop", hfov_
         uy, vy = apply_homography(m, x, y + 1)
         out.append(math.sqrt(abs((ux - u0) * (vy - v0) - (uy - u0) * (vx - v0))))
     return min(out)
+
+
+# ---------------------------------------------------------------------------------------------
+# camera type "compound" (addendum 1.3.2). Mirrors compoundPathAt in remotion/src/math.ts.
+#
+#   camera: {type: "compound", move, start: {cx, cy, zoom},
+#            segments: [{t0, t1, cx, cy, zoom}, ...],   1-4, t0 non-decreasing, first t0 = 0,
+#            timing: {s0, s1}}                          last t1 = 1, 0 <= s0, s1 <= 3
+#
+# Shape: each segment moves the camera from the previous segment's target to its own over its
+# own window [t0, t1] of the path parameter u (smootherstep weight; cx, cy linear, zoom in log
+# space). Overlapping windows blend one phase into the next, so corners are rounded and the
+# camera never comes to rest between phases. The end state is the last segment's target.
+# Timing: the path is re-timed by visual distance (RMS displacement of the frame's corners, in
+# output px), and the fraction of distance covered at raw shot progress t is a cubic Hermite with
+# start slope s0 and end slope s1 (in units of the shot's mean speed; monotone for s <= 3). The
+# speed on screen is therefore set by the plan: s0 * mean at the first frame, s1 * mean at the
+# cut, and at most max(hermite') * mean in between.
+# ---------------------------------------------------------------------------------------------
+ARC_SAMPLES = 512
+
+
+def smootherstep(x: float) -> float:
+    x = min(1.0, max(0.0, x))
+    return x * x * x * (x * (6 * x - 15) + 10)
+
+
+def hermite_slope_max(s0: float, s1: float, steps: int = 2000) -> float:
+    return max(hermite_profile_slope(i / steps, s0, s1) for i in range(steps + 1))
+
+
+def corner_rms_px(a, b, src_w, src_h, out_w, out_h) -> float:
+    """Visual distance between two crop states: RMS displacement of the frame's four corners in
+    output px (zoom is measured at the mean of the two states' scales)."""
+    bw, bh = base_window(src_w, src_h, out_w, out_h)
+    acc = 0.0
+    wa, ha, wb, hb = bw / a[2], bh / a[2], bw / b[2], bh / b[2]
+    scale = 0.5 * (out_w / (wa * src_w) + out_w / (wb * src_w))
+    for sx in (-0.5, 0.5):
+        for sy in (-0.5, 0.5):
+            dx = ((b[0] + sx * wb) - (a[0] + sx * wa)) * src_w
+            dy = ((b[1] + sy * hb) - (a[1] + sy * ha)) * src_h
+            acc += dx * dx + dy * dy
+    return math.sqrt(acc / 4) * scale
+
+
+class CompoundPath:
+    def __init__(self, start: dict, segments: list[dict], timing: dict, src_w: int, src_h: int,
+                 out_w: int, out_h: int):
+        self.c0 = (start["cx"], start["cy"], math.log(start["zoom"]))
+        prev = self.c0
+        self.segs = []
+        for s in segments:
+            tgt = (s["cx"], s["cy"], math.log(s["zoom"]))
+            self.segs.append((s["t0"], s["t1"], tuple(t - p for t, p in zip(tgt, prev))))
+            prev = tgt
+        self.s0, self.s1 = timing["s0"], timing["s1"]
+        self.dims = (src_w, src_h, out_w, out_h)
+        self.table = [0.0]
+        last = self.at_u(0.0)
+        for j in range(1, ARC_SAMPLES + 1):
+            cur = self.at_u(j / ARC_SAMPLES)
+            self.table.append(self.table[-1] + corner_rms_px(last, cur, *self.dims))
+            last = cur
+        self.distance = self.table[-1]
+
+    def at_u(self, u: float) -> tuple[float, float, float]:
+        cx, cy, lz = self.c0
+        for t0, t1, (dx, dy, dz) in self.segs:
+            w = smootherstep((u - t0) / (t1 - t0))
+            cx += dx * w
+            cy += dy * w
+            lz += dz * w
+        return cx, cy, math.exp(lz)
+
+    def u_at(self, t: float) -> float:
+        if self.distance <= 0:
+            return 0.0
+        target = hermite_profile(t, self.s0, self.s1) * self.distance
+        lo, hi = 0, ARC_SAMPLES
+        while hi - lo > 1:
+            mid = (lo + hi) // 2
+            if self.table[mid] <= target:
+                lo = mid
+            else:
+                hi = mid
+        seg = self.table[hi] - self.table[lo]
+        frac = 0.0 if seg <= 0 else (target - self.table[lo]) / seg
+        return min(1.0, (lo + frac) / ARC_SAMPLES)
+
+    def at(self, t: float) -> tuple[float, float, float]:
+        return self.at_u(self.u_at(t))
+
+    def frames(self, n: int) -> list[tuple[float, float, float]]:
+        return [self.at(f / max(1, n - 1)) for f in range(n)]
+
+
+def validate_compound(start: dict | None, segments: list[dict], timing: dict | None) -> None:
+    if start is None or timing is None:
+        raise ValueError("compound camera needs start, segments and timing")
+    if not 1 <= len(segments) <= 4:
+        raise ValueError(f"compound camera needs 1-4 segments, got {len(segments)}")
+    if segments[0]["t0"] != 0 or segments[-1]["t1"] != 1:
+        raise ValueError("compound camera: first segment t0 must be 0 and last t1 must be 1")
+    for a, b in zip(segments, segments[1:]):
+        if b["t0"] < a["t0"] or b["t1"] < a["t1"]:
+            # with both non-decreasing the weights are ordered, so every frame is a convex blend
+            # of the targets (each inside the image, crop windows form a convex set)
+            raise ValueError("compound camera: segment t0 and t1 must be non-decreasing")
+    for s in segments:
+        if not 0 <= s["t0"] < s["t1"] <= 1:
+            raise ValueError("compound camera: each segment needs 0 <= t0 < t1 <= 1")
+        if s["zoom"] <= 0:
+            raise ValueError("compound camera: zoom must be positive")
+    if start["zoom"] <= 0:
+        raise ValueError("compound camera: zoom must be positive")
+    for k in ("s0", "s1"):
+        if not 0 <= timing[k] <= 3:
+            raise ValueError(f"compound camera: timing {k} must be 0-3 (monotone)")
