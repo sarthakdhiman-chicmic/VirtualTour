@@ -264,8 +264,26 @@ export type Segment = { t0: number; t1: number; cx: number; cy: number; zoom: nu
 export type CompoundCamera = {
   start: { cx: number; cy: number; zoom: number };
   segments: Segment[];
-  timing: { s0: number; s1: number };
+  timing: { s0: number; s1: number; turn?: number };
 };
+export const TURN_SMOOTH = 40;
+
+export function motionPx(
+  a: number[], b: number[], sourceW: number, sourceH: number, outW: number, outH: number
+): number[] {
+  const [bw] = baseWindow(sourceW, sourceH, outW, outH);
+  const k = outW / (bw / a[2] * sourceW);
+  return [(b[0] - a[0]) * sourceW * k, (b[1] - a[1]) * sourceH * k,
+    Math.log(b[2] / a[2]) * Math.hypot(outW, outH) / 2];
+}
+
+export function vecAngle(a: number[], b: number[]): number {
+  const na = Math.sqrt(a[0] * a[0] + a[1] * a[1] + a[2] * a[2]);
+  const nb = Math.sqrt(b[0] * b[0] + b[1] * b[1] + b[2] * b[2]);
+  if (na * nb <= 1e-12) return 0;
+  const c = (a[0] * b[0] + a[1] * b[1] + a[2] * b[2]) / (na * nb);
+  return Math.acos(Math.max(-1, Math.min(1, c)));
+}
 
 export function smootherstep(x: number): number {
   const v = Math.min(1, Math.max(0, x));
@@ -294,8 +312,10 @@ export class CompoundPath {
   segs: { t0: number; t1: number; d: number[] }[];
   s0: number;
   s1: number;
+  turn: number;
   table: number[];
   distance: number;
+  cost: number;
 
   constructor(cam: CompoundCamera, sourceW: number, sourceH: number, outW: number, outH: number) {
     this.c0 = [cam.start.cx, cam.start.cy, Math.log(cam.start.zoom)];
@@ -308,14 +328,28 @@ export class CompoundPath {
     });
     this.s0 = cam.timing.s0;
     this.s1 = cam.timing.s1;
-    this.table = [0];
-    let last = this.atU(0);
-    for (let j = 1; j <= ARC_SAMPLES; j++) {
-      const cur = this.atU(j / ARC_SAMPLES);
-      this.table.push(this.table[j - 1] + cornerRmsPx(last, cur, sourceW, sourceH, outW, outH));
-      last = cur;
+    this.turn = cam.timing.turn ?? 0;
+    const states: number[][] = [];
+    for (let j = 0; j <= ARC_SAMPLES; j++) states.push(this.atU(j / ARC_SAMPLES));
+    const dist: number[] = [];
+    for (let j = 1; j <= ARC_SAMPLES; j++) dist.push(cornerRmsPx(states[j - 1], states[j], sourceW, sourceH, outW, outH));
+    this.distance = dist.reduce((acc, d) => acc + d, 0);
+    let cost = dist;
+    if (this.turn > 0) {
+      const vec: number[][] = [];
+      for (let j = 1; j <= ARC_SAMPLES; j++) vec.push(motionPx(states[j - 1], states[j], sourceW, sourceH, outW, outH));
+      const theta: number[] = new Array(ARC_SAMPLES).fill(0);
+      for (let j = 0; j < ARC_SAMPLES - 1; j++) theta[j] = vecAngle(vec[j], vec[j + 1]);
+      const r = TURN_SMOOTH;
+      cost = dist.map((d, j) => {
+        let acc = 0;
+        for (let i = Math.max(0, j - r); i < Math.min(ARC_SAMPLES, j + r + 1); i++) acc += theta[i];
+        return d + this.turn * acc / (2 * r + 1);
+      });
     }
-    this.distance = this.table[ARC_SAMPLES];
+    this.table = [0];
+    for (const c of cost) this.table.push(this.table[this.table.length - 1] + c);
+    this.cost = this.table[ARC_SAMPLES];
   }
 
   atU(u: number): number[] {
@@ -330,8 +364,8 @@ export class CompoundPath {
   }
 
   uAt(t: number): number {
-    if (this.distance <= 0) return 0;
-    const target = hermiteProfile(t, this.s0, this.s1) * this.distance;
+    if (this.cost <= 0) return 0;
+    const target = hermiteProfile(t, this.s0, this.s1) * this.cost;
     let lo = 0, hi = ARC_SAMPLES;
     while (hi - lo > 1) {
       const mid = Math.floor((lo + hi) / 2);

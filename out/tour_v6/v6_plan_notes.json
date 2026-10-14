@@ -1,0 +1,1729 @@
+{
+ "summary": {
+  "score": 34.688,
+  "variants": [
+   "tilt_up",
+   "pan",
+   "tilt_up",
+   "tilt_down",
+   "pan",
+   "tilt_up",
+   "pull_back",
+   "pan",
+   "tilt_down",
+   "pull_back",
+   "pan",
+   "tilt_up",
+   "pull_back"
+  ],
+  "travel": [
+   1,
+   -1,
+   1,
+   -1,
+   1,
+   -1,
+   1,
+   -1,
+   1,
+   -1,
+   1,
+   -1,
+   1
+  ],
+  "categories": [
+   "exterior",
+   "wide",
+   "wide",
+   "medium",
+   "medium",
+   "wide",
+   "tight",
+   "wide",
+   "tight",
+   "bath",
+   "tight",
+   "wide",
+   "final"
+  ],
+  "spread_median": 0.4022,
+  "spread_q25": 0.3688,
+  "total_duration_s": 75.0
+ },
+ "shots": [
+  {
+   "shot_id": "s01",
+   "room_type": "exterior",
+   "role": "hero",
+   "category": "exterior",
+   "variant": "tilt_up",
+   "d": 1,
+   "travel": 1,
+   "suit": 3.5,
+   "interest": -0.0164,
+   "duration_s": 5.29,
+   "frames": [
+    0,
+    159
+   ],
+   "zoom_capped": [
+    {
+     "t": 0,
+     "from": 1.32,
+     "to": 1.3068,
+     "why": "spp"
+    },
+    {
+     "t": 0.62,
+     "from": 1.24,
+     "to": 1.2276,
+     "why": "spp"
+    },
+    {
+     "t": 0,
+     "from": 1.3068,
+     "to": 1.293732,
+     "why": "spp"
+    },
+    {
+     "t": 0.62,
+     "from": 1.2276,
+     "to": 1.215324,
+     "why": "spp"
+    },
+    {
+     "t": 0,
+     "from": 1.293732,
+     "to": 1.280795,
+     "why": "spp"
+    },
+    {
+     "t": 0.62,
+     "from": 1.215324,
+     "to": 1.203171,
+     "why": "spp"
+    },
+    {
+     "t": 0,
+     "from": 1.280795,
+     "to": 1.267987,
+     "why": "spp"
+    },
+    {
+     "t": 0.62,
+     "from": 1.203171,
+     "to": 1.191139,
+     "why": "spp"
+    },
+    {
+     "t": 0,
+     "from": 1.267987,
+     "to": 1.255307,
+     "why": "spp"
+    },
+    {
+     "t": 0.62,
+     "from": 1.191139,
+     "to": 1.179228,
+     "why": "spp"
+    },
+    {
+     "t": 0,
+     "from": 1.255307,
+     "to": 1.242754,
+     "why": "spp"
+    },
+    {
+     "t": 0.62,
+     "from": 1.179228,
+     "to": 1.167436,
+     "why": "spp"
+    },
+    {
+     "t": 0,
+     "from": 1.242754,
+     "to": 1.230326,
+     "why": "spp"
+    },
+    {
+     "t": 0.62,
+     "from": 1.167436,
+     "to": 1.155762,
+     "why": "spp"
+    },
+    {
+     "t": 0,
+     "from": 1.230326,
+     "to": 1.218023,
+     "why": "spp"
+    },
+    {
+     "t": 0.62,
+     "from": 1.155762,
+     "to": 1.144204,
+     "why": "spp"
+    },
+    {
+     "t": 0,
+     "from": 1.218023,
+     "to": 1.205843,
+     "why": "spp"
+    },
+    {
+     "t": 0.62,
+     "from": 1.144204,
+     "to": 1.132762,
+     "why": "spp"
+    }
+   ],
+   "shrink_scale": 0.9,
+   "min_margin_out_px": 2.9545,
+   "min_spp": 0.7585,
+   "speed_scale": 0.8,
+   "speed_first_px_f": 2.989,
+   "speed_max_px_f": 3.298,
+   "speed_min_px_f": 0.932,
+   "speed_cut_px_f": 1.608,
+   "turn_max_deg_f": 3.414,
+   "zoom_start_end": [
+    1.16431,
+    1.012
+   ],
+   "keyframes": [
+    {
+     "t": 0,
+     "cx": 0.464816,
+     "cy": 0.551528,
+     "zoom": 1.16431
+    },
+    {
+     "t": 0.62,
+     "cx": 0.523828,
+     "cy": 0.476233,
+     "zoom": 1.107508
+    },
+    {
+     "t": 1,
+     "cx": 0.49721,
+     "cy": 0.5,
+     "zoom": 1.012
+    }
+   ]
+  },
+  {
+   "shot_id": "s02",
+   "room_type": "living_room",
+   "role": "hero",
+   "category": "wide",
+   "variant": "pan",
+   "d": -1,
+   "travel": -1,
+   "suit": 3.0,
+   "interest": 0.465,
+   "duration_s": 6.73,
+   "frames": [
+    159,
+    361
+   ],
+   "zoom_capped": [
+    {
+     "t": 0,
+     "from": 1.32,
+     "to": 1.3068,
+     "why": "spp"
+    },
+    {
+     "t": 0.62,
+     "from": 1.24,
+     "to": 1.2276,
+     "why": "spp"
+    },
+    {
+     "t": 0,
+     "from": 1.3068,
+     "to": 1.293732,
+     "why": "spp"
+    },
+    {
+     "t": 0.62,
+     "from": 1.2276,
+     "to": 1.215324,
+     "why": "spp"
+    },
+    {
+     "t": 0,
+     "from": 1.293732,
+     "to": 1.280795,
+     "why": "spp"
+    },
+    {
+     "t": 0.62,
+     "from": 1.215324,
+     "to": 1.203171,
+     "why": "spp"
+    },
+    {
+     "t": 0,
+     "from": 1.280795,
+     "to": 1.267987,
+     "why": "spp"
+    },
+    {
+     "t": 0.62,
+     "from": 1.203171,
+     "to": 1.191139,
+     "why": "spp"
+    },
+    {
+     "t": 0,
+     "from": 1.267987,
+     "to": 1.255307,
+     "why": "spp"
+    },
+    {
+     "t": 0.62,
+     "from": 1.191139,
+     "to": 1.179228,
+     "why": "spp"
+    },
+    {
+     "t": 0,
+     "from": 1.255307,
+     "to": 1.242754,
+     "why": "spp"
+    },
+    {
+     "t": 0.62,
+     "from": 1.179228,
+     "to": 1.167436,
+     "why": "spp"
+    },
+    {
+     "t": 0,
+     "from": 1.242754,
+     "to": 1.230326,
+     "why": "spp"
+    },
+    {
+     "t": 0.62,
+     "from": 1.167436,
+     "to": 1.155762,
+     "why": "spp"
+    },
+    {
+     "t": 0,
+     "from": 1.230326,
+     "to": 1.218023,
+     "why": "spp"
+    },
+    {
+     "t": 0.62,
+     "from": 1.155762,
+     "to": 1.144204,
+     "why": "spp"
+    }
+   ],
+   "shrink_scale": 0.9,
+   "min_margin_out_px": 2.9545,
+   "min_spp": 0.7648,
+   "speed_scale": 1.0,
+   "speed_first_px_f": 2.876,
+   "speed_max_px_f": 3.169,
+   "speed_min_px_f": 0.957,
+   "speed_cut_px_f": 1.716,
+   "turn_max_deg_f": 2.523,
+   "zoom_start_end": [
+    1.218023,
+    1.012
+   ],
+   "keyframes": [
+    {
+     "t": 0,
+     "cx": 0.553811,
+     "cy": 0.5,
+     "zoom": 1.218023
+    },
+    {
+     "t": 0.62,
+     "cx": 0.463073,
+     "cy": 0.5,
+     "zoom": 1.144204
+    },
+    {
+     "t": 1,
+     "cx": 0.50279,
+     "cy": 0.5,
+     "zoom": 1.012
+    }
+   ]
+  },
+  {
+   "shot_id": "s03",
+   "room_type": "living_room",
+   "role": "detail",
+   "category": "wide",
+   "variant": "tilt_up",
+   "d": 1,
+   "travel": 1,
+   "suit": 3.0,
+   "interest": 0.5997,
+   "duration_s": 6.73,
+   "frames": [
+    361,
+    562
+   ],
+   "zoom_capped": [
+    {
+     "t": 0,
+     "from": 1.32,
+     "to": 1.3068,
+     "why": "spp"
+    },
+    {
+     "t": 0.62,
+     "from": 1.24,
+     "to": 1.2276,
+     "why": "spp"
+    },
+    {
+     "t": 0,
+     "from": 1.3068,
+     "to": 1.293732,
+     "why": "spp"
+    },
+    {
+     "t": 0.62,
+     "from": 1.2276,
+     "to": 1.215324,
+     "why": "spp"
+    },
+    {
+     "t": 0,
+     "from": 1.293732,
+     "to": 1.280795,
+     "why": "spp"
+    },
+    {
+     "t": 0.62,
+     "from": 1.215324,
+     "to": 1.203171,
+     "why": "spp"
+    },
+    {
+     "t": 0,
+     "from": 1.280795,
+     "to": 1.267987,
+     "why": "spp"
+    },
+    {
+     "t": 0.62,
+     "from": 1.203171,
+     "to": 1.191139,
+     "why": "spp"
+    },
+    {
+     "t": 0,
+     "from": 1.267987,
+     "to": 1.255307,
+     "why": "spp"
+    },
+    {
+     "t": 0.62,
+     "from": 1.191139,
+     "to": 1.179228,
+     "why": "spp"
+    },
+    {
+     "t": 0,
+     "from": 1.255307,
+     "to": 1.242754,
+     "why": "spp"
+    },
+    {
+     "t": 0.62,
+     "from": 1.179228,
+     "to": 1.167436,
+     "why": "spp"
+    },
+    {
+     "t": 0,
+     "from": 1.242754,
+     "to": 1.230326,
+     "why": "spp"
+    },
+    {
+     "t": 0.62,
+     "from": 1.167436,
+     "to": 1.155762,
+     "why": "spp"
+    },
+    {
+     "t": 0,
+     "from": 1.230326,
+     "to": 1.218023,
+     "why": "spp"
+    },
+    {
+     "t": 0.62,
+     "from": 1.155762,
+     "to": 1.144204,
+     "why": "spp"
+    },
+    {
+     "t": 0,
+     "from": 1.218023,
+     "to": 1.205843,
+     "why": "spp"
+    },
+    {
+     "t": 0.62,
+     "from": 1.144204,
+     "to": 1.132762,
+     "why": "spp"
+    }
+   ],
+   "shrink_scale": 0.9,
+   "min_margin_out_px": 2.9545,
+   "min_spp": 0.7585,
+   "speed_scale": 1.0,
+   "speed_first_px_f": 2.802,
+   "speed_max_px_f": 3.085,
+   "speed_min_px_f": 0.912,
+   "speed_cut_px_f": 1.582,
+   "turn_max_deg_f": 2.562,
+   "zoom_start_end": [
+    1.205843,
+    1.012
+   ],
+   "keyframes": [
+    {
+     "t": 0,
+     "cx": 0.456718,
+     "cy": 0.56441,
+     "zoom": 1.205843
+    },
+    {
+     "t": 0.62,
+     "cx": 0.53418,
+     "cy": 0.5,
+     "zoom": 1.132762
+    },
+    {
+     "t": 1,
+     "cx": 0.49721,
+     "cy": 0.5,
+     "zoom": 1.012
+    }
+   ]
+  },
+  {
+   "shot_id": "s04",
+   "room_type": "living_room",
+   "role": "detail",
+   "category": "medium",
+   "variant": "tilt_down",
+   "d": -1,
+   "travel": -1,
+   "suit": 2.0,
+   "interest": -0.0004,
+   "duration_s": 5.77,
+   "frames": [
+    562,
+    736
+   ],
+   "zoom_capped": [
+    {
+     "t": 0,
+     "from": 1.32,
+     "to": 1.3068,
+     "why": "spp"
+    },
+    {
+     "t": 0.62,
+     "from": 1.24,
+     "to": 1.2276,
+     "why": "spp"
+    },
+    {
+     "t": 0,
+     "from": 1.3068,
+     "to": 1.293732,
+     "why": "spp"
+    },
+    {
+     "t": 0.62,
+     "from": 1.2276,
+     "to": 1.215324,
+     "why": "spp"
+    },
+    {
+     "t": 0,
+     "from": 1.293732,
+     "to": 1.280795,
+     "why": "spp"
+    },
+    {
+     "t": 0.62,
+     "from": 1.215324,
+     "to": 1.203171,
+     "why": "spp"
+    },
+    {
+     "t": 0,
+     "from": 1.280795,
+     "to": 1.267987,
+     "why": "spp"
+    },
+    {
+     "t": 0.62,
+     "from": 1.203171,
+     "to": 1.191139,
+     "why": "spp"
+    },
+    {
+     "t": 0,
+     "from": 1.267987,
+     "to": 1.255307,
+     "why": "spp"
+    },
+    {
+     "t": 0.62,
+     "from": 1.191139,
+     "to": 1.179228,
+     "why": "spp"
+    },
+    {
+     "t": 0,
+     "from": 1.255307,
+     "to": 1.242754,
+     "why": "spp"
+    },
+    {
+     "t": 0.62,
+     "from": 1.179228,
+     "to": 1.167436,
+     "why": "spp"
+    },
+    {
+     "t": 0,
+     "from": 1.242754,
+     "to": 1.230326,
+     "why": "spp"
+    },
+    {
+     "t": 0.62,
+     "from": 1.167436,
+     "to": 1.155762,
+     "why": "spp"
+    },
+    {
+     "t": 0,
+     "from": 1.230326,
+     "to": 1.218023,
+     "why": "spp"
+    },
+    {
+     "t": 0.62,
+     "from": 1.155762,
+     "to": 1.144204,
+     "why": "spp"
+    },
+    {
+     "t": 0,
+     "from": 1.218023,
+     "to": 1.205843,
+     "why": "spp"
+    },
+    {
+     "t": 0.62,
+     "from": 1.144204,
+     "to": 1.132762,
+     "why": "spp"
+    }
+   ],
+   "shrink_scale": 0.9,
+   "min_margin_out_px": 2.9545,
+   "min_spp": 0.7585,
+   "speed_scale": 0.85,
+   "speed_first_px_f": 2.956,
+   "speed_max_px_f": 3.267,
+   "speed_min_px_f": 0.903,
+   "speed_cut_px_f": 1.573,
+   "turn_max_deg_f": 3.179,
+   "zoom_start_end": [
+    1.174557,
+    1.012
+   ],
+   "keyframes": [
+    {
+     "t": 0,
+     "cx": 0.537208,
+     "cy": 0.445251,
+     "zoom": 1.174557
+    },
+    {
+     "t": 0.62,
+     "cx": 0.474933,
+     "cy": 0.528478,
+     "zoom": 1.113769
+    },
+    {
+     "t": 1,
+     "cx": 0.50279,
+     "cy": 0.5,
+     "zoom": 1.012
+    }
+   ]
+  },
+  {
+   "shot_id": "s05",
+   "room_type": "kitchen",
+   "role": "hero",
+   "category": "medium",
+   "variant": "pan",
+   "d": 1,
+   "travel": 1,
+   "suit": 3.0,
+   "interest": 0.3362,
+   "duration_s": 5.77,
+   "frames": [
+    736,
+    909
+   ],
+   "zoom_capped": [
+    {
+     "t": 0,
+     "from": 1.32,
+     "to": 1.3068,
+     "why": "spp"
+    },
+    {
+     "t": 0.62,
+     "from": 1.24,
+     "to": 1.2276,
+     "why": "spp"
+    },
+    {
+     "t": 0,
+     "from": 1.3068,
+     "to": 1.293732,
+     "why": "spp"
+    },
+    {
+     "t": 0.62,
+     "from": 1.2276,
+     "to": 1.215324,
+     "why": "spp"
+    },
+    {
+     "t": 0,
+     "from": 1.293732,
+     "to": 1.280795,
+     "why": "spp"
+    },
+    {
+     "t": 0.62,
+     "from": 1.215324,
+     "to": 1.203171,
+     "why": "spp"
+    },
+    {
+     "t": 0,
+     "from": 1.280795,
+     "to": 1.267987,
+     "why": "spp"
+    },
+    {
+     "t": 0.62,
+     "from": 1.203171,
+     "to": 1.191139,
+     "why": "spp"
+    },
+    {
+     "t": 0,
+     "from": 1.267987,
+     "to": 1.255307,
+     "why": "spp"
+    },
+    {
+     "t": 0.62,
+     "from": 1.191139,
+     "to": 1.179228,
+     "why": "spp"
+    },
+    {
+     "t": 0,
+     "from": 1.255307,
+     "to": 1.242754,
+     "why": "spp"
+    },
+    {
+     "t": 0.62,
+     "from": 1.179228,
+     "to": 1.167436,
+     "why": "spp"
+    },
+    {
+     "t": 0,
+     "from": 1.242754,
+     "to": 1.230326,
+     "why": "spp"
+    },
+    {
+     "t": 0.62,
+     "from": 1.167436,
+     "to": 1.155762,
+     "why": "spp"
+    },
+    {
+     "t": 0,
+     "from": 1.230326,
+     "to": 1.218023,
+     "why": "spp"
+    },
+    {
+     "t": 0.62,
+     "from": 1.155762,
+     "to": 1.144204,
+     "why": "spp"
+    }
+   ],
+   "shrink_scale": 0.9,
+   "min_margin_out_px": 2.9545,
+   "min_spp": 0.7647,
+   "speed_scale": 0.9,
+   "speed_first_px_f": 2.978,
+   "speed_max_px_f": 3.276,
+   "speed_min_px_f": 1.009,
+   "speed_cut_px_f": 1.797,
+   "turn_max_deg_f": 2.908,
+   "zoom_start_end": [
+    1.195661,
+    1.012
+   ],
+   "keyframes": [
+    {
+     "t": 0,
+     "cx": 0.451291,
+     "cy": 0.5,
+     "zoom": 1.195661
+    },
+    {
+     "t": 0.62,
+     "cx": 0.532955,
+     "cy": 0.5,
+     "zoom": 1.130241
+    },
+    {
+     "t": 1,
+     "cx": 0.49721,
+     "cy": 0.5,
+     "zoom": 1.012
+    }
+   ]
+  },
+  {
+   "shot_id": "s06",
+   "room_type": "dining_room",
+   "role": "hero",
+   "category": "wide",
+   "variant": "tilt_up",
+   "d": -1,
+   "travel": -1,
+   "suit": 3.5,
+   "interest": 0.4901,
+   "duration_s": 6.73,
+   "frames": [
+    909,
+    1111
+   ],
+   "zoom_capped": [
+    {
+     "t": 0,
+     "from": 1.32,
+     "to": 1.3068,
+     "why": "spp"
+    },
+    {
+     "t": 0.62,
+     "from": 1.24,
+     "to": 1.2276,
+     "why": "spp"
+    },
+    {
+     "t": 0,
+     "from": 1.3068,
+     "to": 1.293732,
+     "why": "spp"
+    },
+    {
+     "t": 0.62,
+     "from": 1.2276,
+     "to": 1.215324,
+     "why": "spp"
+    },
+    {
+     "t": 0,
+     "from": 1.293732,
+     "to": 1.280795,
+     "why": "spp"
+    },
+    {
+     "t": 0.62,
+     "from": 1.215324,
+     "to": 1.203171,
+     "why": "spp"
+    },
+    {
+     "t": 0,
+     "from": 1.280795,
+     "to": 1.267987,
+     "why": "spp"
+    },
+    {
+     "t": 0.62,
+     "from": 1.203171,
+     "to": 1.191139,
+     "why": "spp"
+    },
+    {
+     "t": 0,
+     "from": 1.267987,
+     "to": 1.255307,
+     "why": "spp"
+    },
+    {
+     "t": 0.62,
+     "from": 1.191139,
+     "to": 1.179228,
+     "why": "spp"
+    },
+    {
+     "t": 0,
+     "from": 1.255307,
+     "to": 1.242754,
+     "why": "spp"
+    },
+    {
+     "t": 0.62,
+     "from": 1.179228,
+     "to": 1.167436,
+     "why": "spp"
+    },
+    {
+     "t": 0,
+     "from": 1.242754,
+     "to": 1.230326,
+     "why": "spp"
+    },
+    {
+     "t": 0.62,
+     "from": 1.167436,
+     "to": 1.155762,
+     "why": "spp"
+    },
+    {
+     "t": 0,
+     "from": 1.230326,
+     "to": 1.218023,
+     "why": "spp"
+    },
+    {
+     "t": 0.62,
+     "from": 1.155762,
+     "to": 1.144204,
+     "why": "spp"
+    },
+    {
+     "t": 0,
+     "from": 1.218023,
+     "to": 1.205843,
+     "why": "spp"
+    },
+    {
+     "t": 0.62,
+     "from": 1.144204,
+     "to": 1.132762,
+     "why": "spp"
+    }
+   ],
+   "shrink_scale": 0.9,
+   "min_margin_out_px": 2.9545,
+   "min_spp": 0.7586,
+   "speed_scale": 1.0,
+   "speed_first_px_f": 2.788,
+   "speed_max_px_f": 3.07,
+   "speed_min_px_f": 0.907,
+   "speed_cut_px_f": 1.574,
+   "turn_max_deg_f": 2.55,
+   "zoom_start_end": [
+    1.205843,
+    1.012
+   ],
+   "keyframes": [
+    {
+     "t": 0,
+     "cx": 0.543282,
+     "cy": 0.56441,
+     "zoom": 1.205843
+    },
+    {
+     "t": 0.62,
+     "cx": 0.46582,
+     "cy": 0.5,
+     "zoom": 1.132762
+    },
+    {
+     "t": 1,
+     "cx": 0.50279,
+     "cy": 0.5,
+     "zoom": 1.012
+    }
+   ]
+  },
+  {
+   "shot_id": "s07",
+   "room_type": "dining_room",
+   "role": "detail",
+   "category": "tight",
+   "variant": "pull_back",
+   "d": -1,
+   "travel": 1,
+   "suit": 3.0,
+   "interest": 0.391,
+   "duration_s": 4.81,
+   "frames": [
+    1111,
+    1255
+   ],
+   "zoom_capped": [],
+   "shrink_scale": 1.0,
+   "min_margin_out_px": 19.2,
+   "min_spp": 0.8263,
+   "speed_scale": 1.0,
+   "speed_first_px_f": 1.68,
+   "speed_max_px_f": 1.68,
+   "speed_min_px_f": 0.899,
+   "speed_cut_px_f": 0.954,
+   "turn_max_deg_f": 0.043,
+   "zoom_start_end": [
+    1.175,
+    1.02
+   ],
+   "keyframes": [
+    {
+     "t": 0,
+     "cx": 0.4838,
+     "cy": 0.5107,
+     "zoom": 1.175
+    },
+    {
+     "t": 1,
+     "cx": 0.5,
+     "cy": 0.5,
+     "zoom": 1.02
+    }
+   ]
+  },
+  {
+   "shot_id": "s08",
+   "room_type": "basement",
+   "role": "hero",
+   "category": "wide",
+   "variant": "pan",
+   "d": -1,
+   "travel": -1,
+   "suit": 3.0,
+   "interest": 0.1525,
+   "duration_s": 6.73,
+   "frames": [
+    1255,
+    1457
+   ],
+   "zoom_capped": [
+    {
+     "t": 0,
+     "from": 1.32,
+     "to": 1.3068,
+     "why": "spp"
+    },
+    {
+     "t": 0.62,
+     "from": 1.24,
+     "to": 1.2276,
+     "why": "spp"
+    },
+    {
+     "t": 0,
+     "from": 1.3068,
+     "to": 1.293732,
+     "why": "spp"
+    },
+    {
+     "t": 0.62,
+     "from": 1.2276,
+     "to": 1.215324,
+     "why": "spp"
+    },
+    {
+     "t": 0,
+     "from": 1.293732,
+     "to": 1.280795,
+     "why": "spp"
+    },
+    {
+     "t": 0.62,
+     "from": 1.215324,
+     "to": 1.203171,
+     "why": "spp"
+    },
+    {
+     "t": 0,
+     "from": 1.280795,
+     "to": 1.267987,
+     "why": "spp"
+    },
+    {
+     "t": 0.62,
+     "from": 1.203171,
+     "to": 1.191139,
+     "why": "spp"
+    },
+    {
+     "t": 0,
+     "from": 1.267987,
+     "to": 1.255307,
+     "why": "spp"
+    },
+    {
+     "t": 0.62,
+     "from": 1.191139,
+     "to": 1.179228,
+     "why": "spp"
+    },
+    {
+     "t": 0,
+     "from": 1.255307,
+     "to": 1.242754,
+     "why": "spp"
+    },
+    {
+     "t": 0.62,
+     "from": 1.179228,
+     "to": 1.167436,
+     "why": "spp"
+    },
+    {
+     "t": 0,
+     "from": 1.242754,
+     "to": 1.230326,
+     "why": "spp"
+    },
+    {
+     "t": 0.62,
+     "from": 1.167436,
+     "to": 1.155762,
+     "why": "spp"
+    },
+    {
+     "t": 0,
+     "from": 1.230326,
+     "to": 1.218023,
+     "why": "spp"
+    },
+    {
+     "t": 0.62,
+     "from": 1.155762,
+     "to": 1.144204,
+     "why": "spp"
+    }
+   ],
+   "shrink_scale": 0.9,
+   "min_margin_out_px": 2.9545,
+   "min_spp": 0.7648,
+   "speed_scale": 1.0,
+   "speed_first_px_f": 2.876,
+   "speed_max_px_f": 3.169,
+   "speed_min_px_f": 0.957,
+   "speed_cut_px_f": 1.716,
+   "turn_max_deg_f": 2.523,
+   "zoom_start_end": [
+    1.218023,
+    1.012
+   ],
+   "keyframes": [
+    {
+     "t": 0,
+     "cx": 0.553811,
+     "cy": 0.5,
+     "zoom": 1.218023
+    },
+    {
+     "t": 0.62,
+     "cx": 0.463073,
+     "cy": 0.5,
+     "zoom": 1.144204
+    },
+    {
+     "t": 1,
+     "cx": 0.50279,
+     "cy": 0.5,
+     "zoom": 1.012
+    }
+   ]
+  },
+  {
+   "shot_id": "s09",
+   "room_type": "primary_bedroom",
+   "role": "hero",
+   "category": "tight",
+   "variant": "tilt_down",
+   "d": 1,
+   "travel": 1,
+   "suit": 2.0,
+   "interest": 0.2927,
+   "duration_s": 4.81,
+   "frames": [
+    1457,
+    1601
+   ],
+   "zoom_capped": [
+    {
+     "t": 0,
+     "from": 1.32,
+     "to": 1.3068,
+     "why": "spp"
+    },
+    {
+     "t": 0.62,
+     "from": 1.24,
+     "to": 1.2276,
+     "why": "spp"
+    },
+    {
+     "t": 0,
+     "from": 1.3068,
+     "to": 1.293732,
+     "why": "spp"
+    },
+    {
+     "t": 0.62,
+     "from": 1.2276,
+     "to": 1.215324,
+     "why": "spp"
+    },
+    {
+     "t": 0,
+     "from": 1.293732,
+     "to": 1.280795,
+     "why": "spp"
+    },
+    {
+     "t": 0.62,
+     "from": 1.215324,
+     "to": 1.203171,
+     "why": "spp"
+    },
+    {
+     "t": 0,
+     "from": 1.280795,
+     "to": 1.267987,
+     "why": "spp"
+    },
+    {
+     "t": 0.62,
+     "from": 1.203171,
+     "to": 1.191139,
+     "why": "spp"
+    },
+    {
+     "t": 0,
+     "from": 1.267987,
+     "to": 1.255307,
+     "why": "spp"
+    },
+    {
+     "t": 0.62,
+     "from": 1.191139,
+     "to": 1.179228,
+     "why": "spp"
+    },
+    {
+     "t": 0,
+     "from": 1.255307,
+     "to": 1.242754,
+     "why": "spp"
+    },
+    {
+     "t": 0.62,
+     "from": 1.179228,
+     "to": 1.167436,
+     "why": "spp"
+    },
+    {
+     "t": 0,
+     "from": 1.242754,
+     "to": 1.230326,
+     "why": "spp"
+    },
+    {
+     "t": 0.62,
+     "from": 1.167436,
+     "to": 1.155762,
+     "why": "spp"
+    },
+    {
+     "t": 0,
+     "from": 1.230326,
+     "to": 1.218023,
+     "why": "spp"
+    },
+    {
+     "t": 0.62,
+     "from": 1.155762,
+     "to": 1.144204,
+     "why": "spp"
+    },
+    {
+     "t": 0,
+     "from": 1.218023,
+     "to": 1.205843,
+     "why": "spp"
+    },
+    {
+     "t": 0.62,
+     "from": 1.144204,
+     "to": 1.132762,
+     "why": "spp"
+    }
+   ],
+   "shrink_scale": 0.9,
+   "min_margin_out_px": 2.9545,
+   "min_spp": 0.7585,
+   "speed_scale": 0.75,
+   "speed_first_px_f": 2.835,
+   "speed_max_px_f": 3.11,
+   "speed_min_px_f": 0.962,
+   "speed_cut_px_f": 1.644,
+   "turn_max_deg_f": 3.465,
+   "zoom_start_end": [
+    1.154153,
+    1.012
+   ],
+   "keyframes": [
+    {
+     "t": 0,
+     "cx": 0.466841,
+     "cy": 0.451692,
+     "zoom": 1.154153
+    },
+    {
+     "t": 0.62,
+     "cx": 0.524937,
+     "cy": 0.5,
+     "zoom": 1.101283
+    },
+    {
+     "t": 1,
+     "cx": 0.49721,
+     "cy": 0.5,
+     "zoom": 1.012
+    }
+   ]
+  },
+  {
+   "shot_id": "s10",
+   "room_type": "primary_bathroom",
+   "role": "hero",
+   "category": "bath",
+   "variant": "pull_back",
+   "d": -1,
+   "travel": -1,
+   "suit": 3.0,
+   "interest": 0.1091,
+   "duration_s": 4.32,
+   "frames": [
+    1601,
+    1731
+   ],
+   "zoom_capped": [],
+   "shrink_scale": 1.0,
+   "min_margin_out_px": 19.2,
+   "min_spp": 0.8069,
+   "speed_scale": 1.0,
+   "speed_first_px_f": 2.413,
+   "speed_max_px_f": 2.413,
+   "speed_min_px_f": 1.193,
+   "speed_cut_px_f": 1.251,
+   "turn_max_deg_f": 0.093,
+   "zoom_start_end": [
+    1.175,
+    1.02
+   ],
+   "keyframes": [
+    {
+     "t": 0,
+     "cx": 0.5079,
+     "cy": 0.5861,
+     "zoom": 1.175
+    },
+    {
+     "t": 1,
+     "cx": 0.5,
+     "cy": 0.5,
+     "zoom": 1.02
+    }
+   ]
+  },
+  {
+   "shot_id": "s11",
+   "room_type": "bedroom",
+   "role": "hero",
+   "category": "tight",
+   "variant": "pan",
+   "d": 1,
+   "travel": 1,
+   "suit": 2.5,
+   "interest": 0.5206,
+   "duration_s": 4.81,
+   "frames": [
+    1731,
+    1875
+   ],
+   "zoom_capped": [
+    {
+     "t": 0,
+     "from": 1.32,
+     "to": 1.3068,
+     "why": "spp"
+    },
+    {
+     "t": 0.62,
+     "from": 1.24,
+     "to": 1.2276,
+     "why": "spp"
+    },
+    {
+     "t": 0,
+     "from": 1.3068,
+     "to": 1.293732,
+     "why": "spp"
+    },
+    {
+     "t": 0.62,
+     "from": 1.2276,
+     "to": 1.215324,
+     "why": "spp"
+    },
+    {
+     "t": 0,
+     "from": 1.293732,
+     "to": 1.280795,
+     "why": "spp"
+    },
+    {
+     "t": 0.62,
+     "from": 1.215324,
+     "to": 1.203171,
+     "why": "spp"
+    },
+    {
+     "t": 0,
+     "from": 1.280795,
+     "to": 1.267987,
+     "why": "spp"
+    },
+    {
+     "t": 0.62,
+     "from": 1.203171,
+     "to": 1.191139,
+     "why": "spp"
+    },
+    {
+     "t": 0,
+     "from": 1.267987,
+     "to": 1.255307,
+     "why": "spp"
+    },
+    {
+     "t": 0.62,
+     "from": 1.191139,
+     "to": 1.179228,
+     "why": "spp"
+    },
+    {
+     "t": 0,
+     "from": 1.255307,
+     "to": 1.242754,
+     "why": "spp"
+    },
+    {
+     "t": 0.62,
+     "from": 1.179228,
+     "to": 1.167436,
+     "why": "spp"
+    },
+    {
+     "t": 0,
+     "from": 1.242754,
+     "to": 1.230326,
+     "why": "spp"
+    },
+    {
+     "t": 0.62,
+     "from": 1.167436,
+     "to": 1.155762,
+     "why": "spp"
+    },
+    {
+     "t": 0,
+     "from": 1.230326,
+     "to": 1.218023,
+     "why": "spp"
+    },
+    {
+     "t": 0.62,
+     "from": 1.155762,
+     "to": 1.144204,
+     "why": "spp"
+    }
+   ],
+   "shrink_scale": 0.9,
+   "min_margin_out_px": 2.9545,
+   "min_spp": 0.7647,
+   "speed_scale": 0.75,
+   "speed_first_px_f": 2.917,
+   "speed_max_px_f": 3.201,
+   "speed_min_px_f": 1.015,
+   "speed_cut_px_f": 1.79,
+   "turn_max_deg_f": 3.424,
+   "zoom_start_end": [
+    1.162885,
+    1.012
+   ],
+   "keyframes": [
+    {
+     "t": 0,
+     "cx": 0.458944,
+     "cy": 0.5,
+     "zoom": 1.162885
+    },
+    {
+     "t": 0.62,
+     "cx": 0.526998,
+     "cy": 0.5,
+     "zoom": 1.109616
+    },
+    {
+     "t": 1,
+     "cx": 0.49721,
+     "cy": 0.5,
+     "zoom": 1.012
+    }
+   ]
+  },
+  {
+   "shot_id": "s12",
+   "room_type": "bedroom",
+   "role": "detail",
+   "category": "wide",
+   "variant": "tilt_up",
+   "d": -1,
+   "travel": -1,
+   "suit": 3.0,
+   "interest": 0.3134,
+   "duration_s": 6.73,
+   "frames": [
+    1875,
+    2077
+   ],
+   "zoom_capped": [
+    {
+     "t": 0,
+     "from": 1.32,
+     "to": 1.3068,
+     "why": "spp"
+    },
+    {
+     "t": 0.62,
+     "from": 1.24,
+     "to": 1.2276,
+     "why": "spp"
+    },
+    {
+     "t": 0,
+     "from": 1.3068,
+     "to": 1.293732,
+     "why": "spp"
+    },
+    {
+     "t": 0.62,
+     "from": 1.2276,
+     "to": 1.215324,
+     "why": "spp"
+    },
+    {
+     "t": 0,
+     "from": 1.293732,
+     "to": 1.280795,
+     "why": "spp"
+    },
+    {
+     "t": 0.62,
+     "from": 1.215324,
+     "to": 1.203171,
+     "why": "spp"
+    },
+    {
+     "t": 0,
+     "from": 1.280795,
+     "to": 1.267987,
+     "why": "spp"
+    },
+    {
+     "t": 0.62,
+     "from": 1.203171,
+     "to": 1.191139,
+     "why": "spp"
+    },
+    {
+     "t": 0,
+     "from": 1.267987,
+     "to": 1.255307,
+     "why": "spp"
+    },
+    {
+     "t": 0.62,
+     "from": 1.191139,
+     "to": 1.179228,
+     "why": "spp"
+    },
+    {
+     "t": 0,
+     "from": 1.255307,
+     "to": 1.242754,
+     "why": "spp"
+    },
+    {
+     "t": 0.62,
+     "from": 1.179228,
+     "to": 1.167436,
+     "why": "spp"
+    },
+    {
+     "t": 0,
+     "from": 1.242754,
+     "to": 1.230326,
+     "why": "spp"
+    },
+    {
+     "t": 0.62,
+     "from": 1.167436,
+     "to": 1.155762,
+     "why": "spp"
+    },
+    {
+     "t": 0,
+     "from": 1.230326,
+     "to": 1.218023,
+     "why": "spp"
+    },
+    {
+     "t": 0.62,
+     "from": 1.155762,
+     "to": 1.144204,
+     "why": "spp"
+    },
+    {
+     "t": 0,
+     "from": 1.218023,
+     "to": 1.205843,
+     "why": "spp"
+    },
+    {
+     "t": 0.62,
+     "from": 1.144204,
+     "to": 1.132762,
+     "why": "spp"
+    }
+   ],
+   "shrink_scale": 0.9,
+   "min_margin_out_px": 2.9545,
+   "min_spp": 0.7586,
+   "speed_scale": 1.0,
+   "speed_first_px_f": 2.788,
+   "speed_max_px_f": 3.07,
+   "speed_min_px_f": 0.907,
+   "speed_cut_px_f": 1.574,
+   "turn_max_deg_f": 2.55,
+   "zoom_start_end": [
+    1.205843,
+    1.012
+   ],
+   "keyframes": [
+    {
+     "t": 0,
+     "cx": 0.543282,
+     "cy": 0.56441,
+     "zoom": 1.205843
+    },
+    {
+     "t": 0.62,
+     "cx": 0.46582,
+     "cy": 0.5,
+     "zoom": 1.132762
+    },
+    {
+     "t": 1,
+     "cx": 0.50279,
+     "cy": 0.5,
+     "zoom": 1.012
+    }
+   ]
+  },
+  {
+   "shot_id": "s13",
+   "room_type": "bedroom",
+   "role": "detail",
+   "category": "final",
+   "variant": "pull_back",
+   "d": 1,
+   "travel": 1,
+   "suit": 2.5,
+   "interest": 0.0341,
+   "duration_s": 5.77,
+   "frames": [
+    2077,
+    2250
+   ],
+   "zoom_capped": [],
+   "shrink_scale": 1.0,
+   "min_margin_out_px": 1.9999,
+   "min_spp": 0.7769,
+   "speed_scale": 1.0,
+   "speed_first_px_f": 2.082,
+   "speed_max_px_f": 2.082,
+   "speed_min_px_f": 0.996,
+   "speed_cut_px_f": 1.04,
+   "turn_max_deg_f": 0.069,
+   "zoom_start_end": [
+    1.175,
+    1.02
+   ],
+   "keyframes": [
+    {
+     "t": 0,
+     "cx": 0.469518,
+     "cy": 0.604375,
+     "zoom": 1.175
+    },
+    {
+     "t": 1,
+     "cx": 0.5,
+     "cy": 0.5,
+     "zoom": 1.02
+    }
+   ]
+  }
+ ]
+}

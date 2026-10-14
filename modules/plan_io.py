@@ -43,6 +43,7 @@ class Segment(BaseModel):
 class Timing(BaseModel):
     s0: float
     s1: float
+    turn: Optional[float] = None
     model_config = ConfigDict(extra='ignore')
 
 class Camera(BaseModel):

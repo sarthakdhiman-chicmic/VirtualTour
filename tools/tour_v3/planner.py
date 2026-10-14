@@ -29,14 +29,15 @@ import statistics
 import cv2
 import numpy as np
 
-from modules.camera_path import CompoundPath, base_window, frame_margin_out_px, frame_spp, hermite_slope_max
+from modules.camera_path import (CompoundPath, base_window, frame_margin_out_px, frame_spp, hermite_slope_max,
+                                 motion_px, vec_angle)
 from modules.plan_io import compute_plan_hash, parse_plan
 from modules.timeline import compute_timeline
 import tools.tour_v2.planner as _v2
 from tools.tour_v2.planner import Geometry, is_bathroom, is_exterior, parse_plan_loose
 from tools.tour_v2.saliency import load_gray, spectral_residual
 
-PLANNER_VERSION = "tour_v4-0.1"
+PLANNER_VERSION = "tour_v5-0.1"
 OUT_W, OUT_H, FPS = 1920, 1080, 30
 MIN_SPP = 0.75
 MIN_MARGIN_OUT_PX = 1.0
@@ -52,6 +53,12 @@ SHRINK_STEP = 0.05
 ZT, ZM, ZW = 1.30, 1.12, 1.012   # tight, medium, wide (full coverage keeps a 2 px margin)
 BEAM = 400
 MAX_USES = 3                      # per move per tour
+TURN_COST = 60.0                  # timing.turn, px of time per radian of turn (addendum 1.3.2a)
+# v5 cut rules (review of v4): the next room starts at about the framing the last one ended on,
+# and moves the opposite way, so a pull-back is answered by a push-in, a pan left by a pan right
+SCALE_JUMP_FREE = 0.03            # |ln(zoom ratio)| across a cut allowed without penalty
+SCALE_JUMP_WEIGHT = 30.0
+REVEAL_FAMILY = {"tilt_reveal", "tilt_reveal_rotate", "tilt_sweep", "rise_reveal"}
 
 
 # ---------------------------------------------------------------------------------------------
@@ -92,18 +99,21 @@ def peak_a(sal):
 
 
 # ---- ported effects: the v2 and v3 keyframe moves, same shapes, re-timed as compound -------
-OVERLAP = 0.06  # each phase starts this much before the previous keyframe is reached
+OVERLAP = 0.25  # each phase starts this much before the previous keyframe is reached
+# (0.06 in v4 left near-sharp corners that the camera swung round at full speed: the jerky pull
+# back; 0.25 rounds them. reveal_sweep has three corners close together and uses 0.18)
 
 
-def from_keyframes(kfs, v):
+def from_keyframes(kfs, v, overlap=None):
     """keyframe_path keyframes -> (start, segments). Phase k runs from keyframe k-1 to k,
-    widened by OVERLAP each side so the camera rounds the keyframe instead of stopping on it.
+    widened by the overlap each side so the camera rounds the keyframe instead of stopping on it.
     v = -1 mirrors the move vertically (a tilt down instead of up)."""
     flip = (lambda st: {**st, "cy": round(1 - st["cy"], 6)}) if v < 0 else (lambda st: st)  # noqa: E731
     pts = [flip(_state(k["cx"], k["cy"], k["zoom"])) for k in kfs]
     ts = [k["t"] for k in kfs]
-    segs = [_seg(round(max(0.0, ts[k - 1] - OVERLAP), 4) if k > 1 else 0,
-                 round(min(1.0, ts[k] + OVERLAP), 4) if k < len(kfs) - 1 else 1, pts[k])
+    ov = OVERLAP if overlap is None else overlap
+    segs = [_seg(round(max(0.0, ts[k - 1] - ov), 4) if k > 1 else 0,
+                 round(min(1.0, ts[k] + ov), 4) if k < len(kfs) - 1 else 1, pts[k])
             for k in range(1, len(kfs))]
     return pts[0], segs
 
@@ -111,7 +121,7 @@ def from_keyframes(kfs, v):
 def mv_reveal_sweep(g, sal, d, v):
     """v2 reveal_sweep: near-full view, diagonal push toward one side, scroll across at the same
     height, pull back from that corner."""
-    return from_keyframes(_v2.move_reveal_sweep(g, sal, d), v)
+    return from_keyframes(_v2.move_reveal_sweep(g, sal, d), v, 0.18)
 
 
 def mv_tilt_reveal(g, sal, d, v):
@@ -132,7 +142,7 @@ def mv_tilt_sweep(g, sal, d, v):
     whole room from the far corner (a rounder, wider-blended tilt_reveal)."""
     start = E(g, -d, v, ZT)
     mid = E(g, d, 0.25 * peak_b(sal), ZT - 0.06)
-    return start, [_seg(0, 0.68, mid), _seg(0.5, 1, edge_held(g, mid, d, ZW))]
+    return start, [_seg(0, 0.75, mid), _seg(0.4, 1, edge_held(g, mid, d, ZW))]
 
 
 def mv_swoop(g, sal, d, v):
@@ -141,7 +151,7 @@ def mv_swoop(g, sal, d, v):
     start = E(g, 0.12 * d, 0, ZM)
     a = E(g, -d, b, ZT)
     bb = E(g, d, b, ZT)
-    return start, [_seg(0, 0.4, a), _seg(0.26, 0.76, bb), _seg(0.62, 1, edge_held(g, bb, d, ZW))]
+    return start, [_seg(0, 0.46, a), _seg(0.2, 0.8, bb), _seg(0.55, 1, edge_held(g, bb, d, ZW))]
 
 
 def mv_traverse(g, sal, d, v):
@@ -162,7 +172,7 @@ def mv_pan_reveal(g, sal, d, v):
     """Tight on one side at the salient height, drift across while pulling back to the room."""
     start = E(g, -d, 0.7 * peak_b(sal), ZT)
     mid = E(g, 0.6 * d, 0.4 * peak_b(sal), 1.16)
-    return start, [_seg(0, 0.6, mid), _seg(0.35, 1, _state(*g.fit(0.5, 0.5, ZW), ZW))]
+    return start, [_seg(0, 0.66, mid), _seg(0.28, 1, _state(*g.fit(0.5, 0.5, ZW), ZW))]
 
 
 def mv_slide_push(g, sal, d, v):
@@ -200,7 +210,7 @@ def mv_rise_reveal(g, sal, d, v):
     """Tight on the floor-level foreground, tilt up while pulling back to the whole room."""
     start = E(g, 0.4 * d, v, ZT)
     mid = E(g, -0.3 * d, -0.3 * v, 1.14)
-    return start, [_seg(0, 0.7, mid), _seg(0.4, 1, _state(*g.fit(0.5, 0.5, ZW), ZW))]
+    return start, [_seg(0, 0.74, mid), _seg(0.3, 1, _state(*g.fit(0.5, 0.5, ZW), ZW))]
 
 
 MOVES = {
@@ -216,16 +226,17 @@ MOVES = {
 # "tight" below. The room score is the shot's role: heroes add HERO_BONUS to the feature moves.
 SUIT = {  # category -> {move: score}; a move missing from a category is not allowed there
     "exterior": {"crane": 3, "push_pan": 1, "swoop": 1},
-    "final": {"pull_back": 3, "pan_reveal": 3, "tilt_reveal": 2.5, "rise_reveal": 2},
+    "final": {"pull_back": 3, "pan_reveal": 3, "tilt_reveal_rotate": 3, "tilt_reveal": 2, "rise_reveal": 2},
     "bath": {"settle_push": 2, "pull_back": 1.5, "tilt_reveal_rotate": 1.5, "push_pan": 1},
-    "wide": {"tilt_reveal": 5, "reveal_sweep": 3, "swoop": 2.5, "tilt_sweep": 2.5, "traverse": 2,
+    "wide": {"tilt_reveal_rotate": 5, "tilt_reveal": 2, "reveal_sweep": 3, "swoop": 2.5, "tilt_sweep": 2.5, "traverse": 2,
              "rise_reveal": 2, "slide_push": 2, "pan_reveal": 1.5, "push_pan": 1},
-    "medium": {"tilt_reveal_rotate": 3, "push_pan": 2, "pan_reveal": 2, "traverse": 2, "rise_reveal": 1.5,
+    "medium": {"tilt_reveal_rotate": 3.5, "push_pan": 2, "pan_reveal": 2, "traverse": 2, "rise_reveal": 1.5,
                "slide_push": 2.5, "tilt_reveal": 1.5, "swoop": 1, "settle_push": 1},
     "tight": {"push_pan": 2, "settle_push": 2, "slide_push": 2, "tilt_reveal_rotate": 2, "pan_reveal": 1.5,
               "pull_back": 1.5, "rise_reveal": 1},
 }
-FEATURE_MOVES = {"tilt_reveal", "reveal_sweep", "swoop", "tilt_sweep", "traverse", "rise_reveal"}
+FEATURE_MOVES = {"tilt_reveal", "tilt_reveal_rotate", "reveal_sweep", "swoop", "tilt_sweep", "traverse",
+                 "rise_reveal"}
 HERO_BONUS = 0.75
 ROTATE_MOVES = {"tilt_reveal_rotate"}  # rendered with projection "rotate" (addendum 1.3.1)
 
@@ -258,18 +269,32 @@ def classify(vec):
     return {"lateral": sgn(lat), "vertical": sgn(ver), "zoom": sgn(zoom)}
 
 
-def continuity(prev_exit, entry):
-    """Score for cutting from prev_exit into entry. A zoom reversal across the cut is the abrupt
-    zoom in/out from the review and is not allowed."""
-    if prev_exit["zoom"] * entry["zoom"] < 0:
-        return None
-    s = 0.0
-    if prev_exit["zoom"] and prev_exit["zoom"] == entry["zoom"]:
-        s += 2.5
-    for k, same, opp in (("lateral", 1.5, -2.0), ("vertical", 0.5, -1.0)):
-        p = prev_exit[k] * entry[k]
-        s += same if p > 0 else opp if p < 0 else 0
+def scale_jump(prev, nxt):
+    return abs(math.log(nxt["z_start"] / prev["z_end"]))
+
+
+def continuity(prev, nxt):
+    """Score for cutting from prev into nxt (v5).
+    Framing: the next room opens at about the zoom the last one closed on (a wide close opens
+    wide, a tight close opens tight), so the cut never jumps in scale.
+    Motion: the next room moves the opposite way to the last one's closing motion - a pull-back
+    is answered by a push-in, a pan left by a pan right, a tilt up by a tilt down or level."""
+    s = -SCALE_JUMP_WEIGHT * max(0.0, scale_jump(prev, nxt) - SCALE_JUMP_FREE)
+    pe, ne = prev["exit"], nxt["entry"]
+    for k, opp, same in (("zoom", 2.0, -2.0), ("lateral", 1.0, -0.5), ("vertical", 0.3, -0.3)):
+        p = pe[k] * ne[k]
+        s += opp if p < 0 else same if p > 0 else 0
     return s
+
+
+def signature(c):
+    """What a viewer reads as 'the same move again': the side it opens on and its first motion."""
+    st = c["start"]
+    side = (1 if st["cx"] > 0.54 else -1 if st["cx"] < 0.46 else 0,
+            1 if st["cy"] > 0.54 else -1 if st["cy"] < 0.46 else 0)
+    e = c["entry"]
+    first = max(("zoom", "lateral", "vertical"), key=lambda k: abs(c["entry_vec"][k]))
+    return side, first, e[first]
 
 
 class SalMap:
@@ -321,20 +346,29 @@ def candidates(shots, sal, maps, thr, q25):
             if s["role"] == "hero" and move in FEATURE_MOVES:
                 suit += HERO_BONUS
             fn, uses_v = MOVES[move]
+            lo = FINAL_MIN_S if i == len(shots) - 1 else SHOT_RANGE_S[0]
             for d in (1, -1):
                 for v in ((1, -1) if uses_v else (1,)):
                     start, segs = fn(g, sal[name], d, v)
-                    path = make_path(g, start, segs)
-                    if path.distance < 1.0:
+                    raw = make_path(g, start, segs, {"s0": 1, "s1": 1, "turn": TURN_COST})
+                    if raw.distance < 1.0:
                         continue
+                    secs = min(max(raw.cost / M_TARGET / FPS, lo), SHOT_RANGE_S[1])
+                    note = {}
+                    start, segs, timing = fit_speed(g, start, segs, round(secs * FPS), note)
+                    path = make_path(g, start, segs, timing)
                     open_i = maps[name].window_interest(g, start)
                     close_i = maps[name].window_interest(g, segs[-1])
                     interest = 1.5 * max(-1, min(1, open_i - 1)) + 0.75 * max(-1, min(1, close_i - 1))
-                    cands.append({"move": move, "d": d, "v": v, "start": start, "segments": segs,
-                                  "entry": classify(motion_vector(path, False)),
-                                  "exit": classify(motion_vector(path, True)),
-                                  "suit": suit, "interest": round(interest, 4), "category": cat,
-                                  "distance": path.distance})
+                    ev, xv = motion_vector(path, False), motion_vector(path, True)
+                    c = {"move": move, "d": d, "v": v, "start": start, "segments": segs, "timing": timing,
+                         "entry": classify(ev), "exit": classify(xv),
+                         "entry_vec": dict(zip(("lateral", "vertical", "zoom"), ev)),
+                         "z_start": start["zoom"], "z_end": segs[-1]["zoom"], "secs": round(secs, 2),
+                         "suit": suit, "interest": round(interest, 4), "category": cat,
+                         "distance": path.distance, "cost": path.cost, "fit": note}
+                    c["signature"] = signature(c)
+                    cands.append(c)
         out.append(cands)
     return out
 
@@ -348,23 +382,34 @@ def select(cands):
                 s = score + c["suit"] + c["interest"]
                 if seq:
                     prev = cands[i - 1][seq[-1]]
-                    cont = continuity(prev["exit"], c["entry"])
-                    if cont is None:
-                        continue
-                    s += cont
+                    s += continuity(prev, c)
                     if prev["move"] == c["move"]:
                         s -= 5
-                    if prev["d"] == c["d"]:
-                        s -= 0.6    # vary the direction from shot to shot
-                    if len(seq) > 1 and cands[i - 2][seq[-2]]["move"] == c["move"]:
-                        s -= 2
-                    if (len(seq) > 1 and c["exit"]["zoom"] != 0
-                            and c["exit"]["zoom"] == prev["exit"]["zoom"] == cands[i - 2][seq[-2]]["exit"]["zoom"]):
-                        s -= 1.5    # three reveals (or three pushes) in a row
+                    fam = c["move"] in REVEAL_FAMILY
+                    if fam and prev["move"] in REVEAL_FAMILY:
+                        s -= 4      # "start on a side, push, tilt, pull back" twice running
+                    if prev["signature"][0] == c["signature"][0]:
+                        s -= 1.0    # opens on the same side of the frame as the last shot
+                    if prev["signature"][1:] == c["signature"][1:]:
+                        s -= 1.0    # opens with the same first motion
+                    if len(seq) > 1:
+                        p2 = cands[i - 2][seq[-2]]
+                        if p2["move"] == c["move"]:
+                            s -= 2.5
+                        if fam and p2["move"] in REVEAL_FAMILY:
+                            s -= 1.5
+                        if p2["signature"] == c["signature"]:
+                            s -= 1.0
                 if uses.get(c["move"], 0) >= MAX_USES:
                     s -= 8
+                s -= 2.0 * uses.get((c["move"], c["d"], c["v"]), 0)   # same move, same direction again
+                s -= 1.5 * uses.get((c["move"], c["d"]), 0)           # same move, same pan direction
+                if c["move"] in REVEAL_FAMILY and sum(uses.get(m, 0) for m in REVEAL_FAMILY) >= 4:
+                    s -= 6
                 u = dict(uses)
                 u[c["move"]] = u.get(c["move"], 0) + 1
+                u[(c["move"], c["d"], c["v"])] = u.get((c["move"], c["d"], c["v"]), 0) + 1
+                u[(c["move"], c["d"])] = u.get((c["move"], c["d"]), 0) + 1
                 nxt.append((s, seq + [ci], u))
         if not nxt:
             raise RuntimeError(f"no continuous sequence reaches shot {i + 1}")
@@ -383,7 +428,7 @@ def allocate_durations(chosen, total, n_final):
     then scaled toward the baseline total (within TOTAL_TOLERANCE_S), integer centiseconds."""
     lo = [SHOT_RANGE_S[0]] * len(chosen)
     lo[n_final] = max(lo[n_final], FINAL_MIN_S)
-    want = [min(max(c["distance"] / M_TARGET / FPS, lo[i]), SHOT_RANGE_S[1]) for i, c in enumerate(chosen)]
+    want = [min(max(c["secs"], lo[i]), SHOT_RANGE_S[1]) for i, c in enumerate(chosen)]
     s = sum(want)
     target = min(max(s, total - TOTAL_TOLERANCE_S), total + TOTAL_TOLERANCE_S)
     d = list(want)
@@ -395,12 +440,14 @@ def allocate_durations(chosen, total, n_final):
     return [round(x, 2) for x in d], round(s, 2), round(target, 2)
 
 
-def timing_for(distance, frames):
-    mean = distance / max(1, frames - 1)
+def timing_for(cost, frames):
+    """cost is the path's time-cost (distance plus turn cost); between turns the camera moves at
+    hermite' x cost / frames px/frame."""
+    mean = cost / max(1, frames - 1)
     # slopes above 1 would make the middle of the shot slower than its ends (at 3 it stops), so a
     # short move enters and leaves below V_CUT at a constant speed instead
     s = min(1.0, V_CUT / mean) if mean > 0 else 1.0
-    return {"s0": round(s, 4), "s1": round(s, 4)}, mean
+    return {"s0": round(s, 4), "s1": round(s, 4), "turn": TURN_COST}, mean
 
 
 def fit_speed(g, start, segs, frames, note):
@@ -413,11 +460,12 @@ def fit_speed(g, start, segs, frames, note):
             end["zoom"] * (st["zoom"] / end["zoom"]) ** f)}
         st2 = sc(start)
         segs2 = [{**sc(s), "t0": s["t0"], "t1": s["t1"]} for s in segs[:-1]] + [end]
-        dist = make_path(g, st2, segs2).distance
-        timing, mean = timing_for(dist, frames)
+        raw = make_path(g, st2, segs2, {"s0": 1, "s1": 1, "turn": TURN_COST})
+        dist = raw.distance
+        timing, mean = timing_for(raw.cost, frames)
         peak = hermite_slope_max(timing["s0"], timing["s1"]) * mean
         m = measured(make_path(g, st2, segs2, timing), frames, g)
-        if (peak <= V_MAX + 1e-9 and m["min_margin_out_px"] >= MIN_MARGIN_OUT_PX
+        if (m["speed_max_px_f"] <= V_MAX + 1e-6 and m["min_margin_out_px"] >= MIN_MARGIN_OUT_PX
                 and m["min_spp"] >= MIN_SPP - 1e-9) or f <= SHRINK_STEP:
             break
         f = round(f - SHRINK_STEP, 3)
@@ -433,7 +481,9 @@ def measured(path, frames, g):
                for cx, cy, z in fr]
     spp = [frame_spp(cx, cy, z, g.src_w, g.src_h, OUT_W, OUT_H, g.projection, g.hfov_deg) for cx, cy, z in fr]
     zs = [z for _, _, z in fr]
-    return {"speed_first_px_f": round(sp[0], 3), "speed_cut_px_f": round(sp[-1], 3),
+    v = [motion_px(a, b, g.src_w, g.src_h, OUT_W, OUT_H) for a, b in zip(fr, fr[1:])]
+    turn = [math.degrees(vec_angle(a, b)) for a, b in zip(v, v[1:])] or [0.0]
+    return {"turn_max_deg_f": round(max(turn), 3),"speed_first_px_f": round(sp[0], 3), "speed_cut_px_f": round(sp[-1], 3),
             "speed_max_px_f": round(max(sp), 3), "speed_min_px_f": round(min(sp), 3),
             "min_margin_out_px": round(min(margins), 3), "min_spp": round(min(spp), 4),
             "zoom_range": [round(min(zs), 4), round(max(zs), 4)]}
@@ -474,15 +524,22 @@ def build(baseline, saliency, images_dir):
                 "suit": c["suit"], "interest": c["interest"], "duration_s": s["duration_s"],
                 "frames": [timeline[i]["render_from"], timeline[i]["render_from"] + n]}
         if i:
-            note["continuity_from_prev"] = continuity(chosen[i - 1]["exit"], c["entry"])
-        start, segs, timing = fit_speed(g, c["start"], c["segments"], n, note)
+            note["continuity_from_prev"] = round(continuity(chosen[i - 1], c), 3)
+        # the move as designed (fit_speed shrinks from it again at the final duration)
+        fn, _ = MOVES[c["move"]]
+        start, segs = fn(g, saliency["photos"][s["image_uri"].split("/")[-1]], c["d"], c["v"])
+        start, segs, timing = fit_speed(g, start, segs, n, note)
         s["camera"] = {"type": "compound", "move": c["move"], "start": start, "segments": segs, "timing": timing}
         if g.projection == "rotate":
             s["camera"].update({"projection": "rotate", "hfov_deg": g.hfov_deg})
         note.update(measured(make_path(g, start, segs, timing), n, g))
+        note["zoom_start_end"] = [start["zoom"], segs[-1]["zoom"]]
+        if notes:
+            note["cut_zoom_ratio"] = round(start["zoom"] / notes[-1]["zoom_start_end"][1], 4)
+        note["signature"] = c["signature"]
         note["camera"] = s["camera"]
         notes.append(note)
-    plan["provenance"]["planner_config_version"] = f"{PLANNER_VERSION}/v4_compound"
+    plan["provenance"]["planner_config_version"] = f"{PLANNER_VERSION}/v5"
     plan["provenance"].pop("plan_hash", None)
     plan["provenance"]["plan_hash"] = compute_plan_hash(plan)
     parse_plan(plan)  # contract checks, including every-frame bounds
@@ -502,14 +559,15 @@ def main():
     args = ap.parse_args()
     plan, notes = build(json.load(open(args.baseline)), json.load(open(args.saliency)), args.images_dir)
     os.makedirs(args.out_dir, exist_ok=True)
-    json.dump(plan, open(os.path.join(args.out_dir, "v4_compound.plan.json"), "w"), indent=1)
-    json.dump(notes, open(os.path.join(args.out_dir, "v4_plan_notes.json"), "w"), indent=1)
+    json.dump(plan, open(os.path.join(args.out_dir, "v5.plan.json"), "w"), indent=1)
+    json.dump(notes, open(os.path.join(args.out_dir, "v5_plan_notes.json"), "w"), indent=1)
     print(json.dumps(notes["summary"]))
     for n in notes["shots"]:
         e, x = n["entry"], n["exit"]
         print(f"{n['shot_id']} {n['category']:<8} {n['move']:<12} d{n['d']:+d} v{n['v']:+d} {n['duration_s']:>4}s "
               f"in(z{e['zoom']:+d} x{e['lateral']:+d} y{e['vertical']:+d}) out(z{x['zoom']:+d} x{x['lateral']:+d} y{x['vertical']:+d}) "
-              f"cont {n.get('continuity_from_prev', '-')} | shrink {n['shrink']} speed first {n['speed_first_px_f']} "
+              f"cont {n.get('continuity_from_prev', '-')} zcut {n.get('cut_zoom_ratio', '-')} | shrink {n['shrink']} "
+              f"turn {n['turn_max_deg_f']} speed first {n['speed_first_px_f']} "
               f"max {n['speed_max_px_f']} min {n['speed_min_px_f']} cut {n['speed_cut_px_f']} | margin {n['min_margin_out_px']} "
               f"spp {n['min_spp']} zoom {n['zoom_range']}")
 

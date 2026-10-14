@@ -11,6 +11,7 @@ import tempfile
 import time
 
 from modules.plan_io import parse_plan
+from modules.probe import verify
 from modules.remotion_render import render
 
 
@@ -38,10 +39,11 @@ def main() -> None:
         jq = None if args.jpeg_quality == "default" else int(args.jpeg_quality)
         out = render(plan, wd, 1.0, concurrency=args.concurrency, jpeg_quality=jq, gl=args.gl)
         elapsed = time.time() - t
+        playback = verify(out, plan)   # production checks, including smooth-playback ones
         os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
         shutil.copy(out, args.out)
     print(json.dumps({"out": args.out, "render_seconds": round(elapsed, 2), "concurrency": args.concurrency,
-                      "jpeg_quality": args.jpeg_quality, "gl": args.gl}))
+                      "jpeg_quality": args.jpeg_quality, "gl": args.gl, "playback": playback}))
 
 
 if __name__ == "__main__":

@@ -25,7 +25,9 @@ export const KenBurnsShot: React.FC<{
   };
   width: number;
   height: number;
-}> = ({ durationFrames, image, source, camera, width, height }) => {
+  // rotate shots pre-warped to one image per frame by the worker (modules/prewarp.py)
+  prewarp?: { dir: string; frames: number };
+}> = ({ durationFrames, image, source, camera, width, height, prewarp }) => {
   const frame = useCurrentFrame();
   const rawT = frame / Math.max(1, durationFrames - 1);
   const t = Math.max(0, Math.min(1, rawT));
@@ -42,15 +44,27 @@ export const KenBurnsShot: React.FC<{
     : cameraAt(camera.start as CameraPoint, camera.end as CameraPoint,
         interpolateEasing(t, camera.easing ?? 'ease_in_out'));
 
+  if (prewarp) {
+    const f = Math.max(0, Math.min(prewarp.frames - 1, frame));
+    return (
+      <AbsoluteFill style={{ overflow: 'hidden' }}>
+        <Img src={staticFile(`${prewarp.dir}/${String(f).padStart(5, '0')}.jpg`)}
+          style={{ width: '100%', height: '100%' }} />
+      </AbsoluteFill>
+    );
+  }
+
   if ((camera.type === 'keyframe_path' || camera.type === 'compound') && camera.projection === 'rotate') {
+    // preview fallback only: the worker pre-warps rotate shots (prewarp above)
     // camera turning in place: the photo reprojected onto a camera aimed at (cx, cy).
-    // NOT deterministic: two full renders differed in ~300 of 2100 frames (one render chunk,
-    // mean abs diff 1-2.4 levels); will-change: transform did not fix it (out/tour_v3/report.md)
+    // The layer is remounted every frame (key={frame}): Chrome keeps the raster scale of a layer
+    // whose 3D transform changes, so a reused layer's sharpness depended on which frames that tab
+    // had rendered before, and two renders differed (out/tour_v3/report.md).
     const toSource = rotateHomography(cx, cy, zoom, source.width, source.height, width, height,
       camera.hfov_deg ?? DEFAULT_HFOV_DEG);
     return (
       <AbsoluteFill style={{ overflow: 'hidden' }}>
-        <div style={{
+        <div key={frame} style={{
           position: 'absolute',
           width: source.width,
           height: source.height,

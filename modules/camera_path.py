@@ -216,7 +216,7 @@ def frame_spp(cx, cy, zoom, src_w, src_h, out_w, out_h, projection="crop", hfov_
 #
 #   camera: {type: "compound", move, start: {cx, cy, zoom},
 #            segments: [{t0, t1, cx, cy, zoom}, ...],   1-4, t0 non-decreasing, first t0 = 0,
-#            timing: {s0, s1}}                          last t1 = 1, 0 <= s0, s1 <= 3
+#            timing: {s0, s1, turn?}}                   last t1 = 1, 0 <= s0, s1 <= 3
 #
 # Shape: each segment moves the camera from the previous segment's target to its own over its
 # own window [t0, t1] of the path parameter u (smootherstep weight; cx, cy linear, zoom in log
@@ -227,8 +227,14 @@ def frame_spp(cx, cy, zoom, src_w, src_h, out_w, out_h, projection="crop", hfov_
 # start slope s0 and end slope s1 (in units of the shot's mean speed; monotone for s <= 3). The
 # speed on screen is therefore set by the plan: s0 * mean at the first frame, s1 * mean at the
 # cut, and at most max(hermite') * mean in between.
+# Turning (1.3.2a, optional timing.turn, px per radian, default 0): a change of direction costs
+# time as well as distance. Each arc sample costs its distance plus turn x the angle the motion
+# direction turns there (lateral px, vertical px, zoom px; smoothed over +-TURN_SMOOTH samples), so
+# the camera slows into a corner and speeds up out of it, as an operator would, instead of
+# swinging round it at full speed. "mean" above is then the mean cost per frame.
 # ---------------------------------------------------------------------------------------------
 ARC_SAMPLES = 512
+TURN_SMOOTH = 40
 
 
 def smootherstep(x: float) -> float:
@@ -255,6 +261,24 @@ def corner_rms_px(a, b, src_w, src_h, out_w, out_h) -> float:
     return math.sqrt(acc / 4) * scale
 
 
+def motion_px(a, b, src_w, src_h, out_w, out_h) -> tuple[float, float, float]:
+    """Motion from crop state a to b as (lateral, vertical, zoom) output px; zoom is the radial
+    motion of the frame corners."""
+    bw, _ = base_window(src_w, src_h, out_w, out_h)
+    k = out_w / (bw / a[2] * src_w)
+    return ((b[0] - a[0]) * src_w * k, (b[1] - a[1]) * src_h * k,
+            math.log(b[2] / a[2]) * math.hypot(out_w, out_h) / 2)
+
+
+def vec_angle(a, b) -> float:
+    na = math.sqrt(a[0] * a[0] + a[1] * a[1] + a[2] * a[2])
+    nb = math.sqrt(b[0] * b[0] + b[1] * b[1] + b[2] * b[2])
+    if na * nb <= 1e-12:
+        return 0.0
+    c = (a[0] * b[0] + a[1] * b[1] + a[2] * b[2]) / (na * nb)
+    return math.acos(max(-1.0, min(1.0, c)))
+
+
 class CompoundPath:
     def __init__(self, start: dict, segments: list[dict], timing: dict, src_w: int, src_h: int,
                  out_w: int, out_h: int):
@@ -266,14 +290,24 @@ class CompoundPath:
             self.segs.append((s["t0"], s["t1"], tuple(t - p for t, p in zip(tgt, prev))))
             prev = tgt
         self.s0, self.s1 = timing["s0"], timing["s1"]
+        self.turn = timing.get("turn") or 0.0
         self.dims = (src_w, src_h, out_w, out_h)
+        states = [self.at_u(j / ARC_SAMPLES) for j in range(ARC_SAMPLES + 1)]
+        dist = [corner_rms_px(states[j - 1], states[j], *self.dims) for j in range(1, ARC_SAMPLES + 1)]
+        self.distance = sum(dist)
+        cost = dist
+        if self.turn > 0:
+            vec = [motion_px(states[j - 1], states[j], *self.dims) for j in range(1, ARC_SAMPLES + 1)]
+            theta = [0.0] * ARC_SAMPLES          # theta[j]: turn between increment j and j + 1
+            for j in range(ARC_SAMPLES - 1):
+                theta[j] = vec_angle(vec[j], vec[j + 1])
+            r = TURN_SMOOTH
+            cost = [dist[j] + self.turn * sum(theta[max(0, j - r):j + r + 1]) / (2 * r + 1)
+                    for j in range(ARC_SAMPLES)]
         self.table = [0.0]
-        last = self.at_u(0.0)
-        for j in range(1, ARC_SAMPLES + 1):
-            cur = self.at_u(j / ARC_SAMPLES)
-            self.table.append(self.table[-1] + corner_rms_px(last, cur, *self.dims))
-            last = cur
-        self.distance = self.table[-1]
+        for c in cost:
+            self.table.append(self.table[-1] + c)
+        self.cost = self.table[-1]
 
     def at_u(self, u: float) -> tuple[float, float, float]:
         cx, cy, lz = self.c0
@@ -285,9 +319,9 @@ class CompoundPath:
         return cx, cy, math.exp(lz)
 
     def u_at(self, t: float) -> float:
-        if self.distance <= 0:
+        if self.cost <= 0:
             return 0.0
-        target = hermite_profile(t, self.s0, self.s1) * self.distance
+        target = hermite_profile(t, self.s0, self.s1) * self.cost
         lo, hi = 0, ARC_SAMPLES
         while hi - lo > 1:
             mid = (lo + hi) // 2
@@ -328,3 +362,5 @@ def validate_compound(start: dict | None, segments: list[dict], timing: dict | N
     for k in ("s0", "s1"):
         if not 0 <= timing[k] <= 3:
             raise ValueError(f"compound camera: timing {k} must be 0-3 (monotone)")
+    if not 0 <= (timing.get("turn") or 0) <= 2000:
+        raise ValueError("compound camera: timing turn must be 0-2000 px per radian")

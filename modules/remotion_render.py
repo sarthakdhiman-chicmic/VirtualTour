@@ -1,6 +1,8 @@
 import os
 import json
 import subprocess
+from modules.encode import MASTER_CRF, deliver
+from modules.prewarp import prewarp_rotate_shots
 from modules.timeline import compute_timeline
 
 def render(plan, workdir, scale=1.0, concurrency=2, jpeg_quality=95, gl=None):
@@ -10,10 +12,14 @@ def render(plan, workdir, scale=1.0, concurrency=2, jpeg_quality=95, gl=None):
     renders of the same plan differ (out/tour_v2/report.md), so leave gl unset."""
     # build props
     props_path = os.path.join(workdir, "props.json")
+    master_path = os.path.join(workdir, "master.mp4")   # Remotion's render (modules/encode.py)
     out_path = os.path.join(workdir, "out.mp4")
     
     # Calculate frames
     timeline = compute_timeline(plan)
+    # rotate shots are warped to frames outside the browser (modules/prewarp.py: Chrome's 3D path
+    # was not deterministic)
+    prewarp = prewarp_rotate_shots(plan, workdir)
     shots = []
     fps = plan.output.fps
     
@@ -29,7 +35,7 @@ def render(plan, workdir, scale=1.0, concurrency=2, jpeg_quality=95, gl=None):
                 "move": shot.camera.move,
                 "start": {k: v for k, v in shot.camera.start.model_dump().items() if k in ("cx", "cy", "zoom")},
                 "segments": [x.model_dump() for x in shot.camera.segments],
-                "timing": shot.camera.timing.model_dump(),
+                "timing": shot.camera.timing.model_dump(exclude_none=True),
                 **({"projection": shot.camera.projection} if shot.camera.projection else {}),
                 **({"hfov_deg": shot.camera.hfov_deg} if shot.camera.hfov_deg is not None else {}),
             } if shot.camera.type == "compound" else {
@@ -44,6 +50,7 @@ def render(plan, workdir, scale=1.0, concurrency=2, jpeg_quality=95, gl=None):
                 "end": shot.camera.end.model_dump(),
                 "easing": shot.camera.easing
             }),
+            **({"prewarp": prewarp[shot.shot_id]} if shot.shot_id in prewarp else {}),
         })
         
     total_frames = round((plan.total_duration_s * 100) * fps / 100)
@@ -67,13 +74,13 @@ def render(plan, workdir, scale=1.0, concurrency=2, jpeg_quality=95, gl=None):
     cmd = [
         "npx", "remotion", "render",
         "src/index.ts", "TourComposition",
-        out_path,
+        master_path,
         "--props", props_path,
         "--public-dir", images_dir,
         "--scale", str(scale),
         "--codec", plan.output.codec,
         "--pixel-format", "yuv420p",
-        "--crf", "18",
+        "--crf", str(MASTER_CRF),
         # frames are captured as JPEG before encoding; the default quality (80) adds
         # per-frame compression noise that crawls on fine texture as the camera moves
         "--timeout", "600000",
@@ -92,5 +99,6 @@ def render(plan, workdir, scale=1.0, concurrency=2, jpeg_quality=95, gl=None):
         raise RuntimeError("timeout")
     except subprocess.CalledProcessError as e:
         raise RuntimeError(f"render_failed: {e.stderr}")
-        
-    return out_path
+
+    # delivery encode: capped bitrate, 2 s keyframes, faststart (smooth playback; modules/encode.py)
+    return deliver(master_path, out_path, plan.output.fps)

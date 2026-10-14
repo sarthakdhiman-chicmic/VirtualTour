@@ -29,6 +29,7 @@ export const TourComposition: React.FC = () => {
                 image={shot.image}
                 source={shot.source}
                 camera={shot.camera}
+                prewarp={shot.prewarp}
                 width={props.width as number}
                 height={props.height as number}
               />
