@@ -200,12 +200,12 @@ def select(cands):
 
 
 def allocate(cats, total, variants):
-    want = [VARIANT_DURATION_S.get(v, DURATION_S[c]) for c, v in zip(cats, variants)]
-    total = min(sum(want), total + TOTAL_EXTRA_S)
+    want = [LENGTH * VARIANT_DURATION_S.get(v, DURATION_S[c]) for c, v in zip(cats, variants)]
+    total = min(sum(want), LENGTH * (total + TOTAL_EXTRA_S))
     d = list(want)
     for _ in range(30):
         f = total / sum(d)
-        d = [min(max(x * f, SHOT_RANGE_S[0]), SHOT_RANGE_S[1]) for x in d]
+        d = [min(max(x * f, SHOT_RANGE_S[0] * LENGTH), SHOT_RANGE_S[1] * LENGTH) for x in d]
         if abs(sum(d) - total) < 1e-6:
             break
     cs = [math.floor(x * 100) for x in d]
@@ -224,13 +224,24 @@ def motion_stats(kfs, n, g):
             "turn_max_deg_f": round(max(turn), 3)}
 
 
-def cap_speed(kfs, n, g, note):
-    """Shrink the reveal toward its end (the whole room) until no frame moves faster than V_MAX."""
+# Slower comparison versions (--speed, --length):
+#   SPEED < 1: every shot's move is shrunk toward its end (the whole room) until its peak speed is
+#              SPEED x what v8 gave it; same shot lengths, smaller moves.
+#   LENGTH > 1: every shot is LENGTH x longer with the same move as v8, so it plays 1/LENGTH as
+#              fast; the tour gets longer.
+SPEED = 1.0
+LENGTH = 1.0
+
+
+def cap_speed(kfs, n, g, note, vmax=None, step=None):
+    """Shrink the reveal toward its end (the whole room) until no frame moves faster than vmax."""
+    vmax = V_MAX if vmax is None else vmax
+    step = SHRINK_STEP if step is None else step
     end = kfs[-1]
     f = 1.0
     out = kfs
-    while motion_stats(out, n, g)["speed_max_px_f"] > V_MAX and f > SHRINK_STEP:
-        f = round(f - SHRINK_STEP, 3)
+    while motion_stats(out, n, g)["speed_max_px_f"] > vmax and f > step:
+        f = round(f - step, 3)
         out = [dict(k, cx=round(end["cx"] + f * (k["cx"] - end["cx"]), 6),
                     cy=round(end["cy"] + f * (k["cy"] - end["cy"]), 6),
                     zoom=round(end["zoom"] * (k["zoom"] / end["zoom"]) ** f, 6)) for k in kfs]
@@ -284,9 +295,15 @@ def build(baseline, saliency, images_dir):
                 "suit": c["suit"], "interest": c["interest"], "duration_s": s["duration_s"],
                 "frames": [timeline[i]["render_from"], timeline[i]["render_from"] + n]}
         if c["variant"] in COMPOUND_VARIANTS:
-            P3.V_MAX = V_MAX                       # same speed cap as the keyframe reveals
+            P3.V_MAX = V_MAX / LENGTH              # same speed cap as the keyframe reveals
+            P3.SHRINK_STEP = 0.05
             start, segs = arc_camera(g, c["d"])
             start, segs, timing = P3.fit_speed(g, start, segs, n, note)   # speed, margin, density
+            if SPEED < 1:
+                v8_max = P3.measured(P3.make_path(g, start, segs, timing), n, g)["speed_max_px_f"]
+                P3.V_MAX, P3.SHRINK_STEP = SPEED * v8_max, 0.01
+                start, segs = arc_camera(g, c["d"])
+                start, segs, timing = P3.fit_speed(g, start, segs, n, note)
             s["camera"] = {"type": "compound", "move": f"reveal_{c['variant']}", "start": start,
                            "segments": segs, "timing": timing}
             m = P3.measured(P3.make_path(g, start, segs, timing), n, g)
@@ -296,7 +313,11 @@ def build(baseline, saliency, images_dir):
                          "zoom_start_end": [start["zoom"], segs[-1]["zoom"]], "keyframes": None})
         else:
             kfs = v2.enforce(copy.deepcopy(c["keyframes"]), n, g, note)   # fit, density floor, every-frame margin
-            kfs, note["speed_scale"] = cap_speed(kfs, n, g, note)
+            kfs, note["speed_scale"] = cap_speed(kfs, n, g, note, vmax=V_MAX / LENGTH)
+            if SPEED < 1:
+                v8_max = motion_stats(kfs, n, g)["speed_max_px_f"]
+                kfs, extra = cap_speed(kfs, n, g, note, vmax=SPEED * v8_max, step=0.01)
+                note["speed_scale"] = round(note["speed_scale"] * extra, 4)
             s["camera"] = {"type": "keyframe_path", "move": f"reveal_{c['variant']}", "keyframes": kfs}
             note.update(motion_stats(kfs, n, g))
             note["zoom_start_end"] = [kfs[0]["zoom"], kfs[-1]["zoom"]]
@@ -304,7 +325,7 @@ def build(baseline, saliency, images_dir):
         if g.projection == "rotate":
             s["camera"].update({"projection": "rotate", "hfov_deg": HFOV_DEG})
         notes.append(note)
-    plan["provenance"]["planner_config_version"] = f"{PLANNER_VERSION}/v8"
+    plan["provenance"]["planner_config_version"] = f"{PLANNER_VERSION}/v8" + (f"/speed{SPEED:g}" if SPEED != 1 else "") + (f"/length{LENGTH:g}" if LENGTH != 1 else "")
     plan["provenance"].pop("plan_hash", None)
     plan["provenance"]["plan_hash"] = compute_plan_hash(plan)
     parse_plan(plan)
@@ -320,7 +341,11 @@ def main():
     ap.add_argument("--saliency", required=True)
     ap.add_argument("--images-dir", required=True)
     ap.add_argument("--out-dir", required=True)
+    ap.add_argument("--speed", type=float, default=1.0, help="peak speed vs v8, same lengths (e.g. 0.85)")
+    ap.add_argument("--length", type=float, default=1.0, help="shot lengths vs v8, same moves (e.g. 1.2)")
     args = ap.parse_args()
+    global SPEED, LENGTH
+    SPEED, LENGTH = args.speed, args.length
     plan, notes = build(json.load(open(args.baseline)), json.load(open(args.saliency)), args.images_dir)
     os.makedirs(args.out_dir, exist_ok=True)
     name = os.path.basename(os.path.normpath(args.out_dir)).replace("tour_", "")
