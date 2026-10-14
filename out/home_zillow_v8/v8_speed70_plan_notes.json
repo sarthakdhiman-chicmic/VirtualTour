@@ -1,24 +1,20 @@
 {
  "summary": {
-  "score": 37.471,
+  "score": 33.942,
   "variants": [
-   "rise",
-   "pull_back",
-   "rise",
-   "crane",
-   "pull_back",
-   "pan",
+   "aerial_orbit",
    "crane",
    "tilt_up",
+   "pull_back",
+   "crane",
    "pan",
    "arc",
-   "tilt_up",
-   "tilt_down"
+   "pull_back",
+   "pan",
+   "tilt_up"
   ],
   "travel": [
    1,
-   -1,
-   0,
    -1,
    1,
    -1,
@@ -30,158 +26,82 @@
    -1
   ],
   "categories": [
-   "exterior",
-   "exterior",
-   "exterior",
+   "aerial",
+   "wide",
+   "wide",
+   "tight",
+   "wide",
+   "medium",
    "wide",
    "tight",
    "medium",
-   "tight",
-   "medium",
-   "tight",
-   "medium",
-   "wide",
    "final"
   ],
-  "spread_median": 0.42545,
-  "spread_q25": 0.381525,
-  "total_duration_s": 71.0
+  "spread_median": 0.37775000000000003,
+  "spread_q25": 0.35695,
+  "total_duration_s": 64.0
  },
  "shots": [
   {
    "shot_id": "s01",
-   "room_type": "exterior",
+   "room_type": "aerial",
    "role": "hero",
-   "category": "exterior",
-   "variant": "rise",
+   "category": "aerial",
+   "variant": "aerial_orbit",
    "d": 1,
    "travel": 1,
-   "suit": 4.5,
-   "interest": 0.3453,
-   "duration_s": 5.46,
+   "suit": 5.5,
+   "interest": 0.1477,
+   "duration_s": 7.0,
    "frames": [
     0,
-    164
+    210
    ],
    "zoom_capped": [],
    "shrink_scale": 1.0,
-   "min_margin_out_px": 1.9991,
-   "min_spp": 0.5152,
-   "speed_scale": 0.49,
-   "speed_first_px_f": 2.167,
-   "speed_max_px_f": 2.167,
-   "speed_min_px_f": 1.015,
-   "speed_cut_px_f": 1.054,
-   "turn_max_deg_f": 0.006,
+   "min_margin_out_px": 1.9996,
+   "min_spp": 0.8103,
+   "speed_scale": 0.7,
+   "speed_first_px_f": 1.026,
+   "speed_max_px_f": 1.026,
+   "speed_min_px_f": 0.41,
+   "speed_cut_px_f": 0.446,
+   "turn_max_deg_f": 0.317,
+   "roll_deg": [
+    -2.5,
+    -1.0,
+    -0.0
+   ],
    "zoom_start_end": [
-    1.063725,
+    1.146247,
     1.03
    ],
    "keyframes": [
     {
      "t": 0,
-     "cx": 0.47128,
-     "cy": 0.508773,
-     "zoom": 1.063725
+     "cx": 0.493524,
+     "cy": 0.500042,
+     "zoom": 1.146247,
+     "roll_deg": -2.5
+    },
+    {
+     "t": 0.55,
+     "cx": 0.509295,
+     "cy": 0.500021,
+     "zoom": 1.078515,
+     "roll_deg": -1.0
     },
     {
      "t": 1,
-     "cx": 0.486448,
-     "cy": 0.366775,
-     "zoom": 1.03
+     "cx": 0.513552,
+     "cy": 0.5,
+     "zoom": 1.03,
+     "roll_deg": -0.0
     }
    ]
   },
   {
    "shot_id": "s02",
-   "room_type": "exterior",
-   "role": "detail",
-   "category": "exterior",
-   "variant": "pull_back",
-   "d": 1,
-   "travel": -1,
-   "suit": 1.0,
-   "interest": 0.2873,
-   "duration_s": 5.46,
-   "frames": [
-    164,
-    328
-   ],
-   "zoom_capped": [],
-   "shrink_scale": 1.0,
-   "min_margin_out_px": 19.2,
-   "min_spp": 0.459,
-   "speed_scale": 0.69,
-   "speed_first_px_f": 1.096,
-   "speed_max_px_f": 1.096,
-   "speed_min_px_f": 0.56,
-   "speed_cut_px_f": 0.589,
-   "turn_max_deg_f": 0.039,
-   "zoom_start_end": [
-    1.124585,
-    1.02
-   ],
-   "keyframes": [
-    {
-     "t": 0,
-     "cx": 0.520355,
-     "cy": 0.492755,
-     "zoom": 1.124585
-    },
-    {
-     "t": 1,
-     "cx": 0.5,
-     "cy": 0.5,
-     "zoom": 1.02
-    }
-   ]
-  },
-  {
-   "shot_id": "s03",
-   "room_type": "front_exterior",
-   "role": "hero",
-   "category": "exterior",
-   "variant": "rise",
-   "d": -1,
-   "travel": 0,
-   "suit": 4.5,
-   "interest": -0.1262,
-   "duration_s": 5.46,
-   "frames": [
-    328,
-    491
-   ],
-   "zoom_capped": [],
-   "shrink_scale": 1.0,
-   "min_margin_out_px": 1.9995,
-   "min_spp": 0.5781,
-   "speed_scale": 0.71,
-   "speed_first_px_f": 2.029,
-   "speed_max_px_f": 2.029,
-   "speed_min_px_f": 0.942,
-   "speed_cut_px_f": 0.977,
-   "turn_max_deg_f": 0.012,
-   "zoom_start_end": [
-    1.079224,
-    1.03
-   ],
-   "keyframes": [
-    {
-     "t": 0,
-     "cx": 0.48848,
-     "cy": 0.555911,
-     "zoom": 1.079224
-    },
-    {
-     "t": 1,
-     "cx": 0.48848,
-     "cy": 0.411104,
-     "zoom": 1.03
-    }
-   ]
-  },
-  {
-   "shot_id": "s04",
    "room_type": "living_room",
    "role": "hero",
    "category": "wide",
@@ -189,95 +109,235 @@
    "d": -1,
    "travel": -1,
    "suit": 3.25,
-   "interest": 0.4715,
-   "duration_s": 6.95,
+   "interest": 0.6003,
+   "duration_s": 7.0,
    "frames": [
-    491,
-    700
+    210,
+    420
    ],
    "zoom_capped": [],
    "shrink_scale": 1.0,
-   "min_margin_out_px": 2.0005,
-   "min_spp": 0.54,
-   "speed_scale": 0.71,
-   "speed_first_px_f": 1.759,
-   "speed_max_px_f": 1.759,
-   "speed_min_px_f": 0.806,
-   "speed_cut_px_f": 0.834,
-   "turn_max_deg_f": 0.026,
+   "min_margin_out_px": 2.0002,
+   "min_spp": 0.783,
+   "speed_scale": 0.648,
+   "speed_first_px_f": 2.175,
+   "speed_max_px_f": 2.175,
+   "speed_min_px_f": 0.988,
+   "speed_cut_px_f": 1.022,
+   "turn_max_deg_f": 0.039,
    "zoom_start_end": [
-    1.139277,
-    1.046069
+    1.195937,
+    1.059612
    ],
    "keyframes": [
     {
      "t": 0,
-     "cx": 0.538373,
-     "cy": 0.5736,
-     "zoom": 1.139277
+     "cx": 0.560237,
+     "cy": 0.56368,
+     "zoom": 1.195937
     },
     {
      "t": 1,
-     "cx": 0.478976,
+     "cx": 0.472854,
      "cy": 0.46,
-     "zoom": 1.046069
+     "zoom": 1.059612
     }
    ]
   },
   {
-   "shot_id": "s05",
+   "shot_id": "s03",
    "room_type": "living_room",
    "role": "detail",
-   "category": "tight",
-   "variant": "pull_back",
-   "d": -1,
+   "category": "wide",
+   "variant": "tilt_up",
+   "d": 1,
    "travel": 1,
    "suit": 3.0,
-   "interest": 0.4124,
-   "duration_s": 4.97,
+   "interest": 0.6198,
+   "duration_s": 7.0,
    "frames": [
-    700,
-    849
+    420,
+    630
    ],
    "zoom_capped": [
     {
      "t": 0,
-     "from": 1.175,
-     "to": 1.16325,
+     "from": 1.32,
+     "to": 1.3068,
+     "why": "spp"
+    },
+    {
+     "t": 0.62,
+     "from": 1.24,
+     "to": 1.2276,
      "why": "spp"
     },
     {
      "t": 0,
-     "from": 1.16325,
-     "to": 1.151617,
+     "from": 1.3068,
+     "to": 1.293732,
+     "why": "spp"
+    },
+    {
+     "t": 0.62,
+     "from": 1.2276,
+     "to": 1.215324,
      "why": "spp"
     },
     {
      "t": 0,
-     "from": 1.151617,
-     "to": 1.140101,
+     "from": 1.293732,
+     "to": 1.280795,
+     "why": "spp"
+    },
+    {
+     "t": 0.62,
+     "from": 1.215324,
+     "to": 1.203171,
+     "why": "spp"
+    },
+    {
+     "t": 0,
+     "from": 1.280795,
+     "to": 1.267987,
+     "why": "spp"
+    },
+    {
+     "t": 0.62,
+     "from": 1.203171,
+     "to": 1.191139,
+     "why": "spp"
+    },
+    {
+     "t": 0,
+     "from": 1.267987,
+     "to": 1.255307,
+     "why": "spp"
+    },
+    {
+     "t": 0.62,
+     "from": 1.191139,
+     "to": 1.179228,
+     "why": "spp"
+    },
+    {
+     "t": 0,
+     "from": 1.255307,
+     "to": 1.242754,
+     "why": "spp"
+    },
+    {
+     "t": 0.62,
+     "from": 1.179228,
+     "to": 1.167436,
+     "why": "spp"
+    },
+    {
+     "t": 0,
+     "from": 1.242754,
+     "to": 1.230326,
+     "why": "spp"
+    },
+    {
+     "t": 0.62,
+     "from": 1.167436,
+     "to": 1.155762,
+     "why": "spp"
+    },
+    {
+     "t": 0,
+     "from": 1.230326,
+     "to": 1.218023,
+     "why": "spp"
+    },
+    {
+     "t": 0.62,
+     "from": 1.155762,
+     "to": 1.144204,
+     "why": "spp"
+    },
+    {
+     "t": 0,
+     "from": 1.218023,
+     "to": 1.205843,
+     "why": "spp"
+    },
+    {
+     "t": 0.62,
+     "from": 1.144204,
+     "to": 1.132762,
      "why": "spp"
     }
    ],
-   "shrink_scale": 1.0,
-   "min_margin_out_px": 2.0008,
-   "min_spp": 0.5134,
-   "speed_scale": 0.7,
-   "speed_first_px_f": 1.343,
-   "speed_max_px_f": 1.343,
-   "speed_min_px_f": 0.644,
-   "speed_cut_px_f": 0.671,
-   "turn_max_deg_f": 0.046,
+   "shrink_scale": 0.9,
+   "min_margin_out_px": 2.9545,
+   "min_spp": 0.7585,
+   "speed_scale": 0.73,
+   "speed_first_px_f": 1.877,
+   "speed_max_px_f": 2.064,
+   "speed_min_px_f": 0.641,
+   "speed_cut_px_f": 1.092,
+   "turn_max_deg_f": 2.366,
    "zoom_start_end": [
-    1.102657,
+    1.150114,
+    1.012
+   ],
+   "keyframes": [
+    {
+     "t": 0,
+     "cx": 0.467651,
+     "cy": 0.547019,
+     "zoom": 1.150114
+    },
+    {
+     "t": 0.62,
+     "cx": 0.524198,
+     "cy": 0.5,
+     "zoom": 1.098803
+    },
+    {
+     "t": 1,
+     "cx": 0.49721,
+     "cy": 0.5,
+     "zoom": 1.012
+    }
+   ]
+  },
+  {
+   "shot_id": "s04",
+   "room_type": "living_room",
+   "role": "detail",
+   "category": "tight",
+   "variant": "pull_back",
+   "d": 1,
+   "travel": -1,
+   "suit": 3.0,
+   "interest": 0.1685,
+   "duration_s": 5.0,
+   "frames": [
+    630,
+    780
+   ],
+   "zoom_capped": [],
+   "shrink_scale": 1.0,
+   "min_margin_out_px": 1.9993,
+   "min_spp": 0.7761,
+   "speed_scale": 0.71,
+   "speed_first_px_f": 1.683,
+   "speed_max_px_f": 1.683,
+   "speed_min_px_f": 0.808,
+   "speed_cut_px_f": 0.843,
+   "turn_max_deg_f": 0.058,
+   "zoom_start_end": [
+    1.127771,
     1.02
    ],
    "keyframes": [
     {
      "t": 0,
-     "cx": 0.479907,
-     "cy": 0.558782,
-     "zoom": 1.102657
+     "cx": 0.522317,
+     "cy": 0.573807,
+     "zoom": 1.127771
     },
     {
      "t": 1,
@@ -288,214 +348,69 @@
    ]
   },
   {
-   "shot_id": "s06",
+   "shot_id": "s05",
    "room_type": "kitchen",
    "role": "hero",
+   "category": "wide",
+   "variant": "crane",
+   "d": 1,
+   "travel": 1,
+   "suit": 3.25,
+   "interest": 0.2632,
+   "duration_s": 7.0,
+   "frames": [
+    780,
+    990
+   ],
+   "zoom_capped": [],
+   "shrink_scale": 1.0,
+   "min_margin_out_px": 2.0002,
+   "min_spp": 0.8317,
+   "speed_scale": 0.72,
+   "speed_first_px_f": 1.919,
+   "speed_max_px_f": 1.919,
+   "speed_min_px_f": 0.875,
+   "speed_cut_px_f": 0.906,
+   "turn_max_deg_f": 0.031,
+   "zoom_start_end": [
+    1.157392,
+    1.049223
+   ],
+   "keyframes": [
+    {
+     "t": 0,
+     "cx": 0.453471,
+     "cy": 0.5752,
+     "zoom": 1.157392
+    },
+    {
+     "t": 1,
+     "cx": 0.522464,
+     "cy": 0.46,
+     "zoom": 1.049223
+    }
+   ]
+  },
+  {
+   "shot_id": "s06",
+   "room_type": "kitchen",
+   "role": "detail",
    "category": "medium",
    "variant": "pan",
    "d": -1,
    "travel": -1,
-   "suit": 3.0,
-   "interest": 0.2954,
-   "duration_s": 5.96,
-   "frames": [
-    849,
-    1028
-   ],
-   "zoom_capped": [
-    {
-     "t": 0,
-     "from": 1.32,
-     "to": 1.25
-    },
-    {
-     "t": 0,
-     "from": 1.25,
-     "to": 1.2375,
-     "why": "spp"
-    },
-    {
-     "t": 0.62,
-     "from": 1.24,
-     "to": 1.2276,
-     "why": "spp"
-    },
-    {
-     "t": 0,
-     "from": 1.2375,
-     "to": 1.225125,
-     "why": "spp"
-    },
-    {
-     "t": 0.62,
-     "from": 1.2276,
-     "to": 1.215324,
-     "why": "spp"
-    },
-    {
-     "t": 0,
-     "from": 1.225125,
-     "to": 1.212874,
-     "why": "spp"
-    },
-    {
-     "t": 0.62,
-     "from": 1.215324,
-     "to": 1.203171,
-     "why": "spp"
-    },
-    {
-     "t": 0,
-     "from": 1.212874,
-     "to": 1.200745,
-     "why": "spp"
-    },
-    {
-     "t": 0.62,
-     "from": 1.203171,
-     "to": 1.191139,
-     "why": "spp"
-    },
-    {
-     "t": 0,
-     "from": 1.200745,
-     "to": 1.188738,
-     "why": "spp"
-    },
-    {
-     "t": 0.62,
-     "from": 1.191139,
-     "to": 1.179228,
-     "why": "spp"
-    },
-    {
-     "t": 0,
-     "from": 1.188738,
-     "to": 1.176851,
-     "why": "spp"
-    },
-    {
-     "t": 0.62,
-     "from": 1.179228,
-     "to": 1.167436,
-     "why": "spp"
-    },
-    {
-     "t": 0,
-     "from": 1.176851,
-     "to": 1.165082,
-     "why": "spp"
-    },
-    {
-     "t": 0.62,
-     "from": 1.167436,
-     "to": 1.155762,
-     "why": "spp"
-    }
-   ],
-   "shrink_scale": 1.0,
-   "min_margin_out_px": 1.3425,
-   "min_spp": 0.5108,
-   "speed_scale": 0.684,
-   "speed_first_px_f": 1.927,
-   "speed_max_px_f": 2.205,
-   "speed_min_px_f": 0.145,
-   "speed_cut_px_f": 1.454,
-   "turn_max_deg_f": 14.161,
-   "zoom_start_end": [
-    1.114358,
-    1.012
-   ],
-   "keyframes": [
-    {
-     "t": 0,
-     "cx": 0.532547,
-     "cy": 0.497939,
-     "zoom": 1.114358
-    },
-    {
-     "t": 0.62,
-     "cx": 0.471083,
-     "cy": 0.49785,
-     "zoom": 1.108253
-    },
-    {
-     "t": 1,
-     "cx": 0.5031,
-     "cy": 0.5,
-     "zoom": 1.012
-    }
-   ]
-  },
-  {
-   "shot_id": "s07",
-   "room_type": "dining_room",
-   "role": "hero",
-   "category": "tight",
-   "variant": "crane",
-   "d": 1,
-   "travel": 1,
-   "suit": 3.0,
-   "interest": 0.1849,
-   "duration_s": 4.97,
-   "frames": [
-    1028,
-    1177
-   ],
-   "zoom_capped": [],
-   "shrink_scale": 1.0,
-   "min_margin_out_px": 1.9995,
-   "min_spp": 0.5777,
-   "speed_scale": 0.71,
-   "speed_first_px_f": 1.862,
-   "speed_max_px_f": 1.862,
-   "speed_min_px_f": 0.868,
-   "speed_cut_px_f": 0.9,
-   "turn_max_deg_f": 0.014,
-   "zoom_start_end": [
-    1.080741,
-    1.035
-   ],
-   "keyframes": [
-    {
-     "t": 0,
-     "cx": 0.486862,
-     "cy": 0.57165,
-     "zoom": 1.080741
-    },
-    {
-     "t": 1,
-     "cx": 0.515902,
-     "cy": 0.46,
-     "zoom": 1.035
-    }
-   ]
-  },
-  {
-   "shot_id": "s08",
-   "room_type": "dining_room",
-   "role": "detail",
-   "category": "medium",
-   "variant": "tilt_up",
-   "d": -1,
-   "travel": -1,
    "suit": 2.5,
-   "interest": 0.7004,
-   "duration_s": 5.96,
+   "interest": 0.0579,
+   "duration_s": 6.0,
    "frames": [
-    1177,
-    1356
+    990,
+    1170
    ],
    "zoom_capped": [
     {
      "t": 0,
      "from": 1.32,
-     "to": 1.25
-    },
-    {
-     "t": 0,
-     "from": 1.25,
-     "to": 1.2375,
+     "to": 1.3068,
      "why": "spp"
     },
     {
@@ -506,8 +421,8 @@
     },
     {
      "t": 0,
-     "from": 1.2375,
-     "to": 1.225125,
+     "from": 1.3068,
+     "to": 1.293732,
      "why": "spp"
     },
     {
@@ -518,8 +433,8 @@
     },
     {
      "t": 0,
-     "from": 1.225125,
-     "to": 1.212874,
+     "from": 1.293732,
+     "to": 1.280795,
      "why": "spp"
     },
     {
@@ -530,8 +445,8 @@
     },
     {
      "t": 0,
-     "from": 1.212874,
-     "to": 1.200745,
+     "from": 1.280795,
+     "to": 1.267987,
      "why": "spp"
     },
     {
@@ -542,8 +457,8 @@
     },
     {
      "t": 0,
-     "from": 1.200745,
-     "to": 1.188738,
+     "from": 1.267987,
+     "to": 1.255307,
      "why": "spp"
     },
     {
@@ -554,8 +469,8 @@
     },
     {
      "t": 0,
-     "from": 1.188738,
-     "to": 1.176851,
+     "from": 1.255307,
+     "to": 1.242754,
      "why": "spp"
     },
     {
@@ -566,8 +481,8 @@
     },
     {
      "t": 0,
-     "from": 1.176851,
-     "to": 1.165082,
+     "from": 1.242754,
+     "to": 1.230326,
      "why": "spp"
     },
     {
@@ -578,8 +493,8 @@
     },
     {
      "t": 0,
-     "from": 1.165082,
-     "to": 1.153431,
+     "from": 1.230326,
+     "to": 1.218023,
      "why": "spp"
     },
     {
@@ -589,206 +504,66 @@
      "why": "spp"
     }
    ],
-   "shrink_scale": 1.0,
-   "min_margin_out_px": 1.3243,
-   "min_spp": 0.5088,
-   "speed_scale": 0.72,
-   "speed_first_px_f": 1.932,
-   "speed_max_px_f": 2.211,
-   "speed_min_px_f": 0.153,
-   "speed_cut_px_f": 1.421,
-   "turn_max_deg_f": 13.177,
+   "shrink_scale": 0.9,
+   "min_margin_out_px": 2.9545,
+   "min_spp": 0.7648,
+   "speed_scale": 0.648,
+   "speed_first_px_f": 1.976,
+   "speed_max_px_f": 2.172,
+   "speed_min_px_f": 0.703,
+   "speed_cut_px_f": 1.228,
+   "turn_max_deg_f": 2.709,
    "zoom_start_end": [
-    1.111948,
+    1.141112,
     1.012
    ],
    "keyframes": [
     {
      "t": 0,
-     "cx": 0.527201,
-     "cy": 0.539361,
-     "zoom": 1.111948
+     "cx": 0.535852,
+     "cy": 0.5,
+     "zoom": 1.141112
     },
     {
      "t": 0.62,
-     "cx": 0.471326,
+     "cx": 0.477054,
      "cy": 0.5,
-     "zoom": 1.105536
+     "zoom": 1.095806
     },
     {
      "t": 1,
-     "cx": 0.5031,
+     "cx": 0.50279,
      "cy": 0.5,
      "zoom": 1.012
     }
    ]
   },
   {
-   "shot_id": "s09",
-   "room_type": "bedroom",
-   "role": "hero",
-   "category": "tight",
-   "variant": "pan",
+   "shot_id": "s07",
+   "room_type": "kitchen",
+   "role": "detail",
+   "category": "wide",
+   "variant": "arc",
    "d": 1,
    "travel": 1,
-   "suit": 2.5,
-   "interest": 0.1298,
-   "duration_s": 4.96,
-   "frames": [
-    1356,
-    1504
-   ],
-   "zoom_capped": [
-    {
-     "t": 0,
-     "from": 1.32,
-     "to": 1.25
-    },
-    {
-     "t": 0,
-     "from": 1.25,
-     "to": 1.2375,
-     "why": "spp"
-    },
-    {
-     "t": 0.62,
-     "from": 1.24,
-     "to": 1.2276,
-     "why": "spp"
-    },
-    {
-     "t": 0,
-     "from": 1.2375,
-     "to": 1.225125,
-     "why": "spp"
-    },
-    {
-     "t": 0.62,
-     "from": 1.2276,
-     "to": 1.215324,
-     "why": "spp"
-    },
-    {
-     "t": 0,
-     "from": 1.225125,
-     "to": 1.212874,
-     "why": "spp"
-    },
-    {
-     "t": 0.62,
-     "from": 1.215324,
-     "to": 1.203171,
-     "why": "spp"
-    },
-    {
-     "t": 0,
-     "from": 1.212874,
-     "to": 1.200745,
-     "why": "spp"
-    },
-    {
-     "t": 0.62,
-     "from": 1.203171,
-     "to": 1.191139,
-     "why": "spp"
-    },
-    {
-     "t": 0,
-     "from": 1.200745,
-     "to": 1.188738,
-     "why": "spp"
-    },
-    {
-     "t": 0.62,
-     "from": 1.191139,
-     "to": 1.179228,
-     "why": "spp"
-    },
-    {
-     "t": 0,
-     "from": 1.188738,
-     "to": 1.176851,
-     "why": "spp"
-    },
-    {
-     "t": 0.62,
-     "from": 1.179228,
-     "to": 1.167436,
-     "why": "spp"
-    },
-    {
-     "t": 0,
-     "from": 1.176851,
-     "to": 1.165082,
-     "why": "spp"
-    },
-    {
-     "t": 0.62,
-     "from": 1.167436,
-     "to": 1.155762,
-     "why": "spp"
-    }
-   ],
-   "shrink_scale": 1.0,
-   "min_margin_out_px": 1.3487,
-   "min_spp": 0.5118,
-   "speed_scale": 0.576,
-   "speed_first_px_f": 1.955,
-   "speed_max_px_f": 2.232,
-   "speed_min_px_f": 0.149,
-   "speed_cut_px_f": 1.481,
-   "turn_max_deg_f": 15.874,
-   "zoom_start_end": [
-    1.097534,
-    1.012
-   ],
-   "keyframes": [
-    {
-     "t": 0,
-     "cx": 0.471904,
-     "cy": 0.5,
-     "zoom": 1.097534
-    },
-    {
-     "t": 0.62,
-     "cx": 0.524071,
-     "cy": 0.5,
-     "zoom": 1.092468
-    },
-    {
-     "t": 1,
-     "cx": 0.4969,
-     "cy": 0.5,
-     "zoom": 1.012
-    }
-   ]
-  },
-  {
-   "shot_id": "s10",
-   "room_type": "patio",
-   "role": "hero",
-   "category": "medium",
-   "variant": "arc",
-   "d": -1,
-   "travel": -1,
    "suit": 2.75,
-   "interest": 0.2489,
-   "duration_s": 7.94,
+   "interest": 0.132,
+   "duration_s": 8.0,
    "frames": [
-    1504,
-    1743
+    1170,
+    1410
    ],
    "shrink": 0.71,
-   "distance_px": 258.8,
-   "mean_px_f": 2.284,
-   "planned_peak_px_f": 2.626,
+   "distance_px": 257.8,
+   "mean_px_f": 2.268,
+   "planned_peak_px_f": 2.603,
    "planned_cut_px_f": 1.6,
-   "speed_first_px_f": 0.975,
-   "speed_max_px_f": 1.608,
-   "speed_min_px_f": 0.639,
-   "speed_cut_px_f": 0.639,
-   "turn_max_deg_f": 2.507,
-   "min_spp": 0.5444,
+   "speed_first_px_f": 0.972,
+   "speed_max_px_f": 1.585,
+   "speed_min_px_f": 0.637,
+   "speed_cut_px_f": 0.637,
+   "turn_max_deg_f": 2.483,
+   "min_spp": 0.8547,
    "min_margin_out_px": 5.645,
    "speed_scale": 0.71,
    "shrink_scale": 1.0,
@@ -799,30 +574,69 @@
    "keyframes": null
   },
   {
-   "shot_id": "s11",
-   "room_type": "patio",
+   "shot_id": "s08",
+   "room_type": "bedroom",
+   "role": "hero",
+   "category": "tight",
+   "variant": "pull_back",
+   "d": -1,
+   "travel": -1,
+   "suit": 3.0,
+   "interest": 0.4148,
+   "duration_s": 5.0,
+   "frames": [
+    1410,
+    1560
+   ],
+   "zoom_capped": [],
+   "shrink_scale": 1.0,
+   "min_margin_out_px": 2.0001,
+   "min_spp": 0.7768,
+   "speed_scale": 0.7,
+   "speed_first_px_f": 1.516,
+   "speed_max_px_f": 1.516,
+   "speed_min_px_f": 0.739,
+   "speed_cut_px_f": 0.773,
+   "turn_max_deg_f": 0.058,
+   "zoom_start_end": [
+    1.126177,
+    1.02
+   ],
+   "keyframes": [
+    {
+     "t": 0,
+     "cx": 0.527686,
+     "cy": 0.552538,
+     "zoom": 1.126177
+    },
+    {
+     "t": 1,
+     "cx": 0.5,
+     "cy": 0.5,
+     "zoom": 1.02
+    }
+   ]
+  },
+  {
+   "shot_id": "s09",
+   "room_type": "bedroom",
    "role": "detail",
-   "category": "wide",
-   "variant": "tilt_up",
+   "category": "medium",
+   "variant": "pan",
    "d": 1,
    "travel": 1,
-   "suit": 3.0,
-   "interest": 0.1926,
-   "duration_s": 6.95,
+   "suit": 2.5,
+   "interest": 0.0854,
+   "duration_s": 6.0,
    "frames": [
-    1743,
-    1951
+    1560,
+    1740
    ],
    "zoom_capped": [
     {
      "t": 0,
      "from": 1.32,
-     "to": 1.25
-    },
-    {
-     "t": 0,
-     "from": 1.25,
-     "to": 1.2375,
+     "to": 1.3068,
      "why": "spp"
     },
     {
@@ -833,8 +647,8 @@
     },
     {
      "t": 0,
-     "from": 1.2375,
-     "to": 1.225125,
+     "from": 1.3068,
+     "to": 1.293732,
      "why": "spp"
     },
     {
@@ -845,8 +659,8 @@
     },
     {
      "t": 0,
-     "from": 1.225125,
-     "to": 1.212874,
+     "from": 1.293732,
+     "to": 1.280795,
      "why": "spp"
     },
     {
@@ -857,8 +671,8 @@
     },
     {
      "t": 0,
-     "from": 1.212874,
-     "to": 1.200745,
+     "from": 1.280795,
+     "to": 1.267987,
      "why": "spp"
     },
     {
@@ -869,8 +683,8 @@
     },
     {
      "t": 0,
-     "from": 1.200745,
-     "to": 1.188738,
+     "from": 1.267987,
+     "to": 1.255307,
      "why": "spp"
     },
     {
@@ -881,8 +695,8 @@
     },
     {
      "t": 0,
-     "from": 1.188738,
-     "to": 1.176851,
+     "from": 1.255307,
+     "to": 1.242754,
      "why": "spp"
     },
     {
@@ -893,8 +707,8 @@
     },
     {
      "t": 0,
-     "from": 1.176851,
-     "to": 1.165082,
+     "from": 1.242754,
+     "to": 1.230326,
      "why": "spp"
     },
     {
@@ -905,8 +719,8 @@
     },
     {
      "t": 0,
-     "from": 1.165082,
-     "to": 1.153431,
+     "from": 1.230326,
+     "to": 1.218023,
      "why": "spp"
     },
     {
@@ -916,65 +730,60 @@
      "why": "spp"
     }
    ],
-   "shrink_scale": 1.0,
-   "min_margin_out_px": 1.3248,
-   "min_spp": 0.5097,
-   "speed_scale": 0.72,
-   "speed_first_px_f": 1.657,
-   "speed_max_px_f": 1.899,
-   "speed_min_px_f": 0.131,
-   "speed_cut_px_f": 1.22,
-   "turn_max_deg_f": 11.438,
+   "shrink_scale": 0.9,
+   "min_margin_out_px": 2.9545,
+   "min_spp": 0.7647,
+   "speed_scale": 0.648,
+   "speed_first_px_f": 1.976,
+   "speed_max_px_f": 2.172,
+   "speed_min_px_f": 0.703,
+   "speed_cut_px_f": 1.228,
+   "turn_max_deg_f": 2.709,
    "zoom_start_end": [
-    1.111948,
+    1.141112,
     1.012
    ],
    "keyframes": [
     {
      "t": 0,
-     "cx": 0.472732,
-     "cy": 0.539084,
-     "zoom": 1.111948
+     "cx": 0.464148,
+     "cy": 0.5,
+     "zoom": 1.141112
     },
     {
      "t": 0.62,
-     "cx": 0.528674,
+     "cx": 0.522946,
      "cy": 0.5,
-     "zoom": 1.105536
+     "zoom": 1.095806
     },
     {
      "t": 1,
-     "cx": 0.4969,
+     "cx": 0.49721,
      "cy": 0.5,
      "zoom": 1.012
     }
    ]
   },
   {
-   "shot_id": "s12",
-   "room_type": "backyard",
-   "role": "hero",
+   "shot_id": "s10",
+   "room_type": "bedroom",
+   "role": "detail",
    "category": "final",
-   "variant": "tilt_down",
+   "variant": "tilt_up",
    "d": -1,
    "travel": -1,
-   "suit": 2.0,
-   "interest": 0.3288,
-   "duration_s": 5.96,
+   "suit": 2.5,
+   "interest": 0.2022,
+   "duration_s": 6.0,
    "frames": [
-    1951,
-    2130
+    1740,
+    1920
    ],
    "zoom_capped": [
     {
      "t": 0,
      "from": 1.32,
-     "to": 1.25
-    },
-    {
-     "t": 0,
-     "from": 1.25,
-     "to": 1.2375,
+     "to": 1.3068,
      "why": "spp"
     },
     {
@@ -985,8 +794,8 @@
     },
     {
      "t": 0,
-     "from": 1.2375,
-     "to": 1.225125,
+     "from": 1.3068,
+     "to": 1.293732,
      "why": "spp"
     },
     {
@@ -997,8 +806,8 @@
     },
     {
      "t": 0,
-     "from": 1.225125,
-     "to": 1.212874,
+     "from": 1.293732,
+     "to": 1.280795,
      "why": "spp"
     },
     {
@@ -1009,8 +818,8 @@
     },
     {
      "t": 0,
-     "from": 1.212874,
-     "to": 1.200745,
+     "from": 1.280795,
+     "to": 1.267987,
      "why": "spp"
     },
     {
@@ -1021,8 +830,8 @@
     },
     {
      "t": 0,
-     "from": 1.200745,
-     "to": 1.188738,
+     "from": 1.267987,
+     "to": 1.255307,
      "why": "spp"
     },
     {
@@ -1033,8 +842,8 @@
     },
     {
      "t": 0,
-     "from": 1.188738,
-     "to": 1.176851,
+     "from": 1.255307,
+     "to": 1.242754,
      "why": "spp"
     },
     {
@@ -1045,8 +854,8 @@
     },
     {
      "t": 0,
-     "from": 1.176851,
-     "to": 1.165082,
+     "from": 1.242754,
+     "to": 1.230326,
      "why": "spp"
     },
     {
@@ -1057,8 +866,8 @@
     },
     {
      "t": 0,
-     "from": 1.165082,
-     "to": 1.153431,
+     "from": 1.230326,
+     "to": 1.218023,
      "why": "spp"
     },
     {
@@ -1066,37 +875,49 @@
      "from": 1.155762,
      "to": 1.144204,
      "why": "spp"
+    },
+    {
+     "t": 0,
+     "from": 1.218023,
+     "to": 1.205843,
+     "why": "spp"
+    },
+    {
+     "t": 0.62,
+     "from": 1.144204,
+     "to": 1.132762,
+     "why": "spp"
     }
    ],
-   "shrink_scale": 1.0,
-   "min_margin_out_px": 1.2809,
-   "min_spp": 0.5101,
-   "speed_scale": 0.648,
-   "speed_first_px_f": 1.908,
-   "speed_max_px_f": 2.183,
-   "speed_min_px_f": 0.138,
-   "speed_cut_px_f": 1.294,
-   "turn_max_deg_f": 14.39,
+   "shrink_scale": 0.9,
+   "min_margin_out_px": 2.9545,
+   "min_spp": 0.7586,
+   "speed_scale": 0.684,
+   "speed_first_px_f": 2.041,
+   "speed_max_px_f": 2.242,
+   "speed_min_px_f": 0.702,
+   "speed_cut_px_f": 1.193,
+   "turn_max_deg_f": 2.746,
    "zoom_start_end": [
-    1.101524,
+    1.14088,
     1.012
    ],
    "keyframes": [
     {
      "t": 0,
-     "cx": 0.524832,
-     "cy": 0.464746,
-     "zoom": 1.101524
+     "cx": 0.530486,
+     "cy": 0.544057,
+     "zoom": 1.14088
     },
     {
      "t": 0.62,
-     "cx": 0.477431,
-     "cy": 0.523726,
-     "zoom": 1.095806
+     "cx": 0.477502,
+     "cy": 0.5,
+     "zoom": 1.09312
     },
     {
      "t": 1,
-     "cx": 0.5031,
+     "cx": 0.50279,
      "cy": 0.5,
      "zoom": 1.012
     }

@@ -41,7 +41,7 @@ def render(plan, workdir, scale=1.0, concurrency=2, jpeg_quality=95, gl=None):
             } if shot.camera.type == "compound" else {
                 "type": "keyframe_path",
                 "move": shot.camera.move,
-                "keyframes": [k.model_dump() for k in shot.camera.keyframes],
+                "keyframes": [k.model_dump(exclude_none=True) for k in shot.camera.keyframes],
                 **({"projection": shot.camera.projection} if shot.camera.projection else {}),
                 **({"hfov_deg": shot.camera.hfov_deg} if shot.camera.hfov_deg is not None else {}),
             } if shot.camera.type == "keyframe_path" else {

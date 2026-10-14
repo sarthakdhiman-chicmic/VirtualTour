@@ -46,7 +46,7 @@ HFOV_DEG = 75.0
 BEAM = 300
 
 # seconds per category before scaling to the baseline total; clamped to SHOT_RANGE_S after
-DURATION_S = {"exterior": 5.5, "wide": 7.0, "medium": 6.0, "tight": 5.0, "bath": 4.5, "final": 6.0}
+DURATION_S = {"aerial": 7.0, "exterior": 5.5, "wide": 7.0, "medium": 6.0, "tight": 5.0, "bath": 4.5, "final": 6.0}
 SHOT_RANGE_S = (4.0, 8.0)
 TOTAL_EXTRA_S = 5.0       # the tour may run up to 5 s over the baseline total (as v4/v5)
 V_MAX = 3.3               # px/frame: about the v3 rotate pace (2.75 at 7.5 s); shorter shots
@@ -55,6 +55,7 @@ SHRINK_STEP = 0.05        # get a smaller reveal instead of a faster one
 SUIT = {
     # v8: the exterior rises vertically as a crop (as v3 / v5 did; a rotate tilt leaned the house)
     "exterior": {"rise": 4.0, "tilt_up": 1.5, "pull_back": 1.0},
+    "aerial": {"aerial_orbit": 5.0, "pull_back": 1.0},
     "wide": {"tilt_up": 3.0, "crane": 2.75, "arc": 2.75, "pan": 2.5, "tilt_down": 2.0, "pull_back": 1.0},
     "medium": {"tilt_up": 2.5, "pan": 2.5, "crane": 2.25, "arc": 2.25, "tilt_down": 2.0, "pull_back": 1.5},
     "tight": {"pull_back": 3.0, "crane": 2.5, "pan": 2.0, "tilt_up": 2.0, "tilt_down": 1.5},
@@ -62,8 +63,8 @@ SUIT = {
     "final": {"pull_back": 2.5, "tilt_up": 2.5, "pan": 2.0, "tilt_down": 1.5},
 }
 HERO_BONUS = 0.5          # heroes lean toward the travelling reveals
-TRAVELLING = {"tilt_up", "tilt_down", "pan", "arc", "crane", "rise"}
-CROP_VARIANTS = {"crane", "rise"}                  # everything else turns the camera in place ("rotate")
+TRAVELLING = {"tilt_up", "tilt_down", "pan", "arc", "crane", "rise", "aerial_orbit"}
+CROP_VARIANTS = {"crane", "rise", "aerial_orbit"}                  # everything else turns the camera in place ("rotate")
 ARC = {"z": (1.16, 1.14, 1.11, 1.07, 1.012), "r": (1.0, 0.95, 0.8, 0.5), "overlap": 0.18}
 VARIANT_DURATION_S = {"arc": 8.0}         # a circle is a long path: give it time to stay slow
 # crane: lateral travel and start zoom grow with the room's coverage (0 = at/below the tour's
@@ -71,6 +72,11 @@ VARIANT_DURATION_S = {"arc": 8.0}         # a circle is a long path: give it tim
 # 1 it slides ~16% of the width while rising, so it reads as a move, not a stabiliser wobble
 # (v7's 2.5% drift did in big rooms). Lateral room in a crop needs zoom: +-1/(2z) of the width.
 CRANE = {"z0": (1.10, 1.28), "z1": (1.035, 1.06), "rise": 0.16, "drift": (0.025, 0.11)}
+# aerial_orbit (drone exteriors): starts on the house, banked, and eases away: pulls back to near
+# the full view while levelling out and drifting sideways, like a drone backing off in an orbit.
+# Roll (addendum 1.3.3) is crop-only; the roll's extra zoom (roll_fit_scale) counts toward the
+# density floor, so the start zoom is capped by it.
+AERIAL = {"z": (1.2, 1.1, 1.03), "t1": 0.55, "roll": (2.5, 1.0, 0.0), "toward_peak": 0.6, "drift": 0.03}
 # rise (exterior): low -> as high as the photo allows, zooming out to near-full (crop)
 RISE_V8 = {"z0": 1.10, "z1": 1.03, "x_toward_peak": 0.3}
 
@@ -133,6 +139,21 @@ def variant_keyframes(variant, g, sal, d):
         z1 = c["z1"][0] + f * (c["z1"][1] - c["z1"][0])
         cx1, cy1 = g.fit(0.5 + d * drift, 0.5 - c["rise"] / 2 + 0.04, z1)
         return [v2.kf(0, cx0, cy0, z0), v2.kf(1, cx1, cy1, z1)]
+    if variant == "aerial_orbit":
+        a = AERIAL
+        from modules.camera_path import roll_fit_scale
+        z0 = min(a["z"][0], g.zoom_cap / roll_fit_scale(math.radians(a["roll"][0]), OUT_W, OUT_H))
+        zs = (z0, min(a["z"][1], z0), a["z"][2])
+        px = 0.5 + a["toward_peak"] * (sal["peak"]["x"] - 0.5)
+        py = 0.5 + a["toward_peak"] * (sal["peak"]["y"] - 0.5)
+        pts = [(px - d * a["drift"], py), ((px + 0.5) / 2, (py + 0.5) / 2), (0.5 + d * a["drift"], 0.5)]
+        out = []
+        for k, ((cx, cy), z, r) in enumerate(zip(pts, zs, a["roll"])):
+            cx, cy = g.fit(cx, cy, z)
+            kfk = v2.kf((0, a["t1"], 1)[k], cx, cy, z)
+            kfk["roll_deg"] = round(-d * r, 4)
+            out.append(kfk)
+        return out
     if variant == "rise":
         r = RISE_V8
         cx = 0.5 + r["x_toward_peak"] * (sal["peak"]["x"] - 0.5)
@@ -157,6 +178,8 @@ class SalMap:
 
 def category(shots, i, spread, thr, q25):
     s = shots[i]
+    if s.get("room_type") == "aerial":         # drone exterior: its own move, wherever it plays
+        return "aerial"
     if i == len(shots) - 1:
         return "final"
     if v2.is_exterior(s):
@@ -320,6 +343,16 @@ def build(baseline, saliency, images_dir):
                 note["speed_scale"] = round(note["speed_scale"] * extra, 4)
             s["camera"] = {"type": "keyframe_path", "move": f"reveal_{c['variant']}", "keyframes": kfs}
             note.update(motion_stats(kfs, n, g))
+            if any(k.get("roll_deg") for k in kfs):
+                # density with the roll's extra zoom (the renderer scales a rolled frame up)
+                from modules.camera_path import roll_fit_scale
+                kp = KeyframePath(kfs)
+                eff = min(g.spp(cx, cy, z) / roll_fit_scale(math.radians(r), OUT_W, OUT_H)
+                          for (cx, cy, z), r in zip(kp.frames(n), kp.rolls(n)))
+                if eff < g.min_spp - 1e-6:
+                    raise RuntimeError(f"{s['shot_id']}: rolled density {eff:.4f} < floor {g.min_spp:.4f}")
+                note["min_spp"] = round(min(note.get("min_spp", eff), eff), 4)
+                note["roll_deg"] = [k.get("roll_deg") for k in kfs]
             note["zoom_start_end"] = [kfs[0]["zoom"], kfs[-1]["zoom"]]
             note["keyframes"] = kfs
         if g.projection == "rotate":

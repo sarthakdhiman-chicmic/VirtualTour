@@ -10,37 +10,46 @@
   "fps": 30,
   "codec": "h264"
  },
- "total_duration_s": 71.0,
+ "total_duration_s": 64.0,
  "shots": [
   {
    "shot_id": "s01",
    "order": 1,
-   "asset_id": "img_10",
-   "image_uri": "img_10.png",
+   "asset_id": "img_03",
+   "image_uri": "img_03.webp",
    "source": {
-    "width": 1088,
-    "height": 813
+    "width": 1920,
+    "height": 1280
    },
-   "room_key": "exterior",
-   "room_type": "exterior",
+   "room_key": "aerial",
+   "room_type": "aerial",
    "narrative_stage": "exterior_open",
    "role": "hero",
-   "duration_s": 5.46,
+   "duration_s": 7.0,
    "camera": {
     "type": "keyframe_path",
-    "move": "reveal_rise",
+    "move": "reveal_aerial_orbit",
     "keyframes": [
      {
       "t": 0,
-      "cx": 0.47128,
-      "cy": 0.508773,
-      "zoom": 1.063725
+      "cx": 0.493524,
+      "cy": 0.500042,
+      "zoom": 1.146247,
+      "roll_deg": -2.5
+     },
+     {
+      "t": 0.55,
+      "cx": 0.509295,
+      "cy": 0.500021,
+      "zoom": 1.078515,
+      "roll_deg": -1.0
      },
      {
       "t": 1,
-      "cx": 0.486448,
-      "cy": 0.366775,
-      "zoom": 1.03
+      "cx": 0.513552,
+      "cy": 0.5,
+      "zoom": 1.03,
+      "roll_deg": -0.0
      }
     ]
    },
@@ -52,36 +61,34 @@
   {
    "shot_id": "s02",
    "order": 2,
-   "asset_id": "img_02",
-   "image_uri": "img_02.png",
+   "asset_id": "img_01",
+   "image_uri": "img_01.webp",
    "source": {
-    "width": 1087,
-    "height": 815
+    "width": 1920,
+    "height": 1280
    },
-   "room_key": "exterior",
-   "room_type": "exterior",
-   "narrative_stage": "exterior_open",
-   "role": "detail",
-   "duration_s": 5.46,
+   "room_key": "living_room",
+   "room_type": "living_room",
+   "narrative_stage": "living",
+   "role": "hero",
+   "duration_s": 7.0,
    "camera": {
     "type": "keyframe_path",
-    "move": "reveal_pull_back",
+    "move": "reveal_crane",
     "keyframes": [
      {
       "t": 0,
-      "cx": 0.520355,
-      "cy": 0.492755,
-      "zoom": 1.124585
+      "cx": 0.560237,
+      "cy": 0.56368,
+      "zoom": 1.195937
      },
      {
       "t": 1,
-      "cx": 0.5,
-      "cy": 0.5,
-      "zoom": 1.02
+      "cx": 0.472854,
+      "cy": 0.46,
+      "zoom": 1.059612
      }
-    ],
-    "projection": "rotate",
-    "hfov_deg": 75.0
+    ]
    },
    "transition_in": {
     "type": "cut",
@@ -91,34 +98,42 @@
   {
    "shot_id": "s03",
    "order": 3,
-   "asset_id": "img_01",
-   "image_uri": "img_01.png",
+   "asset_id": "img_00",
+   "image_uri": "img_00.webp",
    "source": {
-    "width": 1221,
-    "height": 814
+    "width": 1920,
+    "height": 1280
    },
-   "room_key": "front_exterior",
-   "room_type": "front_exterior",
-   "narrative_stage": "exterior_open",
-   "role": "hero",
-   "duration_s": 5.46,
+   "room_key": "living_room",
+   "room_type": "living_room",
+   "narrative_stage": "living",
+   "role": "detail",
+   "duration_s": 7.0,
    "camera": {
     "type": "keyframe_path",
-    "move": "reveal_rise",
+    "move": "reveal_tilt_up",
     "keyframes": [
      {
       "t": 0,
-      "cx": 0.48848,
-      "cy": 0.555911,
-      "zoom": 1.079224
+      "cx": 0.467651,
+      "cy": 0.547019,
+      "zoom": 1.150114
+     },
+     {
+      "t": 0.62,
+      "cx": 0.524198,
+      "cy": 0.5,
+      "zoom": 1.098803
      },
      {
       "t": 1,
-      "cx": 0.48848,
-      "cy": 0.411104,
-      "zoom": 1.03
+      "cx": 0.49721,
+      "cy": 0.5,
+      "zoom": 1.012
      }
-    ]
+    ],
+    "projection": "rotate",
+    "hfov_deg": 75.0
    },
    "transition_in": {
     "type": "cut",
@@ -128,63 +143,26 @@
   {
    "shot_id": "s04",
    "order": 4,
-   "asset_id": "img_03",
-   "image_uri": "img_03.png",
+   "asset_id": "img_05",
+   "image_uri": "img_05.webp",
    "source": {
-    "width": 1223,
-    "height": 818
-   },
-   "room_key": "living_room",
-   "room_type": "living_room",
-   "narrative_stage": "living",
-   "role": "hero",
-   "duration_s": 6.95,
-   "camera": {
-    "type": "keyframe_path",
-    "move": "reveal_crane",
-    "keyframes": [
-     {
-      "t": 0,
-      "cx": 0.538373,
-      "cy": 0.5736,
-      "zoom": 1.139277
-     },
-     {
-      "t": 1,
-      "cx": 0.478976,
-      "cy": 0.46,
-      "zoom": 1.046069
-     }
-    ]
-   },
-   "transition_in": {
-    "type": "cut",
-    "duration_s": 0.0
-   }
-  },
-  {
-   "shot_id": "s05",
-   "order": 5,
-   "asset_id": "img_00",
-   "image_uri": "img_00.png",
-   "source": {
-    "width": 1222,
-    "height": 818
+    "width": 1920,
+    "height": 1280
    },
    "room_key": "living_room",
    "room_type": "living_room",
    "narrative_stage": "living",
    "role": "detail",
-   "duration_s": 4.97,
+   "duration_s": 5.0,
    "camera": {
     "type": "keyframe_path",
     "move": "reveal_pull_back",
     "keyframes": [
      {
       "t": 0,
-      "cx": 0.479907,
-      "cy": 0.558782,
-      "zoom": 1.102657
+      "cx": 0.522317,
+      "cy": 0.573807,
+      "zoom": 1.127771
      },
      {
       "t": 1,
@@ -202,38 +180,75 @@
    }
   },
   {
-   "shot_id": "s06",
-   "order": 6,
-   "asset_id": "img_05",
-   "image_uri": "img_05.png",
+   "shot_id": "s05",
+   "order": 5,
+   "asset_id": "img_09",
+   "image_uri": "img_09.webp",
    "source": {
-    "width": 1221,
-    "height": 816
+    "width": 1920,
+    "height": 1280
    },
    "room_key": "kitchen",
    "room_type": "kitchen",
    "narrative_stage": "living",
    "role": "hero",
-   "duration_s": 5.96,
+   "duration_s": 7.0,
+   "camera": {
+    "type": "keyframe_path",
+    "move": "reveal_crane",
+    "keyframes": [
+     {
+      "t": 0,
+      "cx": 0.453471,
+      "cy": 0.5752,
+      "zoom": 1.157392
+     },
+     {
+      "t": 1,
+      "cx": 0.522464,
+      "cy": 0.46,
+      "zoom": 1.049223
+     }
+    ]
+   },
+   "transition_in": {
+    "type": "cut",
+    "duration_s": 0.0
+   }
+  },
+  {
+   "shot_id": "s06",
+   "order": 6,
+   "asset_id": "img_04",
+   "image_uri": "img_04.webp",
+   "source": {
+    "width": 1920,
+    "height": 1280
+   },
+   "room_key": "kitchen",
+   "room_type": "kitchen",
+   "narrative_stage": "living",
+   "role": "detail",
+   "duration_s": 6.0,
    "camera": {
     "type": "keyframe_path",
     "move": "reveal_pan",
     "keyframes": [
      {
       "t": 0,
-      "cx": 0.532547,
-      "cy": 0.497939,
-      "zoom": 1.114358
+      "cx": 0.535852,
+      "cy": 0.5,
+      "zoom": 1.141112
      },
      {
       "t": 0.62,
-      "cx": 0.471083,
-      "cy": 0.49785,
-      "zoom": 1.108253
+      "cx": 0.477054,
+      "cy": 0.5,
+      "zoom": 1.095806
      },
      {
       "t": 1,
-      "cx": 0.5031,
+      "cx": 0.50279,
       "cy": 0.5,
       "zoom": 1.012
      }
@@ -249,34 +264,62 @@
   {
    "shot_id": "s07",
    "order": 7,
-   "asset_id": "img_11",
-   "image_uri": "img_11.png",
+   "asset_id": "img_07",
+   "image_uri": "img_07.webp",
    "source": {
-    "width": 1220,
-    "height": 818
+    "width": 1920,
+    "height": 1280
    },
-   "room_key": "dining_room",
-   "room_type": "dining_room",
+   "room_key": "kitchen",
+   "room_type": "kitchen",
    "narrative_stage": "living",
-   "role": "hero",
-   "duration_s": 4.97,
+   "role": "detail",
+   "duration_s": 8.0,
    "camera": {
-    "type": "keyframe_path",
-    "move": "reveal_crane",
-    "keyframes": [
+    "type": "compound",
+    "move": "reveal_arc",
+    "start": {
+     "cx": 0.467924,
+     "cy": 0.5,
+     "zoom": 1.114981
+    },
+    "segments": [
      {
-      "t": 0,
-      "cx": 0.486862,
-      "cy": 0.57165,
-      "zoom": 1.080741
+      "t0": 0.0,
+      "t1": 0.43,
+      "cx": 0.5,
+      "cy": 0.427322,
+      "zoom": 1.101298
      },
      {
-      "t": 1,
-      "cx": 0.515902,
-      "cy": 0.46,
-      "zoom": 1.035
+      "t0": 0.07,
+      "t1": 0.68,
+      "cx": 0.518053,
+      "cy": 0.5,
+      "zoom": 1.080642
+     },
+     {
+      "t0": 0.32,
+      "t1": 0.93,
+      "cx": 0.5,
+      "cy": 0.530698,
+      "zoom": 1.052846
+     },
+     {
+      "t0": 0.57,
+      "t1": 1.0,
+      "cx": 0.5,
+      "cy": 0.5,
+      "zoom": 1.012
      }
-    ]
+    ],
+    "timing": {
+     "s0": 0.7053,
+     "s1": 0.7053,
+     "turn": 60.0
+    },
+    "projection": "rotate",
+    "hfov_deg": 75.0
    },
    "transition_in": {
     "type": "cut",
@@ -286,38 +329,32 @@
   {
    "shot_id": "s08",
    "order": 8,
-   "asset_id": "img_04",
-   "image_uri": "img_04.png",
+   "asset_id": "img_02",
+   "image_uri": "img_02.webp",
    "source": {
-    "width": 1221,
-    "height": 816
+    "width": 1920,
+    "height": 1280
    },
-   "room_key": "dining_room",
-   "room_type": "dining_room",
-   "narrative_stage": "living",
-   "role": "detail",
-   "duration_s": 5.96,
+   "room_key": "bedroom",
+   "room_type": "bedroom",
+   "narrative_stage": "private",
+   "role": "hero",
+   "duration_s": 5.0,
    "camera": {
     "type": "keyframe_path",
-    "move": "reveal_tilt_up",
+    "move": "reveal_pull_back",
     "keyframes": [
      {
       "t": 0,
-      "cx": 0.527201,
-      "cy": 0.539361,
-      "zoom": 1.111948
-     },
-     {
-      "t": 0.62,
-      "cx": 0.471326,
-      "cy": 0.5,
-      "zoom": 1.105536
+      "cx": 0.527686,
+      "cy": 0.552538,
+      "zoom": 1.126177
      },
      {
       "t": 1,
-      "cx": 0.5031,
+      "cx": 0.5,
       "cy": 0.5,
-      "zoom": 1.012
+      "zoom": 1.02
      }
     ],
     "projection": "rotate",
@@ -331,36 +368,36 @@
   {
    "shot_id": "s09",
    "order": 9,
-   "asset_id": "img_06",
-   "image_uri": "img_06.png",
+   "asset_id": "img_08",
+   "image_uri": "img_08.webp",
    "source": {
-    "width": 1222,
-    "height": 819
+    "width": 1920,
+    "height": 1280
    },
    "room_key": "bedroom",
    "room_type": "bedroom",
    "narrative_stage": "private",
-   "role": "hero",
-   "duration_s": 4.96,
+   "role": "detail",
+   "duration_s": 6.0,
    "camera": {
     "type": "keyframe_path",
     "move": "reveal_pan",
     "keyframes": [
      {
       "t": 0,
-      "cx": 0.471904,
+      "cx": 0.464148,
       "cy": 0.5,
-      "zoom": 1.097534
+      "zoom": 1.141112
      },
      {
       "t": 0.62,
-      "cx": 0.524071,
+      "cx": 0.522946,
       "cy": 0.5,
-      "zoom": 1.092468
+      "zoom": 1.095806
      },
      {
       "t": 1,
-      "cx": 0.4969,
+      "cx": 0.49721,
       "cy": 0.5,
       "zoom": 1.012
      }
@@ -376,146 +413,36 @@
   {
    "shot_id": "s10",
    "order": 10,
-   "asset_id": "img_09",
-   "image_uri": "img_09.png",
+   "asset_id": "img_06",
+   "image_uri": "img_06.webp",
    "source": {
-    "width": 1223,
-    "height": 817
+    "width": 1920,
+    "height": 1280
    },
-   "room_key": "patio",
-   "room_type": "patio",
-   "narrative_stage": "amenity_close",
-   "role": "hero",
-   "duration_s": 7.94,
-   "camera": {
-    "type": "compound",
-    "move": "reveal_arc",
-    "start": {
-     "cx": 0.532076,
-     "cy": 0.5,
-     "zoom": 1.114981
-    },
-    "segments": [
-     {
-      "t0": 0.0,
-      "t1": 0.43,
-      "cx": 0.5,
-      "cy": 0.426918,
-      "zoom": 1.101298
-     },
-     {
-      "t0": 0.07,
-      "t1": 0.68,
-      "cx": 0.481947,
-      "cy": 0.5,
-      "zoom": 1.080642
-     },
-     {
-      "t0": 0.32,
-      "t1": 0.93,
-      "cx": 0.5,
-      "cy": 0.530925,
-      "zoom": 1.052846
-     },
-     {
-      "t0": 0.57,
-      "t1": 1.0,
-      "cx": 0.5,
-      "cy": 0.5,
-      "zoom": 1.012
-     }
-    ],
-    "timing": {
-     "s0": 0.7004,
-     "s1": 0.7004,
-     "turn": 60.0
-    },
-    "projection": "rotate",
-    "hfov_deg": 75.0
-   },
-   "transition_in": {
-    "type": "cut",
-    "duration_s": 0.0
-   }
-  },
-  {
-   "shot_id": "s11",
-   "order": 11,
-   "asset_id": "img_07",
-   "image_uri": "img_07.png",
-   "source": {
-    "width": 1223,
-    "height": 813
-   },
-   "room_key": "patio",
-   "room_type": "patio",
-   "narrative_stage": "amenity_close",
+   "room_key": "bedroom",
+   "room_type": "bedroom",
+   "narrative_stage": "private",
    "role": "detail",
-   "duration_s": 6.95,
+   "duration_s": 6.0,
    "camera": {
     "type": "keyframe_path",
     "move": "reveal_tilt_up",
     "keyframes": [
      {
       "t": 0,
-      "cx": 0.472732,
-      "cy": 0.539084,
-      "zoom": 1.111948
+      "cx": 0.530486,
+      "cy": 0.544057,
+      "zoom": 1.14088
      },
      {
       "t": 0.62,
-      "cx": 0.528674,
+      "cx": 0.477502,
       "cy": 0.5,
-      "zoom": 1.105536
+      "zoom": 1.09312
      },
      {
       "t": 1,
-      "cx": 0.4969,
-      "cy": 0.5,
-      "zoom": 1.012
-     }
-    ],
-    "projection": "rotate",
-    "hfov_deg": 75.0
-   },
-   "transition_in": {
-    "type": "cut",
-    "duration_s": 0.0
-   }
-  },
-  {
-   "shot_id": "s12",
-   "order": 12,
-   "asset_id": "img_08",
-   "image_uri": "img_08.png",
-   "source": {
-    "width": 1224,
-    "height": 815
-   },
-   "room_key": "backyard",
-   "room_type": "backyard",
-   "narrative_stage": "amenity_close",
-   "role": "hero",
-   "duration_s": 5.96,
-   "camera": {
-    "type": "keyframe_path",
-    "move": "reveal_tilt_down",
-    "keyframes": [
-     {
-      "t": 0,
-      "cx": 0.524832,
-      "cy": 0.464746,
-      "zoom": 1.101524
-     },
-     {
-      "t": 0.62,
-      "cx": 0.477431,
-      "cy": 0.523726,
-      "zoom": 1.095806
-     },
-     {
-      "t": 1,
-      "cx": 0.5031,
+      "cx": 0.50279,
       "cy": 0.5,
       "zoom": 1.012
      }
@@ -530,12 +457,11 @@
   }
  ],
  "warnings": [
-  "below_min_total",
-  "total_out_of_range"
+  "below_min_total"
  ],
  "provenance": {
   "scoring_config_version": "0.2.0",
   "planner_config_version": "tour_v8-0.1/v8/speed0.7",
-  "plan_hash": "ce954386d6ed3ebe32b662bdf9623d2feec3829c4a226ec395f0dccb83c09477"
+  "plan_hash": "bab217bfad4dda1ff6e0e4cb587803e491b446cef63e7a5e6a9c4daf589ca352"
  }
 }

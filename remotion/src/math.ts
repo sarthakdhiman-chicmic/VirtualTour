@@ -191,7 +191,7 @@ export function monotoneEval(ts: number[], ys: number[], ms: number[], x: number
     + (-2 * s3 + 3 * s2) * ys[k + 1] + (s3 - s2) * h * ms[k + 1];
 }
 
-export type Keyframe = { t: number; cx: number; cy: number; zoom: number };
+export type Keyframe = { t: number; cx: number; cy: number; zoom: number; roll_deg?: number };
 
 // Camera at raw shot progress t (0..1): time profile first, then per-channel monotone cubic.
 export function keyframePathAt(keyframes: Keyframe[], t: number) {
@@ -201,7 +201,10 @@ export function keyframePathAt(keyframes: Keyframe[], t: number) {
     const ys = keyframes.map((k) => k[c]);
     return monotoneEval(ts, ys, monotoneSlopes(ts, ys), u);
   };
-  return { cx: channel('cx'), cy: channel('cy'), zoom: channel('zoom'), roll: 0 };
+  // optional roll (addendum 1.3.3), degrees -> radians; 0 when no keyframe sets it
+  const rs = keyframes.map((k) => k.roll_deg ?? 0);
+  const roll = rs.some((r) => r !== 0) ? monotoneEval(ts, rs, monotoneSlopes(ts, rs), u) * Math.PI / 180 : 0;
+  return { cx: channel('cx'), cy: channel('cy'), zoom: channel('zoom'), roll };
 }
 
 // ---------------------------------------------------------------------------------------------

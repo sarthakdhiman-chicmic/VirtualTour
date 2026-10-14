@@ -83,11 +83,30 @@ def monotone_eval(ts: list[float], ys: list[float], ms: list[float], x: float) -
             + (-2 * s3 + 3 * s2) * ys[k + 1] + (s3 - s2) * h * ms[k + 1])
 
 
+MAX_ROLL_DEG = 5.0
+
+
+def roll_fit_scale(roll_rad: float, out_w: int, out_h: int) -> float:
+    """Extra zoom that keeps a frame rolled by roll_rad inside its unrolled window (mirrors
+    rollFitScale in remotion/src/math.ts). The window the planner validated is never exceeded."""
+    a = abs(roll_rad)
+    return math.cos(a) + (max(out_w, out_h) / min(out_w, out_h)) * math.sin(a)
+
+
 class KeyframePath:
     def __init__(self, keyframes: list[dict]):
         self.ts = [k["t"] for k in keyframes]
         self.ys = {c: [k[c] for k in keyframes] for c in CHANNELS}
         self.ms = {c: monotone_slopes(self.ts, self.ys[c]) for c in CHANNELS}
+        # optional roll (addendum 1.3.3): degrees, interpolated like the other channels
+        self.roll = [k.get("roll_deg") or 0.0 for k in keyframes]
+        self.roll_ms = monotone_slopes(self.ts, self.roll)
+
+    def roll_deg_at(self, t: float) -> float:
+        return monotone_eval(self.ts, self.roll, self.roll_ms, hermite_profile(t))
+
+    def rolls(self, n: int) -> list[float]:
+        return [self.roll_deg_at(f / max(1, n - 1)) for f in range(n)]
 
     def at_progress(self, u: float) -> tuple[float, float, float]:
         return tuple(monotone_eval(self.ts, self.ys[c], self.ms[c], u) for c in CHANNELS)
@@ -111,6 +130,8 @@ def validate_keyframes(keyframes: list[dict]) -> None:
     for k in keyframes:
         if k["zoom"] <= 0:
             raise ValueError("keyframe_path: zoom must be positive")
+        if abs(k.get("roll_deg") or 0.0) > MAX_ROLL_DEG:
+            raise ValueError(f"keyframe_path: roll_deg must be within +-{MAX_ROLL_DEG}")
 
 
 # ---------------------------------------------------------------------------------------------

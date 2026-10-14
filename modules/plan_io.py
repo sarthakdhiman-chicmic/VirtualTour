@@ -30,6 +30,7 @@ class Keyframe(BaseModel):
     cx: float
     cy: float
     zoom: float
+    roll_deg: Optional[float] = None   # addendum 1.3.3, crop projection only
     model_config = ConfigDict(extra='ignore')
 
 class Segment(BaseModel):
@@ -143,6 +144,9 @@ def check_camera_type(plan: Plan):
         if shot.camera.type in ("keyframe_path", "compound"):
             if shot.camera.projection is not None and shot.camera.projection not in PROJECTIONS:
                 raise ValueError(f"unsupported_projection: {shot.camera.projection}")
+            if (shot.camera.type == "keyframe_path" and shot.camera.projection == "rotate"
+                    and any(k.roll_deg for k in shot.camera.keyframes or [])):
+                raise ValueError(f"invalid_plan: roll_deg in shot {shot.shot_id} is crop-only")
             if shot.camera.hfov_deg is not None and not 20 <= shot.camera.hfov_deg <= 120:
                 raise ValueError(f"invalid_plan: hfov_deg in shot {shot.shot_id} must be 20-120")
 

@@ -1,148 +1,122 @@
 {
  "labels": {
-  "img_00.png": {
-   "source_file": "Screenshot 2026-10-14 at 12.33.25\u202fPM.png",
+  "img_00.webp": {
+   "source_file": "6a0d3e15-66cd-4671-a308-b2d4700ab160.webp",
    "room_type": "living_room"
   },
-  "img_01.png": {
-   "source_file": "Screenshot 2026-10-14 at 12.33.44\u202fPM.png",
-   "room_type": "front_exterior"
-  },
-  "img_02.png": {
-   "source_file": "Screenshot 2026-10-14 at 12.33.58\u202fPM.png",
-   "room_type": "exterior"
-  },
-  "img_03.png": {
-   "source_file": "Screenshot 2026-10-14 at 12.34.12\u202fPM.png",
+  "img_01.webp": {
+   "source_file": "7282e44b-bc23-48f2-b03a-d4f0d250c8be.webp",
    "room_type": "living_room"
   },
-  "img_04.png": {
-   "source_file": "Screenshot 2026-10-14 at 12.34.46\u202fPM.png",
-   "room_type": "dining_room"
-  },
-  "img_05.png": {
-   "source_file": "Screenshot 2026-10-14 at 12.34.57\u202fPM.png",
-   "room_type": "kitchen"
-  },
-  "img_06.png": {
-   "source_file": "Screenshot 2026-10-14 at 12.35.15\u202fPM.png",
+  "img_02.webp": {
+   "source_file": "7a9c5028-6ac1-4e88-9b8e-0b1e46944b56.webp",
    "room_type": "bedroom"
   },
-  "img_07.png": {
-   "source_file": "Screenshot 2026-10-14 at 12.35.32\u202fPM.png",
-   "room_type": "patio"
+  "img_03.webp": {
+   "source_file": "9237926e-c981-4957-b7d0-bb844ce60de6.webp",
+   "room_type": "aerial"
   },
-  "img_08.png": {
-   "source_file": "Screenshot 2026-10-14 at 12.35.44\u202fPM.png",
-   "room_type": "backyard"
+  "img_04.webp": {
+   "source_file": "c9f931c6-0b54-4cba-b1cd-ad81c2a24cc4.webp",
+   "room_type": "kitchen"
   },
-  "img_09.png": {
-   "source_file": "Screenshot 2026-10-14 at 12.35.58\u202fPM.png",
-   "room_type": "patio"
+  "img_05.webp": {
+   "source_file": "d8ab3b2f-c26b-40eb-9d4f-cd5907ea91de.webp",
+   "room_type": "living_room"
   },
-  "img_10.png": {
-   "source_file": "Screenshot 2026-10-14 at 12.36.13\u202fPM.png",
-   "room_type": "exterior"
+  "img_06.webp": {
+   "source_file": "dc291d59-7f70-447e-893c-3c984f5b9c32.webp",
+   "room_type": "bedroom"
   },
-  "img_11.png": {
-   "source_file": "Screenshot 2026-10-14 at 12.36.38\u202fPM.png",
-   "room_type": "dining_room"
+  "img_07.webp": {
+   "source_file": "ddddf4b5-45a0-40c3-bb50-1738a441f42a.webp",
+   "room_type": "kitchen"
+  },
+  "img_08.webp": {
+   "source_file": "e751dc57-1663-4f75-bb1f-2657c989996e.webp",
+   "room_type": "bedroom"
+  },
+  "img_09.webp": {
+   "source_file": "ed198beb-bff5-4288-94ad-70337a83c221.webp",
+   "room_type": "kitchen"
   }
  },
  "scores": {
   "img_00": {
    "overall": null,
-   "coverage": 0.5,
+   "coverage": 0.0,
    "framing": 1.0,
-   "lighting": 0.924,
-   "depth_of_field": 0.621
+   "lighting": 0.925,
+   "depth_of_field": 0.417
   },
   "img_01": {
    "overall": null,
-   "coverage": 0.372,
-   "framing": 0.63,
-   "lighting": 0.951,
-   "depth_of_field": 0.979
+   "coverage": 0.0,
+   "framing": 0.817,
+   "lighting": 0.927,
+   "depth_of_field": 0.827
   },
   "img_02": {
    "overall": null,
-   "coverage": 0.5,
-   "framing": 0.464,
-   "lighting": 0.943,
-   "depth_of_field": 0.999
+   "coverage": 0.0,
+   "framing": 0.803,
+   "lighting": 0.906,
+   "depth_of_field": 0.566
   },
   "img_03": {
    "overall": null,
-   "coverage": 0.667,
-   "framing": 0.891,
-   "lighting": 0.924,
-   "depth_of_field": 0.933
+   "coverage": 0.5,
+   "framing": 0.42,
+   "lighting": 0.936,
+   "depth_of_field": 0.998
   },
   "img_04": {
    "overall": null,
-   "coverage": 0.15,
-   "framing": 0.728,
-   "lighting": 0.927,
-   "depth_of_field": 0.792
+   "coverage": 0.0,
+   "framing": 0.761,
+   "lighting": 0.943,
+   "depth_of_field": 0.964
   },
   "img_05": {
    "overall": null,
-   "coverage": 0.583,
-   "framing": 0.591,
-   "lighting": 0.886,
-   "depth_of_field": 0.964
+   "coverage": 0.0,
+   "framing": 0.815,
+   "lighting": 0.875,
+   "depth_of_field": 0.516
   },
   "img_06": {
    "overall": null,
-   "coverage": 0.242,
-   "framing": 0.729,
-   "lighting": 0.899,
-   "depth_of_field": 0.762
+   "coverage": 0.244,
+   "framing": 0.625,
+   "lighting": 0.932,
+   "depth_of_field": 0.496
   },
   "img_07": {
    "overall": null,
-   "coverage": 0.667,
-   "framing": 0.382,
-   "lighting": 0.96,
-   "depth_of_field": 0.999
+   "coverage": 0.167,
+   "framing": 0.604,
+   "lighting": 0.886,
+   "depth_of_field": 0.949
   },
   "img_08": {
    "overall": null,
-   "coverage": 0.5,
-   "framing": 0.603,
-   "lighting": 0.949,
-   "depth_of_field": 1.0
+   "coverage": 0.0,
+   "framing": 0.733,
+   "lighting": 0.895,
+   "depth_of_field": 0.645
   },
   "img_09": {
    "overall": null,
-   "coverage": 0.393,
-   "framing": 0.767,
-   "lighting": 0.889,
-   "depth_of_field": 0.982
-  },
-  "img_10": {
-   "overall": null,
-   "coverage": 0.368,
-   "framing": 0.815,
-   "lighting": 0.941,
-   "depth_of_field": 0.999
-  },
-  "img_11": {
-   "overall": null,
-   "coverage": 0.434,
-   "framing": 0.913,
-   "lighting": 0.938,
-   "depth_of_field": 0.872
+   "coverage": 0.5,
+   "framing": 0.723,
+   "lighting": 0.834,
+   "depth_of_field": 0.935
   }
  },
  "sequence": [
-  "exterior",
-  "front_exterior",
+  "aerial",
   "living_room",
   "kitchen",
-  "dining_room",
-  "bedroom",
-  "patio",
-  "backyard"
+  "bedroom"
  ]
 }

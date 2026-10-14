@@ -14,8 +14,8 @@ The delivery file:
 - AAC 128 kbps stereo (Remotion's track is silent; this keeps the audio behaviour)
 - colour passed through unchanged (BT.601 matrix, limited range, tagged as Remotion tags it), so
   the picture looks exactly as before
-x264 runs with sliced threads, which is deterministic (the default frame threading was not, with
-a VBV cap), so the same master always gives a byte-identical delivery file.
+x264 runs single-threaded per chunk, chunks in parallel (see deliver), so the same master always
+gives a byte-identical delivery file.
 """
 import json
 import os
@@ -49,29 +49,64 @@ def vbv_min_fullness(frame_bits_decode_order, fps, maxrate=MAXRATE, bufsize=BUFS
     return low / size
 
 
-def deliver(master_path: str, out_path: str, fps: int) -> str:
-    cmd = [
-        "ffmpeg", "-y", "-loglevel", "error", "-i", master_path,
-        "-map", "0:v:0", "-map", "0:a:0?",
-        "-c:v", "libx264", "-preset", PRESET, "-crf", str(CRF),
-        "-maxrate", MAXRATE, "-bufsize", BUFSIZE,
-        "-profile:v", "high", "-level:v", LEVEL,
-        "-g", str(GOP_S * fps), "-keyint_min", str(fps),
-        # sliced threads: x264's default frame threading with a VBV cap was not deterministic (374
-        # of 600 frames differed between two encodes of the same master); slice threading is
-        # byte-identical run to run, ~5.7x faster than one thread, files ~1.6% larger
-        "-x264-params", "nal-hrd=vbr:sliced-threads=1",
-        "-pix_fmt", "yuv420p", "-colorspace", "bt470bg", "-color_range", "tv",
-        "-c:a", "aac", "-b:a", AUDIO_BITRATE, "-ac", "2",
-        "-movflags", "+faststart",
-        out_path,
-    ]
+CHUNK_GOPS = 2           # frames per parallel chunk = CHUNK_GOPS * GOP; each chunk starts on a keyframe
+VBV_INIT_CHUNK = 0.5     # a chunk assumes the player's buffer is only half full when it starts
+
+
+def _run(cmd):
     try:
         subprocess.run(cmd, check=True, capture_output=True, text=True, timeout=1800)
     except subprocess.CalledProcessError as e:
         raise RuntimeError(f"encode_failed: {e.stderr[-2000:]}")
     except subprocess.TimeoutExpired:
         raise RuntimeError("encode_failed: timeout")
+
+
+def _frame_count(path: str) -> int:
+    out = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-count_packets", "-show_entries",
+                          "stream=nb_read_packets", "-of", "csv=p=0", path],
+                         check=True, capture_output=True, text=True).stdout
+    return int(out.strip())
+
+
+def deliver(master_path: str, out_path: str, fps: int) -> str:
+    """Re-encode the master in parallel chunks, each with ONE x264 thread, then join them.
+    Every multi-threaded x264 mode with a VBV cap varied run to run (frame threads, sliced threads,
+    sliced + lookahead-threads=1: 4-5 distinct outputs in 5 encodes of the same clip); one thread
+    is byte-identical. Chunks are whole GOPs, so each starts on a keyframe and the join is a plain
+    stream copy. Each chunk assumes a half-full player buffer at its start (VBV_INIT_CHUNK), so the
+    joined file stays inside the cap; modules/probe.py simulates the whole file to confirm."""
+    import concurrent.futures
+    import os
+    import tempfile
+
+    n = _frame_count(master_path)
+    step = CHUNK_GOPS * GOP_S * fps
+    ranges = [(a, min(n, a + step)) for a in range(0, n, step)]
+    with tempfile.TemporaryDirectory(prefix="deliver_") as td:
+        def encode(k_ab):
+            k, (a, b) = k_ab
+            part = os.path.join(td, f"part_{k:04d}.mp4")
+            _run(["ffmpeg", "-y", "-loglevel", "error", "-i", master_path, "-map", "0:v:0",
+                  "-vf", f"trim=start_frame={a}:end_frame={b},setpts=PTS-STARTPTS",
+                  "-c:v", "libx264", "-preset", PRESET, "-crf", str(CRF),
+                  "-maxrate", MAXRATE, "-bufsize", BUFSIZE,
+                  "-profile:v", "high", "-level:v", LEVEL,
+                  "-g", str(GOP_S * fps), "-keyint_min", str(fps),
+                  "-x264-params", f"nal-hrd=vbr:threads=1:vbv-init={VBV_INIT_CHUNK}",
+                  "-pix_fmt", "yuv420p", "-colorspace", "bt470bg", "-color_range", "tv",
+                  "-r", str(fps), "-an", part])
+            return part
+        workers = max(1, min(len(ranges), os.cpu_count() or 1))
+        with concurrent.futures.ThreadPoolExecutor(workers) as ex:
+            parts = list(ex.map(encode, enumerate(ranges)))
+        listing = os.path.join(td, "parts.txt")
+        with open(listing, "w") as f:
+            f.writelines(f"file '{p}'\n" for p in parts)
+        _run(["ffmpeg", "-y", "-loglevel", "error", "-f", "concat", "-safe", "0", "-i", listing,
+              "-i", master_path, "-map", "0:v:0", "-map", "1:a:0?",
+              "-c:v", "copy", "-c:a", "aac", "-b:a", AUDIO_BITRATE, "-ac", "2",
+              "-movflags", "+faststart", out_path])
     return out_path
 
 
