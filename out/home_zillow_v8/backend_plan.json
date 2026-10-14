@@ -1,0 +1,457 @@
+{
+ "plan_version": "1.2",
+ "listing_id": "home_zillow",
+ "mode": "cinematic",
+ "fallback_reason": null,
+ "preset": "property_showcase",
+ "output": {
+  "width": 1920,
+  "height": 1080,
+  "fps": 30,
+  "codec": "h264"
+ },
+ "total_duration_s": 66.0,
+ "shots": [
+  {
+   "shot_id": "s01",
+   "order": 1,
+   "asset_id": "img_10",
+   "image_uri": "img_10.png",
+   "source": {
+    "width": 1088,
+    "height": 813
+   },
+   "room_key": "exterior",
+   "room_type": "exterior",
+   "narrative_stage": "exterior_open",
+   "role": "hero",
+   "duration_s": 5.5,
+   "camera": {
+    "type": "ken_burns",
+    "easing": "linear",
+    "preset": "push_in_gentle",
+    "start": {
+     "cx": 0.490196,
+     "cy": 0.559281,
+     "zoom": 1.02,
+     "roll_deg": 0.0
+    },
+    "end": {
+     "cx": 0.541359,
+     "cy": 0.572119,
+     "zoom": 1.09344,
+     "roll_deg": 0.3
+    }
+   },
+   "transition_in": {
+    "type": "cut",
+    "duration_s": 0.0
+   }
+  },
+  {
+   "shot_id": "s02",
+   "order": 2,
+   "asset_id": "img_02",
+   "image_uri": "img_02.png",
+   "source": {
+    "width": 1087,
+    "height": 815
+   },
+   "room_key": "exterior",
+   "room_type": "exterior",
+   "narrative_stage": "exterior_open",
+   "role": "detail",
+   "duration_s": 5.5,
+   "camera": {
+    "type": "ken_burns",
+    "easing": "linear",
+    "preset": "slide",
+    "start": {
+     "cx": 0.565217,
+     "cy": 0.4918,
+     "zoom": 1.15,
+     "roll_deg": 0.0
+    },
+    "end": {
+     "cx": 0.458239,
+     "cy": 0.4918,
+     "zoom": 1.0948,
+     "roll_deg": -0.72
+    }
+   },
+   "transition_in": {
+    "type": "cut",
+    "duration_s": 0.0
+   }
+  },
+  {
+   "shot_id": "s03",
+   "order": 3,
+   "asset_id": "img_01",
+   "image_uri": "img_01.png",
+   "source": {
+    "width": 1221,
+    "height": 814
+   },
+   "room_key": "front_exterior",
+   "room_type": "front_exterior",
+   "narrative_stage": "exterior_open",
+   "role": "hero",
+   "duration_s": 5.5,
+   "camera": {
+    "type": "ken_burns",
+    "easing": "linear",
+    "preset": "push_in_strong",
+    "start": {
+     "cx": 0.5,
+     "cy": 0.457378,
+     "zoom": 1.0,
+     "roll_deg": 0.0
+    },
+    "end": {
+     "cx": 0.53975,
+     "cy": 0.433422,
+     "zoom": 1.12,
+     "roll_deg": 0.48
+    }
+   },
+   "transition_in": {
+    "type": "cut",
+    "duration_s": 0.0
+   }
+  },
+  {
+   "shot_id": "s04",
+   "order": 4,
+   "asset_id": "img_03",
+   "image_uri": "img_03.png",
+   "source": {
+    "width": 1223,
+    "height": 818
+   },
+   "room_key": "living_room",
+   "room_type": "living_room",
+   "narrative_stage": "living",
+   "role": "hero",
+   "duration_s": 5.5,
+   "camera": {
+    "type": "ken_burns",
+    "easing": "linear",
+    "preset": "hero_sweep",
+    "start": {
+     "cx": 0.528302,
+     "cy": 0.576246,
+     "zoom": 1.06,
+     "roll_deg": 0.0
+    },
+    "end": {
+     "cx": 0.430877,
+     "cy": 0.594454,
+     "zoom": 1.16176,
+     "roll_deg": -0.9
+    }
+   },
+   "transition_in": {
+    "type": "cut",
+    "duration_s": 0.0
+   }
+  },
+  {
+   "shot_id": "s05",
+   "order": 5,
+   "asset_id": "img_00",
+   "image_uri": "img_00.png",
+   "source": {
+    "width": 1222,
+    "height": 818
+   },
+   "room_key": "living_room",
+   "room_type": "living_room",
+   "narrative_stage": "living",
+   "role": "detail",
+   "duration_s": 5.5,
+   "camera": {
+    "type": "ken_burns",
+    "easing": "linear",
+    "preset": "push_in_gentle",
+    "start": {
+     "cx": 0.508436,
+     "cy": 0.576034,
+     "zoom": 1.02,
+     "roll_deg": 0.0
+    },
+    "end": {
+     "cx": 0.457272,
+     "cy": 0.590366,
+     "zoom": 1.09344,
+     "roll_deg": -0.3
+    }
+   },
+   "transition_in": {
+    "type": "cut",
+    "duration_s": 0.0
+   }
+  },
+  {
+   "shot_id": "s06",
+   "order": 6,
+   "asset_id": "img_05",
+   "image_uri": "img_05.png",
+   "source": {
+    "width": 1221,
+    "height": 816
+   },
+   "room_key": "kitchen",
+   "room_type": "kitchen",
+   "narrative_stage": "living",
+   "role": "hero",
+   "duration_s": 5.5,
+   "camera": {
+    "type": "ken_burns",
+    "easing": "linear",
+    "preset": "slide",
+    "start": {
+     "cx": 0.563683,
+     "cy": 0.50005,
+     "zoom": 1.15,
+     "roll_deg": 0.0
+    },
+    "end": {
+     "cx": 0.456704,
+     "cy": 0.50005,
+     "zoom": 1.0948,
+     "roll_deg": -0.72
+    }
+   },
+   "transition_in": {
+    "type": "cut",
+    "duration_s": 0.0
+   }
+  },
+  {
+   "shot_id": "s07",
+   "order": 7,
+   "asset_id": "img_11",
+   "image_uri": "img_11.png",
+   "source": {
+    "width": 1220,
+    "height": 818
+   },
+   "room_key": "dining_room",
+   "room_type": "dining_room",
+   "narrative_stage": "living",
+   "role": "hero",
+   "duration_s": 5.5,
+   "camera": {
+    "type": "ken_burns",
+    "easing": "linear",
+    "preset": "push_in_strong",
+    "start": {
+     "cx": 0.5,
+     "cy": 0.580532,
+     "zoom": 1.0,
+     "roll_deg": 0.0
+    },
+    "end": {
+     "cx": 0.53975,
+     "cy": 0.556712,
+     "zoom": 1.12,
+     "roll_deg": 0.48
+    }
+   },
+   "transition_in": {
+    "type": "cut",
+    "duration_s": 0.0
+   }
+  },
+  {
+   "shot_id": "s08",
+   "order": 8,
+   "asset_id": "img_04",
+   "image_uri": "img_04.png",
+   "source": {
+    "width": 1221,
+    "height": 816
+   },
+   "room_key": "dining_room",
+   "room_type": "dining_room",
+   "narrative_stage": "living",
+   "role": "detail",
+   "duration_s": 5.5,
+   "camera": {
+    "type": "ken_burns",
+    "easing": "linear",
+    "preset": "push_slide",
+    "start": {
+     "cx": 0.537037,
+     "cy": 0.539356,
+     "zoom": 1.08,
+     "roll_deg": 0.0
+    },
+    "end": {
+     "cx": 0.439867,
+     "cy": 0.548444,
+     "zoom": 1.1448,
+     "roll_deg": -0.6
+    }
+   },
+   "transition_in": {
+    "type": "cut",
+    "duration_s": 0.0
+   }
+  },
+  {
+   "shot_id": "s09",
+   "order": 9,
+   "asset_id": "img_06",
+   "image_uri": "img_06.png",
+   "source": {
+    "width": 1222,
+    "height": 819
+   },
+   "room_key": "bedroom",
+   "room_type": "bedroom",
+   "narrative_stage": "private",
+   "role": "hero",
+   "duration_s": 5.5,
+   "camera": {
+    "type": "ken_burns",
+    "easing": "linear",
+    "preset": "push_in_strong",
+    "start": {
+     "cx": 0.5,
+     "cy": 0.580357,
+     "zoom": 1.0,
+     "roll_deg": 0.0
+    },
+    "end": {
+     "cx": 0.5302,
+     "cy": 0.562253,
+     "zoom": 1.09,
+     "roll_deg": 0.36
+    }
+   },
+   "transition_in": {
+    "type": "cut",
+    "duration_s": 0.0
+   }
+  },
+  {
+   "shot_id": "s10",
+   "order": 10,
+   "asset_id": "img_09",
+   "image_uri": "img_09.png",
+   "source": {
+    "width": 1223,
+    "height": 817
+   },
+   "room_key": "patio",
+   "room_type": "patio",
+   "narrative_stage": "amenity_close",
+   "role": "hero",
+   "duration_s": 5.5,
+   "camera": {
+    "type": "ken_burns",
+    "easing": "linear",
+    "preset": "hero_sweep",
+    "start": {
+     "cx": 0.528302,
+     "cy": 0.517485,
+     "zoom": 1.06,
+     "roll_deg": 0.0
+    },
+    "end": {
+     "cx": 0.430877,
+     "cy": 0.535715,
+     "zoom": 1.16176,
+     "roll_deg": -0.9
+    }
+   },
+   "transition_in": {
+    "type": "cut",
+    "duration_s": 0.0
+   }
+  },
+  {
+   "shot_id": "s11",
+   "order": 11,
+   "asset_id": "img_07",
+   "image_uri": "img_07.png",
+   "source": {
+    "width": 1223,
+    "height": 813
+   },
+   "room_key": "patio",
+   "room_type": "patio",
+   "narrative_stage": "amenity_close",
+   "role": "detail",
+   "duration_s": 5.5,
+   "camera": {
+    "type": "ken_burns",
+    "easing": "linear",
+    "preset": "push_in_gentle",
+    "start": {
+     "cx": 0.490196,
+     "cy": 0.496185,
+     "zoom": 1.02,
+     "roll_deg": 0.0
+    },
+    "end": {
+     "cx": 0.541359,
+     "cy": 0.510615,
+     "zoom": 1.09344,
+     "roll_deg": 0.3
+    }
+   },
+   "transition_in": {
+    "type": "cut",
+    "duration_s": 0.0
+   }
+  },
+  {
+   "shot_id": "s12",
+   "order": 12,
+   "asset_id": "img_08",
+   "image_uri": "img_08.png",
+   "source": {
+    "width": 1224,
+    "height": 815
+   },
+   "room_key": "backyard",
+   "room_type": "backyard",
+   "narrative_stage": "amenity_close",
+   "role": "hero",
+   "duration_s": 5.5,
+   "camera": {
+    "type": "ken_burns",
+    "easing": "linear",
+    "preset": "pull_back",
+    "start": {
+     "cx": 0.547511,
+     "cy": 0.460538,
+     "zoom": 1.105,
+     "roll_deg": 0.0
+    },
+    "end": {
+     "cx": 0.490916,
+     "cy": 0.479662,
+     "zoom": 1.01881,
+     "roll_deg": -0.36
+    }
+   },
+   "transition_in": {
+    "type": "cut",
+    "duration_s": 0.0
+   }
+  }
+ ],
+ "warnings": [
+  "below_min_total",
+  "total_out_of_range"
+ ],
+ "provenance": {
+  "scoring_config_version": "0.2.0",
+  "planner_config_version": "1.4.0",
+  "plan_hash": "3ad611f9b738bed8f67534fa566378828a10fb5cdbd48ec4aca8e0e5536a7fea"
+ }
+}

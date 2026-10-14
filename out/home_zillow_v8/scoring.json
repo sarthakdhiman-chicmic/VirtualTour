@@ -1,0 +1,148 @@
+{
+ "labels": {
+  "img_00.png": {
+   "source_file": "Screenshot 2026-10-14 at 12.33.25\u202fPM.png",
+   "room_type": "living_room"
+  },
+  "img_01.png": {
+   "source_file": "Screenshot 2026-10-14 at 12.33.44\u202fPM.png",
+   "room_type": "front_exterior"
+  },
+  "img_02.png": {
+   "source_file": "Screenshot 2026-10-14 at 12.33.58\u202fPM.png",
+   "room_type": "exterior"
+  },
+  "img_03.png": {
+   "source_file": "Screenshot 2026-10-14 at 12.34.12\u202fPM.png",
+   "room_type": "living_room"
+  },
+  "img_04.png": {
+   "source_file": "Screenshot 2026-10-14 at 12.34.46\u202fPM.png",
+   "room_type": "dining_room"
+  },
+  "img_05.png": {
+   "source_file": "Screenshot 2026-10-14 at 12.34.57\u202fPM.png",
+   "room_type": "kitchen"
+  },
+  "img_06.png": {
+   "source_file": "Screenshot 2026-10-14 at 12.35.15\u202fPM.png",
+   "room_type": "bedroom"
+  },
+  "img_07.png": {
+   "source_file": "Screenshot 2026-10-14 at 12.35.32\u202fPM.png",
+   "room_type": "patio"
+  },
+  "img_08.png": {
+   "source_file": "Screenshot 2026-10-14 at 12.35.44\u202fPM.png",
+   "room_type": "backyard"
+  },
+  "img_09.png": {
+   "source_file": "Screenshot 2026-10-14 at 12.35.58\u202fPM.png",
+   "room_type": "patio"
+  },
+  "img_10.png": {
+   "source_file": "Screenshot 2026-10-14 at 12.36.13\u202fPM.png",
+   "room_type": "exterior"
+  },
+  "img_11.png": {
+   "source_file": "Screenshot 2026-10-14 at 12.36.38\u202fPM.png",
+   "room_type": "dining_room"
+  }
+ },
+ "scores": {
+  "img_00": {
+   "overall": null,
+   "coverage": 0.5,
+   "framing": 1.0,
+   "lighting": 0.924,
+   "depth_of_field": 0.621
+  },
+  "img_01": {
+   "overall": null,
+   "coverage": 0.372,
+   "framing": 0.63,
+   "lighting": 0.951,
+   "depth_of_field": 0.979
+  },
+  "img_02": {
+   "overall": null,
+   "coverage": 0.5,
+   "framing": 0.464,
+   "lighting": 0.943,
+   "depth_of_field": 0.999
+  },
+  "img_03": {
+   "overall": null,
+   "coverage": 0.667,
+   "framing": 0.891,
+   "lighting": 0.924,
+   "depth_of_field": 0.933
+  },
+  "img_04": {
+   "overall": null,
+   "coverage": 0.15,
+   "framing": 0.728,
+   "lighting": 0.927,
+   "depth_of_field": 0.792
+  },
+  "img_05": {
+   "overall": null,
+   "coverage": 0.583,
+   "framing": 0.591,
+   "lighting": 0.886,
+   "depth_of_field": 0.964
+  },
+  "img_06": {
+   "overall": null,
+   "coverage": 0.242,
+   "framing": 0.729,
+   "lighting": 0.899,
+   "depth_of_field": 0.762
+  },
+  "img_07": {
+   "overall": null,
+   "coverage": 0.667,
+   "framing": 0.382,
+   "lighting": 0.96,
+   "depth_of_field": 0.999
+  },
+  "img_08": {
+   "overall": null,
+   "coverage": 0.5,
+   "framing": 0.603,
+   "lighting": 0.949,
+   "depth_of_field": 1.0
+  },
+  "img_09": {
+   "overall": null,
+   "coverage": 0.393,
+   "framing": 0.767,
+   "lighting": 0.889,
+   "depth_of_field": 0.982
+  },
+  "img_10": {
+   "overall": null,
+   "coverage": 0.368,
+   "framing": 0.815,
+   "lighting": 0.941,
+   "depth_of_field": 0.999
+  },
+  "img_11": {
+   "overall": null,
+   "coverage": 0.434,
+   "framing": 0.913,
+   "lighting": 0.938,
+   "depth_of_field": 0.872
+  }
+ },
+ "sequence": [
+  "exterior",
+  "front_exterior",
+  "living_room",
+  "kitchen",
+  "dining_room",
+  "bedroom",
+  "patio",
+  "backyard"
+ ]
+}

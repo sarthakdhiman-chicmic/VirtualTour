@@ -30,6 +30,7 @@ PLANNER_VERSION = "tour_v2-0.1"
 MIN_MARGIN_OUT_PX = 1.0       # contract addendum 1.3, checked at every frame
 PLAN_MARGIN_OUT_PX = 2.0      # where keyframes are placed, so frames between have room
 MIN_SPP = 0.75                # source px per output px at 1080p, every frame
+LOWRES_EXTRA_ZOOM = 1.25      # photos already below MIN_SPP at full view: at most 25% more zoom
 SHRINK_STEP = 0.10
 
 REVEAL_MAX_FRACTION = 0.40
@@ -58,8 +59,13 @@ class Geometry:
         self.src_w, self.src_h, self.out_w, self.out_h = src_w, src_h, out_w, out_h
         self.projection, self.hfov_deg = projection, hfov_deg
         self.bw, self.bh = base_window(src_w, src_h, out_w, out_h)
-        # zoom at which source px per output px reaches MIN_SPP
-        self.zoom_cap = self.bw * src_w / (MIN_SPP * out_w)
+        # density floor: MIN_SPP, or for a photo smaller than the output (already upscaled at full
+        # view) its full-view density / LOWRES_EXTRA_ZOOM, so small photos still get a gentle move
+        # instead of no move at all (stress test: 1280 px and portrait photos failed to plan)
+        full = self.bw * src_w / out_w
+        self.min_spp = min(MIN_SPP, full / LOWRES_EXTRA_ZOOM)
+        # zoom at which source px per output px reaches the floor
+        self.zoom_cap = full / self.min_spp
 
     def half(self, z, margin_px=PLAN_MARGIN_OUT_PX):
         """Half window size plus the margin, normalised."""
@@ -233,11 +239,11 @@ def natural_direction(move, sal, g=None):
 # ---------------------------------------------------------------------------------------------
 
 def is_exterior(s):
-    return s["room_type"] == "exterior" or s["narrative_stage"].startswith("exterior")
+    return s["room_type"] == "exterior" or (s["narrative_stage"] or "").startswith("exterior")
 
 
 def is_bathroom(s):
-    return "bath" in s["room_type"]
+    return "bath" in (s["room_type"] or "")
 
 
 def select_moves(shots, sal, notes):
@@ -399,10 +405,10 @@ def enforce(keyframes, n, g, note):
             k["zoom"] = round(g.zoom_cap, 6)
             k["cx"], k["cy"] = (round(v, 6) for v in g.fit(k["cx"], k["cy"], k["zoom"]))
     # "rotate" is softer off-centre than its centre zoom says: lower the zooms (1% steps) until
-    # every frame keeps MIN_SPP
+    # every frame keeps the density floor
     for _ in range(40):
         _, _, spp = frame_stats(keyframes, n, g)
-        if min(spp) >= MIN_SPP - 1e-9:
+        if min(spp) >= g.min_spp - 1e-9:
             break
         for k in keyframes:
             if k["zoom"] > 1.05:

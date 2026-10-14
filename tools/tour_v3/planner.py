@@ -466,7 +466,7 @@ def fit_speed(g, start, segs, frames, note):
         peak = hermite_slope_max(timing["s0"], timing["s1"]) * mean
         m = measured(make_path(g, st2, segs2, timing), frames, g)
         if (m["speed_max_px_f"] <= V_MAX + 1e-6 and m["min_margin_out_px"] >= MIN_MARGIN_OUT_PX
-                and m["min_spp"] >= MIN_SPP - 1e-9) or f <= SHRINK_STEP:
+                and m["min_spp"] >= g.min_spp - 1e-9) or f <= SHRINK_STEP:
             break
         f = round(f - SHRINK_STEP, 3)
     note.update({"shrink": f, "distance_px": round(dist, 1), "mean_px_f": round(mean, 3),
