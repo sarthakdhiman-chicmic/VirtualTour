@@ -78,7 +78,7 @@ class Shot(BaseModel):
     image_uri: str
     source: Size
     room_key: str
-    room_type: str
+    room_type: Optional[str] = None   # the backend allows untagged rooms
     narrative_stage: str
     role: str
     duration_s: float
