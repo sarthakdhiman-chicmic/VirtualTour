@@ -1,0 +1,44 @@
+# Local development: the render worker as an HTTP service on http://localhost:8000.
+#   docker compose -f docker/compose.yaml up --build
+#   docker compose -f docker/compose.yaml --profile segment up --build    # + segmentation on :8001 (CPU)
+# Call it like RunPod: base URL http://localhost:8000, Authorization: Bearer dev-key.
+# AWS credentials come from your shell (needed for s3:// images and outputs).
+services:
+  render:
+    build:
+      context: ..
+      dockerfile: docker/render.Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      WORKER_API_KEY: ${WORKER_API_KEY:-dev-key}
+      JOB_CONCURRENCY: "1"
+      PREWARP_WORKERS: ${PREWARP_WORKERS:-}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      AWS_SESSION_TOKEN: ${AWS_SESSION_TOKEN:-}
+      AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION:-us-east-1}
+    volumes:
+      - render-jobs:/var/lib/tour-worker/jobs
+
+  segment:
+    profiles: ["segment"]
+    build:
+      context: ..
+      dockerfile: docker/segment.Dockerfile
+      args:
+        TORCH_EXTRA: segment          # CPU PyTorch; the GPU image is the default build
+    ports:
+      - "8001:8000"
+    environment:
+      WORKER_API_KEY: ${WORKER_API_KEY:-dev-key}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      AWS_SESSION_TOKEN: ${AWS_SESSION_TOKEN:-}
+      AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION:-us-east-1}
+    volumes:
+      - segment-jobs:/var/lib/tour-worker/jobs
+
+volumes:
+  render-jobs:
+  segment-jobs:

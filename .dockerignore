@@ -1,0 +1,22 @@
+# Build context for docker/*.Dockerfile (the images copy only pyproject.toml, uv.lock, README.md,
+# LICENSES.md, handler.py and tour_worker/; the rest is kept out of the context)
+.git
+.gitignore
+.venv
+**/__pycache__
+**/*.pyc
+*.egg-info
+.pytest_cache
+.ruff_cache
+.ref
+out
+models
+training
+tests
+tools
+examples
+docker/compose.yaml
+**/*.mp4
+**/*.mov
+**/*.wav
+**/*.mp3
