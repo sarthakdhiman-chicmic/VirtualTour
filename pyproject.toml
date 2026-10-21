@@ -1,13 +1,17 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
 [project]
-name = "articulait-cinematic-tour"
-version = "0.1.0"
-description = "Articulait Cinematic Tour Worker"
+name = "tour-worker"
+version = "0.2.0"
+description = "Articulait cinematic tour worker: renders tour plans to MP4 and segments tour photos"
 readme = "README.md"
 requires-python = ">=3.10"
+# system tools (not pip packages): ffmpeg and ffprobe on PATH (README.md)
 dependencies = [
     "boto3>=1.34.0",
     "numpy>=2.2.6",
-    "onnxruntime>=1.20,<1.24",
     "opencv-python-headless>=5.0.0.93",
     "pillow>=10.0.0",
     "pydantic>=2.0.0",
@@ -20,7 +24,17 @@ dev = [
 ]
 
 [project.optional-dependencies]
-# OneFormer segmentation for the tour_segment job (modules/segment.py).
+dev = [
+    "pytest>=7.0.0",
+]
+# Music analysis for beat sync (tour_worker/music: offline, once per track; not used by the jobs).
+# librosa is pinned: beat / onset results shift between versions.
+music = [
+    "librosa==0.10.2.post1",
+    "scipy>=1.10",
+    "soundfile>=0.12",
+]
+# OneFormer segmentation for the tour_segment job (tour_worker/vision/segment.py).
 #   segment      CPU PyTorch (dev machines, no GPU):   uv sync --extra segment
 #   segment-gpu  CUDA 12.6 PyTorch (RunPod GPU worker): uv sync --extra segment-gpu
 segment = [
@@ -37,6 +51,9 @@ segment-gpu = [
     "huggingface_hub>=0.25",
     "scipy>=1.10",           # OneFormer's model class imports it at construction
 ]
+
+[tool.setuptools.packages.find]
+include = ["tour_worker*"]
 
 [tool.uv]
 conflicts = [[{ extra = "segment" }, { extra = "segment-gpu" }]]

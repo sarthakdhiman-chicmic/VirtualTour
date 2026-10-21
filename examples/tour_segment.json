@@ -1,0 +1,17 @@
+{
+  "input": {
+    "job_type": "tour_segment",
+    "job_id": "job1",
+    "images": [
+      {
+        "photo_id": "living.jpg",
+        "uri": "s3://example-bucket/listings/L123/photos/living.jpg"
+      },
+      {
+        "photo_id": "pool.jpg",
+        "uri": "s3://example-bucket/listings/L123/photos/pool.jpg"
+      }
+    ],
+    "output_prefix": "s3://example-bucket/listings/L123/segments/job1/"
+  }
+}

@@ -1,17 +1,22 @@
-# Licenses
+# Licences
 
-## Remotion License
-Based on the [Remotion License FAQ](https://www.remotion.dev/license) (read on 2026-10-09):
-- **Free for:** Individuals, organisations of up to 3 people, and non-profits.
-- **Automated Rendering:** Falls under "Remotion for Automators". The pricing is $0.01 per render with a $100 monthly minimum.
-- **Telemetry:** Mandatory for Automators starting in Remotion 5.0.
-- **Patents:** Codec patents (such as H.264) are not covered by the license.
+## OneFormer (tour_segment)
+- **Weights:** `shi-labs/oneformer_coco_swin_large` and `shi-labs/oneformer_ade20k_swin_large`,
+  MIT. The revisions and sha256 are pinned in `tour_worker/vision/segment.py`.
+- **COCO** (the primary model's training data): the annotations are CC BY 4.0. The images are
+  under their Flickr licences, and COCO disclaims them. This dataset question needs a legal
+  sign-off before production use.
+- **ADE20K** (the fireplace-aware model): the dataset images are for non-commercial research and
+  education (MIT CSAIL terms). The product owner accepted this, pending legal review.
 
-## Depth Anything V2 Small (depth parallax)
-- **Model:** Depth-Anything-V2-Small, Apache-2.0 ([official repo](https://github.com/DepthAnything/Depth-Anything-V2), checked 2026-10-12). ONNX export from [onnx-community/depth-anything-v2-small](https://huggingface.co/onnx-community/depth-anything-v2-small) (Apache-2.0), pinned to revision `4472b736` in `modules/depth.py`.
-- **Do not use** Depth-Anything-V2 Base/Large/Giant: they are CC-BY-NC-4.0 (non-commercial).
-- Apache-2.0 requires shipping the license and any NOTICE with the weights.
+## Music analysis (the `music` extra, offline)
+- `librosa` (ISC), `scipy` (BSD-3-Clause), `soundfile` (BSD-3-Clause).
 
-## Rendering libraries
-- `onnxruntime`, `three`, `@react-three/fiber`: MIT.
-- `@remotion/three`: covered by the Remotion license above.
+## Codecs
+- H.264 is encoded with ffmpeg / x264, which are system tools and not shipped in this package.
+  Codec patents are a separate question from software licences.
+
+## Removed (2026-10)
+The Remotion renderer (Remotion licence: paid "Automators" tier for automated rendering) and the
+Depth Anything V2 parallax experiment are no longer part of the worker. Both remain on the branch
+`archive/remotion-renderer`.
