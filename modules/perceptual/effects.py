@@ -96,6 +96,8 @@ FIRE_PLUME = 0.45           # flames may stretch above their tips by this share 
 # them and FIRE_PLUME of their height above - and their strength follows their own size
 FIREBOX_SIDE = 0.25
 STRUCT_EDGE = 0.25          # gradient (x 255) above which an edge is hard: structure, not flame
+STRUCT_FAINT_EDGE = 0.06    # a faint edge counts as structure when it runs straight for ...
+STRUCT_LONG = 0.35          # ... this share of the fire box's width (or height)
 STRUCT_LIT_V = 0.28         # in a fire's box, non-flame pixels at least this bright are held ...
 STRUCT_ABOVE = 0.15         # ... above the fire (rows above its top + this share of its height)
 FIRE_AMP_OF_HEIGHT = 0.15   # worker cap: peak flame displacement <= this x the flames' height
@@ -771,6 +773,15 @@ def fire_structure(src: np.ndarray, flame: np.ndarray, box: np.ndarray) -> np.nd
     k = max(9, int(0.15 * max(1, min(y1 - y0, x1 - x0))))
     for kern in (np.ones((1, k), np.uint8), np.ones((k, 1), np.uint8)):
         lines |= cv2.morphologyEx(hard.astype(np.uint8), cv2.MORPH_OPEN, kern)
+    # faint but LONG straight runs too: a screen rod or wire, a door frame's bar - dark on the
+    # dark cavity, so low contrast (review 2026-10-21: a wire across a brick fireplace's
+    # opening warped). Flames never make long straight lines, so length is the test.
+    # Only ABOVE the fire: among the logs, long faint edges are the logs themselves.
+    faint = (edge > STRUCT_FAINT_EDGE * 255).astype(np.uint8)
+    kh = max(15, int(STRUCT_LONG * (x1 - x0)))
+    kv = max(15, int(STRUCT_LONG * (y1 - y0)))
+    faint_lines = (cv2.morphologyEx(faint, cv2.MORPH_OPEN, np.ones((1, kh), np.uint8))
+                   | cv2.morphologyEx(faint, cv2.MORPH_OPEN, np.ones((kv, 1), np.uint8)))
     # only flames and dark empty space may move: anything lit that is not flame - a back wall's
     # herringbone or brick, logs, glass reflections (grey, often dim), the frame - is held
     lit = val >= STRUCT_LIT_V
@@ -789,7 +800,7 @@ def fire_structure(src: np.ndarray, flame: np.ndarray, box: np.ndarray) -> np.nd
     above = np.zeros_like(lit)
     if len(fy):
         above[: max(0, int(fy.min() + STRUCT_ABOVE * (fy.max() - fy.min() + 1)))] = True
-    st = ((lines > 0) | (lit & above & ~fz)) & ~near_flame
+    st = ((lines > 0) | ((lit | (faint_lines > 0)) & above & ~fz)) & ~near_flame
     st = cv2.dilate(st.astype(np.uint8), np.ones((3, 3), np.uint8)) > 0
     out[y0:y1, x0:x1] = st & (box[y0:y1, x0:x1] > 0.5)
     return out

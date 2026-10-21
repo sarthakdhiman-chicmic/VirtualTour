@@ -772,3 +772,16 @@ def test_tree_points_swing_on_a_line_not_in_circles():
         ev = np.linalg.eigvalsh(np.cov(p.T))
         # the minor axis is only the tiny leaf jitter: well under a tenth of the swing
         assert np.sqrt(ev[0]) < 0.1 * np.sqrt(ev[1]) + 0.5 * al, (k, ev)
+
+
+def test_a_faint_rod_across_the_opening_is_held():
+    """Review 2026-10-21: a dark screen rod across the top of a brick fireplace's opening (dark on
+    the dark cavity, so low contrast) warped as the flames licked up into it."""
+    from modules.perceptual.effects import fire_box, fire_structure
+    img, fp = _fireplace_scene(lit=True)
+    img[206:210, 232:368] = (40, 40, 44)                             # a faint rod inside the box
+    flame = _with_firebox(img, fp).astype(np.uint8) * 255
+    box = fire_box(img, flame)
+    st = fire_structure(img, flame, box)
+    assert st[205:211, 260:340].mean() > 0.5                          # the rod is held
+    assert not st[240:280, 250:350].all()                             # the flames are not
