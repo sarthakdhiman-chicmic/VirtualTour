@@ -22,6 +22,7 @@ uv sync                          # the render job, plus the dev group (pytest)
 uv sync --extra segment          # + OneFormer on CPU PyTorch (dev machines)
 uv sync --extra segment-gpu      # + OneFormer on CUDA 12.6 PyTorch (RunPod GPU worker)
 uv sync --extra music            # + music analysis (librosa 0.10.2.post1, pinned)
+uv sync --extra http             # + the HTTP service (fastapi, uvicorn)
 pip install -e ".[segment,dev]"  # the same with pip
 ```
 
@@ -130,6 +131,9 @@ tour_worker/
   jobs/router.py          dispatch by job_type, validate, run in a temp folder
   jobs/render.py          tour_render (run_tour)
   jobs/segment.py         tour_segment (run_segment)
+  service/jobs.py         HTTP service: job store + executor (states, records, TTL, webhook)
+  service/http.py         HTTP service: RunPod's serverless API (FastAPI)
+  service/redact.py       keeps signed URLs and keys out of the service's logs
   io/storage.py           S3 / HTTPS / file / local-folder storage, routed by URI scheme
   io/images.py            fetch + prepare photos and masks
   render/camera_path.py   keyframe_path / compound camera math, rotate projection
@@ -149,6 +153,7 @@ tools/samples/            fireplace / motion sample reels for review
 tools/safe_run.py         run a heavy command pinned to some CPUs, frozen when the CPU gets hot
 training/fireplace_adapter/   research: a fireplace head on COCO OneFormer's features (not enabled)
 examples/                 one request per job type (plan 1.5)
+docker/                   render.Dockerfile, segment.Dockerfile, compose.yaml (local dev)
 tests/                    mirrors tour_worker/
 ```
 
@@ -167,8 +172,174 @@ tests/                    mirrors tour_worker/
 | `ONEFORMER_DIR` | `MODELS_DIR/<checkpoint dir>` | folder of that checkpoint: `oneformer_coco_swin_large` or `oneformer_ade20k_swin_large` |
 | `COCO_FIRE_SEARCH` | `0` | `1`: look for lit fires by colour with the COCO model. Off by default because it failed validation (it found 4 of 11 fires). |
 
+The HTTP service (`python -m tour_worker.service`) adds these; `handler.py` ignores them:
+
+| variable | default | meaning |
+|---|---|---|
+| `WORKER_API_KEY` | (unset) | the key callers send as `Authorization: Bearer <key>` on every endpoint but `/health`. Unset: the service refuses to start, unless `WORKER_ALLOW_NO_AUTH=1`. |
+| `WORKER_ALLOW_NO_AUTH` | `0` | `1`: run without a key (local development only) |
+| `JOB_CONCURRENCY` | `1` | jobs run at once. Keep 1 for renders: one render already uses every CPU it is given (`PREWARP_WORKERS`). |
+| `JOBS_DIR` | (unset) | folder for job records (one JSON per job) so statuses survive a restart. Unset: memory only. The images set `/var/lib/tour-worker/jobs`. |
+| `JOB_TTL_S` | `86400` | seconds a finished job's status is kept; then `/status` is 404 |
+| `RUNSYNC_TIMEOUT_S` | `300` | seconds `POST /runsync` waits before it returns the job's current status |
+| `HOST` | `127.0.0.1` | listen address (the images set `0.0.0.0`) |
+| `PORT` | `8000` | listen port |
+
 boto3 reads the AWS credentials and region itself (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`,
 `AWS_DEFAULT_REGION`, or an instance role).
+
+## Running as a service
+
+The worker has two front doors over one job router (`tour_worker.jobs.router.run_job`) and one
+wire protocol, RunPod's serverless API. The backend uses one client for both; only the base URL
+and the key change:
+
+| deployment | entry | base URL | key |
+|---|---|---|---|
+| RunPod serverless | `python -u handler.py` | `https://api.runpod.ai/v2/<endpoint_id>` | the RunPod API key |
+| service container | `python -m tour_worker.service` | `http://<host>:8000` | `WORKER_API_KEY` |
+
+```bash
+WORKER_API_KEY=dev-key python -m tour_worker.service           # needs the http extra
+```
+
+One process per container: jobs and their statuses live in the process (`JOBS_DIR` keeps the
+records). Scale with more containers; each one is its own base URL.
+
+### Endpoints
+
+Every endpoint but `/health` needs `Authorization: Bearer <WORKER_API_KEY>`. Times are in
+milliseconds, ids are 32 hex characters.
+
+`POST /run`: queue a job. The body is RunPod's: `input` is the job request (see
+[Jobs and their JSON](#jobs-and-their-json)); `webhook` is optional; `policy` is accepted and
+ignored.
+
+```json
+{"input": {"job_type": "tour_render", "plan": {...}, "output_prefix": "s3://bucket/tours/t1/"},
+ "webhook": "https://backend.example.com/hooks/tour"}
+```
+```json
+{"id": "5f0c2a9e4b7d4c35a2d1e0f9b8c7a6d5", "status": "IN_QUEUE"}
+```
+
+`POST /runsync`: the same body. Waits up to `RUNSYNC_TIMEOUT_S` and returns the `/status` body:
+the result if the job finished, else `IN_QUEUE` / `IN_PROGRESS` and the id to poll.
+
+`GET /status/{id}`:
+
+```json
+{"id": "5f0c...", "status": "COMPLETED", "delayTime": 12, "executionTime": 412300,
+ "output": {"status": "completed", "video_uri": "s3://bucket/tours/t1/master.mp4", "duration_s": 71.6,
+            "width": 1920, "height": 1080, "fps": 30, "codec": "h264", "render_seconds": 412.3,
+            "plan_hash": "...", "warnings": []}}
+```
+```json
+{"id": "5f0c...", "status": "FAILED", "delayTime": 12, "executionTime": 2100,
+ "error": {"code": "image_fetch_failed", "message": "image_fetch_failed: ..."}}
+```
+
+- `status`: `IN_QUEUE`, `IN_PROGRESS`, `COMPLETED`, `FAILED` or `CANCELLED` (RunPod's names).
+- `delayTime` once the job started (queue wait); `executionTime` once it finished.
+- `output` only when `COMPLETED`: the job's result without its `error` key (as RunPod's SDK
+  passes a handler's result on).
+- `error` only when `FAILED`: `{"code", "message"}`, the codes in the table above, plus
+  `worker_restarted` (the service restarted before the job finished: submit it again).
+
+`POST /cancel/{id}`: `{"id", "status"}`. Only an `IN_QUEUE` job is cancelled (`CANCELLED`). A
+running job is left running and the body says `IN_PROGRESS`: a render is many ffmpeg and worker
+processes with an upload at the end, and there is no safe point to stop it. A finished job is
+unchanged.
+
+`GET /health` (no key):
+
+```json
+{"jobs": {"inQueue": 0, "inProgress": 1, "completed": 12, "failed": 1, "cancelled": 0},
+ "workers": {"running": 1, "idle": 0, "concurrency": 1},
+ "version": "0.2.0", "jobTypes": ["tour_render", "tour_segment"],
+ "segmentModel": "shi-labs/oneformer_coco_swin_large@3a263017ca", "workerId": "<hostname>"}
+```
+
+**Errors.** Every HTTP error has the worker's failure shape,
+`{"status": "failed", "error": {"code", "message"}}`:
+
+| HTTP | code | when |
+|---|---|---|
+| 400 | `invalid_job_type`, `invalid_request`, `invalid_plan`, `unsupported_camera_type`, `unsupported_easing` | the request cannot run: checked at submit (request shape, and the plan's schema, `plan_hash` and camera rules), nothing is queued. The codes are the ones the job would fail with. A body that is not JSON, has no `input`, or has a non-http(s) `webhook` is `invalid_request`. |
+| 401 | `unauthorized` | missing or wrong key |
+| 404 | `job_not_found` | unknown id, or a finished job older than `JOB_TTL_S` |
+
+**Webhook.** When a job finishes (or is cancelled), the service POSTs its `/status` body to the
+webhook: three tries, 10 s timeout each. It is best effort: a webhook that fails never fails the
+job, so poll `/status` as well.
+
+**Restarts.** With `JOBS_DIR` set, finished jobs survive a restart. A job that was queued or
+running is `FAILED` with `worker_restarted`. Records never hold the request (it has presigned
+URLs) or the webhook.
+
+**Logs.** The service never logs a request body. Error messages and webhook targets are logged
+without query strings, and HTTP client libraries are kept at WARNING (they log URLs).
+
+### Docker
+
+The Dockerfiles have not been built yet (they were written without a Docker daemon). Build them from the repo root:
+
+```bash
+docker build -f docker/render.Dockerfile  -t tour-worker-render .     # python 3.12-slim + ffmpeg, no torch
+docker build -f docker/segment.Dockerfile -t tour-worker-segment .    # CUDA 12.6 torch, COCO weights baked in
+docker build -f docker/segment.Dockerfile --build-arg BAKE_ADE20K=1 -t tour-worker-segment .   # + ADE20K
+docker run -p 8000:8000 -e WORKER_API_KEY=... -e AWS_ACCESS_KEY_ID=... -e AWS_SECRET_ACCESS_KEY=... \
+    -e AWS_DEFAULT_REGION=... tour-worker-render
+docker compose -f docker/compose.yaml up --build                      # local: render on :8000, key dev-key
+docker compose -f docker/compose.yaml --profile segment up --build    # + segment (CPU torch) on :8001
+```
+
+Both images run as a non-root user, default to the HTTP service on port 8000 and have a
+`HEALTHCHECK` on `/health`. The segment image sets `HF_HUB_OFFLINE=1`: the weights are in the
+image, and a missing checkpoint fails at once instead of downloading.
+
+### RunPod
+
+Deploy the same image as a serverless endpoint with the container start command
+`python -u handler.py` (RunPod runs the handler; `WORKER_API_KEY` and the service settings are
+not used). The segment image needs a GPU worker; the render image runs on CPU. The request and
+result JSON are identical; two differences the client must allow for:
+
+- A request that cannot run is not refused at submit: RunPod queues it and the job ends `FAILED`
+  with the same code.
+- `error` may arrive as a JSON string rather than an object, and a handler crash is RunPod's own
+  error JSON (`error_type`, `error_message`, ...). Parse a string as JSON; without a `code`, treat
+  it as `unknown`.
+
+### Contract for callers
+
+1. **Submit** `POST {base}/run` with `{"input": <job request>}`. Keep the returned `id`.
+   A 400 means the request is wrong: do not retry it.
+2. **Poll** `GET {base}/status/{id}` until the status is terminal: `COMPLETED`, `FAILED` or
+   `CANCELLED`. Suggested interval: 2 s for `tour_segment` (about 13 s a photo on CPU, much less
+   on GPU), 5 to 10 s for `tour_render` (minutes), with backoff. A webhook can replace most polls,
+   but keep a slow poll in case it is lost.
+3. **Read** `output` on `COMPLETED`: `video_uri` for a render, `results` / `scenes` for a
+   segmentation. Show `warnings`; they never fail a job.
+   On `FAILED` read `error.code`. Retry only transient codes (`image_fetch_failed`,
+   `encode_failed`, `worker_restarted`, `unknown`); the plan codes and `invalid_request` will fail
+   again.
+4. **Time out** on the caller's side: give up (and `POST /cancel/{id}`, which only helps while it
+   is queued) after a deadline that fits the job, e.g. 30 min for a render. A 404 on `/status`
+   means the job is gone (TTL, or a service without `JOBS_DIR` restarted): resubmit.
+5. **Idempotency.** `/run` is not idempotent: each call is a new job. Retrying is still safe: a
+   plan always renders to the same bytes at `<output_prefix>master.mp4` (masks likewise go to
+   the same keys), so a repeat overwrites the same objects. Use a fresh `output_prefix` per job if
+   two runs must not overwrite each other. `input.job_id` is passed through for the caller's logs.
+
+**Inputs.** The worker reads `s3://` URIs with its own AWS credentials (boto3) and `https://`
+URLs (presigned is fine; 15 s timeout, 50 MB limit, no redirect to http). It writes outputs only
+to `s3://` (`output_prefix` must be `s3://...` in production; `https://` cannot be written). For
+`tour_render`, a plan's URIs stay as the backend hashed them; `image_urls` maps a shot's
+`image_uri` or a region's `mask_uri` to a URL to fetch instead (for example a presigned https
+URL when the worker has no read access to the bucket). `music.uri` is not mapped: it is fetched
+as written (s3:// or https://), and a failed fetch renders without music (`music_fetch_failed`). `tour_segment` reads `images[].uri` (s3:// or
+https://) and writes masks under its `output_prefix`.
 
 ## Run locally
 
