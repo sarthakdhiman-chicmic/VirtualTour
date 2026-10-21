@@ -24,8 +24,8 @@ import numpy as np  # noqa: E402
 
 from tour_worker.vision import fire_detect as F  # noqa: E402
 
-MAX_SIDE = 2048                       # tour_worker.vision.segment.MAX_SIDE (not imported: it would pick a model)
-FIRE_PY = os.path.join(C.ROOT, "modules", "perceptual", "fire.py")
+MAX_SIDE = 2048                       # = tour_worker.vision.segment.MAX_SIDE
+FIRE_PY = os.path.join(C.ROOT, "tour_worker", "vision", "fire_detect.py")
 
 
 def mask_regions(mask: np.ndarray, kind: str = "fireplace") -> list[dict]:

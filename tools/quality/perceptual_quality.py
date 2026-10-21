@@ -27,7 +27,7 @@ import cv2
 import numpy as np
 
 from tour_worker.contract.plan import parse_plan
-from tour_worker.render.frames import ShotWarp, homography_maps, needs_prewarp
+from tour_worker.render.frames import ShotWarp, homography_maps
 from tour_worker.render.timeline import compute_timeline
 
 LIMITS = {
@@ -203,7 +203,9 @@ def main(argv=None) -> int:
     images = os.path.join(a.workdir, "images")
     report, bad = {"limits": LIMITS, "shots": {}}, []
     for shot, tl in zip(plan.shots, compute_timeline(plan)):
-        if not shot.motion_regions or not needs_prewarp(shot.camera, shot):
+        # shots with motion regions and a keyframe_path / compound camera (the gate's scope since
+        # the Remotion days, when only those shots were drawn by OpenCV)
+        if not shot.motion_regions or shot.camera.type not in ("compound", "keyframe_path"):
             continue
         sw = ShotWarp(plan, shot, tl["render_frames"], images)
         if not sw.regions:

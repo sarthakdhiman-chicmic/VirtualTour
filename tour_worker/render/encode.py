@@ -1,7 +1,8 @@
-"""Delivery encode: turns Remotion's master render into a file that plays smoothly everywhere.
+"""Delivery encode settings and checks: a file that plays smoothly everywhere.
 
-Remotion encodes at a constant quality (CRF) with no bitrate ceiling. Tour v5 averaged 14.8 Mbps
-and peaked at 36 Mbps per second (the exterior's foliage), above the 25 Mbps that H.264 High
+The direct renderer (tour_worker.render.direct) encodes with these settings; deliver() re-encodes
+an existing master the same way. History: Remotion (the old renderer) encoded at a constant
+quality (CRF) with no bitrate ceiling. Tour v5 averaged 14.8 Mbps and peaked at 36 Mbps per second (the exterior's foliage), above the 25 Mbps that H.264 High
 Level 4.0 (the level it was tagged) allows, with a keyframe only every ~5 s. Hardware decoders
 and anything streaming the file stalled and re-buffered on those peaks.
 
@@ -21,7 +22,8 @@ import json
 import os
 import subprocess
 
-MASTER_CRF = 16          # Remotion's master render: near-transparent, re-encoded below
+from tour_worker.errors import WorkerError
+
 CRF = 20
 MAXRATE = "10M"
 BUFSIZE = "20M"
@@ -57,9 +59,9 @@ def _run(cmd):
     try:
         subprocess.run(cmd, check=True, capture_output=True, text=True, timeout=1800)
     except subprocess.CalledProcessError as e:
-        raise RuntimeError(f"encode_failed: {e.stderr[-2000:]}")
+        raise WorkerError("encode_failed", e.stderr[-2000:])
     except subprocess.TimeoutExpired:
-        raise RuntimeError("encode_failed: timeout")
+        raise WorkerError("encode_failed", "timeout")
 
 
 def _frame_count(path: str) -> int:

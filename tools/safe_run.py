@@ -5,9 +5,9 @@
 Why: the dev box hard-reset twice during full renders (no OOM, no kernel error; the journal just
 stops while Chrome/encoder/workers load every core). 8 busy threads take the CPU from 57 to 87 C
 in 20 s. So the job is
-  - pinned to a few CPUs (taskset; inherited by every child: PyTorch, Chrome, ffmpeg, prewarp
+  - pinned to a few CPUs (taskset; inherited by every child: PyTorch, ffmpeg, render
     workers), one hardware thread per physical core to spread the heat;
-  - told to use that many threads (OMP/MKL/OpenBLAS, PREWARP_WORKERS, TOUR_RENDER_CONCURRENCY);
+  - told to use that many threads (OMP/MKL/OpenBLAS, PREWARP_WORKERS);
   - run in a systemd user scope with a memory limit;
   - FROZEN (cgroup.freeze) when the CPU package reaches --max-temp, and thawed below
     --resume-temp: the job pauses, it is not killed.
@@ -58,7 +58,7 @@ def main() -> int:
     os.makedirs(os.path.dirname(LOG), exist_ok=True)
     n = len(a.cpus.split(","))
     env = dict(os.environ, OMP_NUM_THREADS=str(n), MKL_NUM_THREADS=str(n), OPENBLAS_NUM_THREADS=str(n),
-               PREWARP_WORKERS=str(max(1, n - 1)), TOUR_RENDER_CONCURRENCY=str(max(1, n - 1)))
+               PREWARP_WORKERS=str(max(1, n - 1)))
     unit = f"safe-run-{os.getpid()}"
     inner = ["taskset", "-c", a.cpus] + cmd
     scoped = shutil.which("systemd-run") is not None

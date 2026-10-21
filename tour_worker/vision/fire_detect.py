@@ -6,7 +6,7 @@ stone or brick surround, which is also inside the fireplace mask, does not count
 was tried first and failed both ways (pale gas flames missed; a petrified-wood table, warm
 pendants and stone chimneys taken for fire): the fireplace mask is what makes it reliable.
 
-The effect (tour_worker/motion/region.py, "fire_flicker") moves the photo's own flames: upward
+The effect (tour_worker.motion.fire, "fire_flicker") moves the photo's own flames: upward
 turbulence, anchored at the base (logs, grate), flames flickering in brightness, and a soft warm
 glow around the fire pulsing on the hearth and nearby surfaces.
 """

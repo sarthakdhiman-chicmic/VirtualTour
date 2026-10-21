@@ -40,30 +40,6 @@ class HttpStorage(Storage):
     def put(self, path: str, uri: str) -> None:
         raise NotImplementedError("HttpStorage cannot put")
 
-class CompositeStorage(Storage):
-    def __init__(self, s3: Storage, http: Storage, local: Storage = None):
-        self.s3 = s3
-        self.http = http
-        self.local = local
-
-    def get(self, uri: str, dest: str) -> None:
-        if self.local:
-            self.local.get(uri, dest)
-        elif uri.startswith("s3://"):
-            self.s3.get(uri, dest)
-        elif uri.startswith("https://"):
-            self.http.get(uri, dest)
-        else:
-            raise ValueError(f"Unsupported URI scheme: {uri}")
-
-    def put(self, path: str, uri: str) -> None:
-        if self.local:
-            self.local.put(path, uri)
-        elif uri.startswith("s3://"):
-            self.s3.put(path, uri)
-        else:
-            raise ValueError(f"Unsupported put URI scheme: {uri}")
-
 class S3Storage(Storage):
     def _get_client(self):
         import boto3
@@ -82,13 +58,20 @@ class S3Storage(Storage):
         self._get_client().upload_file(path, parts[0], parts[1])
 
 class LocalMapStorage(Storage):
-    def __init__(self, images_dir: str):
+    """Dev stand-in for remote storage: every URI maps to <images_dir>/<basename>. A missing file
+    is created as a red 1920x1080 placeholder when placeholder is True (the WORKER_STORAGE=local
+    behaviour), else it is an error."""
+
+    def __init__(self, images_dir: str, placeholder: bool = True):
         self.images_dir = images_dir
+        self.placeholder = placeholder
 
     def get(self, uri: str, dest: str) -> None:
         basename = uri.split("/")[-1]
         src = os.path.join(self.images_dir, basename)
         if not os.path.exists(src):
+            if not self.placeholder:
+                raise FileNotFoundError(f"{basename} not in {self.images_dir}")
             from PIL import Image
             img = Image.new('RGB', (1920, 1080), color = 'red')
             img.save(src)
@@ -98,3 +81,71 @@ class LocalMapStorage(Storage):
         basename = uri.split("/")[-1]
         dest = os.path.join(self.images_dir, basename)
         shutil.copy(path, dest)
+
+
+class FileStorage(Storage):
+    """file:// URIs and plain filesystem paths."""
+
+    @staticmethod
+    def path(uri: str) -> str:
+        return uri[len("file://"):] if uri.startswith("file://") else uri
+
+    def get(self, uri: str, dest: str) -> None:
+        shutil.copy(self.path(uri), dest)
+
+    def put(self, path: str, uri: str) -> None:
+        dest = self.path(uri)
+        os.makedirs(os.path.dirname(os.path.abspath(dest)), exist_ok=True)
+        shutil.copy(path, dest)
+
+
+def is_file_uri(uri: str) -> bool:
+    """file:// or an absolute filesystem path."""
+    return uri.startswith("file://") or uri.startswith("/")
+
+
+class CompositeStorage(Storage):
+    """Routes each URI by its scheme: s3:// -> S3, https:// -> HTTPS (get only), file:// or a
+    filesystem path -> the filesystem, local:// -> the local store.
+
+    local_for_remote=True (WORKER_STORAGE=local, the local CLI): every URI that is not file:// or
+    an absolute path - s3://, https://, bare names - is served by the local store (a
+    LocalMapStorage: by basename), so a plan with production URIs renders from a folder.
+    Before 2026-10 a local store took EVERY URI, file:// too (a file:// music track was looked
+    up by basename in IMAGES_DIR)."""
+
+    def __init__(self, s3: Storage, http: Storage, local: Storage | None = None,
+                 local_for_remote: bool = False, files: Storage | None = None):
+        self.s3 = s3
+        self.http = http
+        self.local = local
+        self.local_for_remote = local_for_remote and local is not None
+        self.files = files or FileStorage()
+
+    def _route(self, uri: str, put: bool = False) -> Storage:
+        if is_file_uri(uri):
+            return self.files
+        if self.local_for_remote or (uri.startswith("local://") and self.local is not None):
+            return self.local
+        if uri.startswith("s3://"):
+            return self.s3
+        if uri.startswith("https://") and not put:
+            return self.http
+        if "://" not in uri:                       # a relative path
+            return self.files
+        raise ValueError(f"Unsupported {'put ' if put else ''}URI scheme: {uri}")
+
+    def get(self, uri: str, dest: str) -> None:
+        self._route(uri).get(uri, dest)
+
+    def put(self, path: str, uri: str) -> None:
+        self._route(uri, put=True).put(path, uri)
+
+
+def build_storage(settings, job_type: str = "tour_render") -> CompositeStorage:
+    """The storage a job runs with. tour_segment always reads photos from S3 / HTTPS and writes
+    masks to S3 (as it always did); tour_render honours WORKER_STORAGE=local."""
+    if job_type == "tour_render" and settings.storage == "local":
+        return CompositeStorage(s3=S3Storage(), http=HttpStorage(), local=LocalMapStorage(settings.images_dir),
+                                local_for_remote=True)
+    return CompositeStorage(s3=S3Storage(), http=HttpStorage())

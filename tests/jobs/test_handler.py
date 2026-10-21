@@ -6,8 +6,8 @@ from handler import handler
 
 def test_handler_invalid_job_type():
     res = handler({"input": {"job_type": "invalid"}})
-    assert "error" in res
-    assert "invalid_job_type" in res["error"]
+    assert res["status"] == "failed"
+    assert res["error"]["code"] == "invalid_job_type"
 
 def test_handler_local_storage(monkeypatch):
     import hashlib
@@ -53,7 +53,8 @@ def test_handler_local_storage(monkeypatch):
         event = {
             "input": {
                 "job_type": "tour_render",
-                "plan": plan_dict
+                "plan": plan_dict,
+                "output_prefix": "s3://bucket/out/",
             }
         }
         
@@ -71,3 +72,6 @@ def test_handler_local_storage(monkeypatch):
             pytest.fail(f"Handler returned error: {res.get('error')}")
         
         assert res.get("status") == "completed"
+        from tour_worker.contract.jobs import TourRenderResult
+        TourRenderResult.model_validate(res)
+        assert res["video_uri"] == "s3://bucket/out/master.mp4" and os.path.exists(os.path.join(d, "master.mp4"))

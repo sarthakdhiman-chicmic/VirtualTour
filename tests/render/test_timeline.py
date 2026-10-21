@@ -1,5 +1,4 @@
 import random
-import pytest
 from tour_worker.contract.plan import Plan
 from tour_worker.render.timeline import compute_timeline
 

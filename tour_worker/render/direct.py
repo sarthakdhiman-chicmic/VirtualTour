@@ -1,13 +1,13 @@
-"""Direct renderer (2026-10-16): OpenCV draws every frame, ffmpeg encodes it. No Remotion, no Chrome.
+"""Direct renderer (2026-10-16): OpenCV draws every frame, ffmpeg encodes it.
 
-Why: in the Remotion path every frame went OpenCV prewarp -> JPEG -> Chrome -> JPEG (quality 80) ->
-master H.264 -> delivery H.264, and Chrome was both the slowest stage (~8-10 min for a 75 s tour
+Why: in the old Remotion path (removed 2026-10; branch archive/remotion-renderer) every frame went
+OpenCV prewarp -> JPEG -> Chrome -> JPEG (quality 80) -> master H.264 -> delivery H.264, and Chrome was both the slowest stage (~8-10 min for a 75 s tour
 on the dev box) and the source of render-to-render differences. Every shot can be drawn by the
-prewarp's ShotWarp (crop, rotate, roll, ken_burns, motion regions), so frames now go straight from
+ShotWarp (tour_worker.render.frames: crop, rotate, roll, ken_burns, motion regions), so frames now go straight from
 OpenCV to the delivery encoder: one lossy step, byte-identical output for the same plan.
 
-Composition is TourComposition.tsx's, exactly: shots stacked in order over black, each faded in by
-smoothstep over its fade frames (hard cuts: fade 0). Encoding is tour_worker/render/encode.py's delivery
+Composition is the old browser composition's, exactly: shots stacked in order over black, each faded in by
+smoothstep over its fade frames (hard cuts: fade 0). Encoding is tour_worker.render.encode's delivery
 encode: chunks of whole GOPs, x264 single-threaded per chunk (deterministic), VBV-capped, joined by
 stream copy. Each chunk's process draws its own frames, so drawing and encoding run in parallel.
 
@@ -24,9 +24,10 @@ import tempfile
 import cv2
 import numpy as np
 
+from tour_worker.errors import WorkerError
 from tour_worker.render.encode import (BUFSIZE, CHUNK_GOPS, CRF, GOP_S, LEVEL, MAXRATE, PRESET, VBV_INIT_CHUNK,
-                            _run)
-from tour_worker.render.frames import ShotWarp, prewarp_workers
+                                       _run)
+from tour_worker.render.frames import ShotWarp, render_workers
 from tour_worker.render.timeline import compute_timeline
 
 AUDIO_BITRATE = "192k"
@@ -34,7 +35,8 @@ _STATE: dict = {}
 
 
 def fade_opacity(f: int, fade: int) -> float:
-    """remotion/src/math.ts fadeOpacity."""
+    """Opacity of a shot f frames into its fade-in of `fade` frames (smoothstep; the Remotion
+    composition's fadeOpacity)."""
     if fade <= 0 or f >= fade:
         return 1.0
     if f < 0:
@@ -107,7 +109,7 @@ def _encode_chunk(task) -> str:
         pass
     err = proc.stderr.read().decode(errors="replace")
     if proc.wait() != 0:
-        raise RuntimeError(f"encode_failed: {err[-2000:]}")
+        raise WorkerError("encode_failed", err[-2000:])
     return part
 
 
@@ -143,7 +145,7 @@ def render_direct(plan, workdir: str, warnings: list | None = None, music_path: 
         ShotWarp(plan, shot, t["render_frames"], images, warnings)
     n = total_frames(plan)
     step = CHUNK_GOPS * GOP_S * plan.output.fps
-    workers = prewarp_workers() if workers is None else workers
+    workers = render_workers(workers)
     out_path = os.path.join(workdir, "out.mp4")
     with tempfile.TemporaryDirectory(prefix="direct_", dir=workdir) as td:
         tasks = [(k, a, min(n, a + step), td) for k, a in enumerate(range(0, n, step))]

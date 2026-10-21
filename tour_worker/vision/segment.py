@@ -19,12 +19,11 @@ import os
 import cv2
 import numpy as np
 
-_MODELS_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "models")
 # Two pinned OneFormer checkpoints (MIT weights). ADE20K (2026-10-16) knows fireplaces (lit-fire
 # effect), pools and blinds; its dataset images are for non-commercial research / education
 # (MIT CSAIL terms) - the product owner accepted that, pending legal (like COCO's Flickr images).
 # Label -> our class name (the planner's perceptual_effects keys); "fireplace" is not a motion
-# class itself: lit fires are looked for inside it (tour_worker/vision/fire_detect.py).
+# class itself: lit fires are looked for inside it (tour_worker.vision.fire_detect).
 MODELS = {
     "coco": {
         "id": "shi-labs/oneformer_coco_swin_large",
@@ -45,46 +44,53 @@ MODELS = {
     },
 }
 # COCO is primary (review 2026-10-19: its water masks are the surface only, submerged steps
-# included; ADE20K's "pool" took in coping and walls). Lit fires: tour_worker/vision/fire_detect.py.
-SEGMENT_MODEL = os.environ.get("SEGMENT_MODEL", "coco")
-# lit fires with COCO (no fireplace class): colour + label rules found 4/11 on the known set
-# (missed Downing's gas fires behind glass; took kitchen pendants and a sconce for fire). Off
-# until the fireplace adapter (a small head on COCO's features) exists.
-COCO_FIRE_SEARCH = os.environ.get("COCO_FIRE_SEARCH", "") == "1"
-_M = MODELS[SEGMENT_MODEL]
-MODEL_ID, MODEL_REVISION, WEIGHTS_SHA256 = _M["id"], _M["revision"], _M["sha256"]
-MODEL_DIR = os.environ.get("ONEFORMER_DIR", os.path.join(_MODELS_DIR, _M["dir"]))
-CLASS_MAP = _M["class_map"]
+# included; ADE20K's "pool" took in coping and walls). Which one runs is the SEGMENT_MODEL setting
+# (tour_worker.config). Lit fires with COCO (no fireplace class): colour + label rules found 4/11
+# on the known set (missed Downing's gas fires behind glass; took kitchen pendants and a sconce
+# for fire) - off (COCO_FIRE_SEARCH) until the fireplace adapter (training/) exists.
+DEFAULT_MODEL = "coco"
+
+
+def model_id(model: str = DEFAULT_MODEL) -> str:
+    """"<hf id>@<revision[:10]>", as reported in tour_segment results."""
+    m = MODELS[model]
+    return f"{m['id']}@{m['revision'][:10]}"
+
+
 MAX_SIDE = 2048            # long side the masks are produced at (memory; the planner reads `space`)
 MIN_PART_AREA = 0.003      # parts smaller than 0.3% of the photo are dropped
 MIN_SCORE = 0.5
 
 
-def ensure_model(model_dir: str = MODEL_DIR) -> str:
+def ensure_model(model_dir: str, model: str = DEFAULT_MODEL) -> str:
     """Download the pinned model if missing and check the weights' hash."""
+    spec = MODELS[model]
     weights = os.path.join(model_dir, "pytorch_model.bin")
     if not os.path.exists(weights):
         from huggingface_hub import snapshot_download
-        snapshot_download(MODEL_ID, revision=MODEL_REVISION, local_dir=model_dir,
+        snapshot_download(spec["id"], revision=spec["revision"], local_dir=model_dir,
                           allow_patterns=["*.json", "*.txt", "pytorch_model.bin", "README.md"])
     h = hashlib.sha256()
     with open(weights, "rb") as f:
         for chunk in iter(lambda: f.read(1 << 22), b""):
             h.update(chunk)
-    if h.hexdigest() != WEIGHTS_SHA256:
+    if h.hexdigest() != spec["sha256"]:
         raise RuntimeError("oneformer weights checksum mismatch")
     return model_dir
 
 
 class Segmenter:
-    """Loads OneFormer once; call it with a BGR image."""
+    """Loads OneFormer once; call it with a BGR image. model: a MODELS key; model_dir: its folder
+    (Settings.oneformer_path()); fire_search: the COCO_FIRE_SEARCH setting."""
 
-    def __init__(self, model_dir: str | None = None, threads: int | None = None):
+    def __init__(self, model_dir: str, model: str = DEFAULT_MODEL, threads: int | None = None,
+                 fire_search: bool = False):
         import torch
         from transformers import OneFormerForUniversalSegmentation, OneFormerProcessor
         if threads:
             torch.set_num_threads(threads)
-        d = ensure_model(model_dir or MODEL_DIR)
+        self.model_name, self.class_map, self.fire_search = model, MODELS[model]["class_map"], fire_search
+        d = ensure_model(model_dir, model)
         self.torch = torch
         self.processor = OneFormerProcessor.from_pretrained(d)
         self.model = OneFormerForUniversalSegmentation.from_pretrained(d).eval()
@@ -109,21 +115,21 @@ class Segmenter:
         res = self.processor.post_process_panoptic_segmentation(out, target_sizes=[(sh, sw)])[0]
         seg = res["segmentation"].cpu().numpy()
         from tour_worker.vision.fire_detect import find_fires, fire_regions
-        regions = segments_to_regions(seg, res["segments_info"], self.id2label, (sw, sh))
+        regions = segments_to_regions(seg, res["segments_info"], self.id2label, (sw, sh), self.class_map)
         scene = scene_summary(seg, res["segments_info"], self.id2label, (sw, sh))
-        regions = outdoor_plants(regions, scene)
-        if "fireplace" in CLASS_MAP:                   # ADE20K: flames inside its fireplace masks
+        regions = outdoor_plants(regions, scene, self.model_name)
+        if "fireplace" in self.class_map:              # ADE20K: flames inside its fireplace masks
             return fire_regions(bgr, regions), scene
-        if COCO_FIRE_SEARCH:                          # off: failed validation (4/11, 2026-10-19)
+        if self.fire_search:                          # off: failed validation (4/11, 2026-10-19)
             regions = regions + find_fires(bgr, seg, res["segments_info"], self.id2label)
         return regions, scene
 
 
-def outdoor_plants(regions: list[dict], scene: dict) -> list[dict]:
+def outdoor_plants(regions: list[dict], scene: dict, model: str = DEFAULT_MODEL) -> list[dict]:
     """ADE20K's "plant" covers potted plants and shrubs alike. A photo showing sky (1% or more)
     is outdoors: its plants are shrubs and hedges, which stay still (user decision 2026-10-16), so
     they are renamed "plant_outdoor" (no effect) rather than dropped."""
-    if SEGMENT_MODEL != "ade20k":                      # COCO's "potted plant" is pots only
+    if model != "ade20k":                              # COCO's "potted plant" is pots only
         return regions
     sky = sum(c["area"] for k, c in scene.get("classes", {}).items() if k.startswith("sky"))
     if sky < 0.01:
@@ -134,13 +140,14 @@ def outdoor_plants(regions: list[dict], scene: dict) -> list[dict]:
 def segments_to_regions(seg: np.ndarray, segments_info: list[dict], id2label: dict,
                         space: tuple[int, int], class_map: dict | None = None) -> list[dict]:
     """Panoptic map -> our regions: mapped classes only, stuff split into connected parts, small
-    parts dropped, ordered by area (largest first) for stable object ids."""
+    parts dropped, ordered by area (largest first) for stable object ids. class_map: the model's
+    (MODELS[...]["class_map"]); default COCO's."""
     sw, sh = space
     min_px = MIN_PART_AREA * sw * sh
     parts = []
     for s in segments_info:
         label = id2label.get(s["label_id"], id2label.get(str(s["label_id"]), ""))
-        cls = (class_map or CLASS_MAP).get(label)
+        cls = (class_map or MODELS[DEFAULT_MODEL]["class_map"]).get(label)
         score = float(s.get("score", 1.0))
         if not cls or score < MIN_SCORE:
             continue

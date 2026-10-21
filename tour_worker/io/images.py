@@ -1,6 +1,9 @@
 import os
 from PIL import Image, ImageOps
 
+from tour_worker.errors import WorkerError
+from tour_worker.motion.masks import mask_relpath
+
 def fetch_and_prepare(plan, storage, workdir, image_urls=None):
     if image_urls is None:
         image_urls = {}
@@ -17,7 +20,7 @@ def fetch_and_prepare(plan, storage, workdir, image_urls=None):
                 uri = image_urls.get(shot.image_uri, shot.image_uri)
                 storage.get(uri, dest_path)
             except Exception as e:
-                raise RuntimeError(f"image_fetch_failed: failed to fetch shot {shot.shot_id} ({e})")
+                raise WorkerError("image_fetch_failed", f"failed to fetch shot {shot.shot_id} ({e})")
                 
         # Prepare
         try:
@@ -41,9 +44,8 @@ def fetch_and_prepare(plan, storage, workdir, image_urls=None):
             raise RuntimeError(f"image preparation failed: {e}")
 
         # plan 1.4 motion region masks: a mask that cannot be fetched drops its region (the
-        # renderer never fails on it; tour_worker/motion/region.load_regions skips it)
+        # renderer never fails on it; tour_worker.motion.loader.load_regions skips it)
         for region in shot.motion_regions or []:
-            from tour_worker.motion.masks import mask_relpath
             mask_dest = os.path.join(images_dir, mask_relpath(shot.shot_id, region.id))
             os.makedirs(os.path.dirname(mask_dest), exist_ok=True)
             if os.path.exists(mask_dest):

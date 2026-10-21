@@ -4,13 +4,15 @@ Request:  {"job_type": "tour_segment", "job_id": ..., "images": [{"photo_id": ..
            "output_prefix": "s3://bucket/.../segments/<job_id>/"}
 Response: {"status": "completed", "results": {photo_id: [region, ...] | None},
            "scenes": {photo_id: scene summary | None}, "model": ..., "warnings": [...]}
-A scene summary (tour_worker/vision/segment.py scene_summary) lists every class in the photo - bed, couch,
+A scene summary (tour_worker.vision.segment.scene_summary) lists every class in the photo - bed, couch,
 window, stairs, ceiling, sky ... - for the planner's choice of camera move.
 
-Each region is shaped like a detect result plus `space` (tour_worker/vision/segment.py); its mask is written to
+Each region is shaped like a detect result plus `space` (tour_worker.vision.segment); its mask is written to
 <output_prefix><photo_id>/<object_id>.png and returned as `mask_url`. No images go back to the
 backend: it plans from the JSON, and the render job fetches the masks it needs. A photo that cannot
 be fetched or segmented gets None (the tour still renders, without motion on that photo).
+Contracts: tour_worker.contract.jobs (TourSegmentRequest / TourSegmentResult). Settings used:
+SEGMENT_MODEL, ONEFORMER_DIR / MODELS_DIR, COCO_FIRE_SEARCH (tour_worker.config).
 """
 from __future__ import annotations
 
@@ -19,27 +21,32 @@ import time
 
 import cv2
 
-from tour_worker.vision.segment import MODEL_ID, MODEL_REVISION, Segmenter
+from tour_worker.config import Settings, get_settings
+from tour_worker.errors import failure
+from tour_worker.vision.segment import model_id
 
-_SEGMENTER: Segmenter | None = None     # loaded once per warm worker
-
-
-def get_segmenter() -> Segmenter:
-    global _SEGMENTER
-    if _SEGMENTER is None:
-        _SEGMENTER = Segmenter()
-    return _SEGMENTER
+_SEGMENTERS: dict = {}                  # loaded once per warm worker (per model / folder)
 
 
-def run_segment(request: dict, storage, workdir: str, segmenter=None) -> dict:
+def get_segmenter(settings: Settings):
+    from tour_worker.vision.segment import Segmenter
+    key = (settings.segment_model, settings.oneformer_path(), settings.coco_fire_search)
+    if key not in _SEGMENTERS:
+        _SEGMENTERS[key] = Segmenter(settings.oneformer_path(), settings.segment_model,
+                                     fire_search=settings.coco_fire_search)
+    return _SEGMENTERS[key]
+
+
+def run_segment(request: dict, storage, workdir: str, segmenter=None, settings: Settings | None = None) -> dict:
     t0 = time.time()
+    settings = settings or get_settings()
     images = request.get("images") or []
     prefix = request.get("output_prefix") or ""
     if not images or not prefix:
-        return {"status": "failed", "error": {"code": "invalid_request", "message": "images and output_prefix are required"}}
+        return failure("invalid_request", "images and output_prefix are required")
     if not prefix.endswith("/"):
         prefix += "/"
-    seg = segmenter or get_segmenter()
+    seg = segmenter or get_segmenter(settings)
     results, scenes, warnings = {}, {}, []
     for item in images:
         pid, uri = str(item.get("photo_id")), item.get("uri")
@@ -72,4 +79,4 @@ def run_segment(request: dict, storage, workdir: str, segmenter=None) -> dict:
             out.append(r)
         results[pid] = out
     return {"status": "completed", "results": results, "scenes": scenes, "warnings": warnings,
-            "model": f"{MODEL_ID}@{MODEL_REVISION[:10]}", "seconds": round(time.time() - t0, 2)}
+            "model": model_id(settings.segment_model), "seconds": round(time.time() - t0, 2)}

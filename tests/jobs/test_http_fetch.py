@@ -4,7 +4,6 @@ import tempfile
 import os
 import threading
 from http.server import HTTPServer, SimpleHTTPRequestHandler
-import pytest
 from PIL import Image
 from handler import handler
 
@@ -63,6 +62,7 @@ def test_handler_http_storage(monkeypatch):
                 "input": {
                     "job_type": "tour_render",
                     "plan": plan_dict,
+                    "output_prefix": "s3://bucket/out/",
                     "image_urls": {
                         "s3://bucket/img.jpg": http_url
                     }

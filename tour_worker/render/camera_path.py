@@ -1,8 +1,8 @@
 """Camera path math for plan 1.3 `keyframe_path` cameras (contract addendum 1.3).
 
-The renderer mirrors this file in remotion/src/math.ts (keyframePathAt); tests/test_camera_path.py
-checks the two agree. Everything that judges a path (plan validation, the planner's margin
-solver, the measurement scripts) evaluates frames through this module.
+Everything that judges a path (plan validation, the planner's margin solver, the measurement
+scripts) evaluates frames through this module. (The removed Remotion renderer mirrored it in
+TypeScript; branch archive/remotion-renderer.)
 
 Per shot with n rendered frames, frame f has raw progress t = f / (n - 1) (as ken_burns).
 1. Global time profile: u = hermite(t), cubic Hermite with p(0)=0, p(1)=1, start slope 1.6 and
@@ -88,7 +88,7 @@ MAX_ROLL_DEG = 5.0
 
 def roll_fit_scale(roll_rad: float, out_w: int, out_h: int) -> float:
     """Extra zoom that keeps a frame rolled by roll_rad inside its unrolled window (mirrors
-    rollFitScale in remotion/src/math.ts). The window the planner validated is never exceeded."""
+    rollFitScale in the old renderer). The window the planner validated is never exceeded."""
     a = abs(roll_rad)
     return math.cos(a) + (max(out_w, out_h) / min(out_w, out_h)) * math.sin(a)
 
@@ -242,7 +242,7 @@ def frame_spp(cx, cy, zoom, src_w, src_h, out_w, out_h, projection="crop", hfov_
 
 
 # ---------------------------------------------------------------------------------------------
-# camera type "compound" (addendum 1.3.2). Mirrors compoundPathAt in remotion/src/math.ts.
+# camera type "compound" (addendum 1.3.2).
 #
 #   camera: {type: "compound", move, start: {cx, cy, zoom},
 #            segments: [{t0, t1, cx, cy, zoom}, ...],   1-4, t0 non-decreasing, first t0 = 0,

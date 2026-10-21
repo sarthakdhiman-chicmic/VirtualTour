@@ -1,9 +1,9 @@
 import hashlib
 import json
 
-from tour_worker.render.camera_path import PROJECTIONS, CompoundPath, KeyframePath, validate_compound, base_window, frame_margin_out_px, validate_keyframes
-from typing import List, Optional, Literal, Dict, Any
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from tour_worker.render.camera_path import PROJECTIONS, CompoundPath, KeyframePath, validate_compound, frame_margin_out_px, validate_keyframes
+from typing import List, Optional, Any
+from pydantic import BaseModel, ConfigDict, Field
 
 class OutputConfig(BaseModel):
     width: int

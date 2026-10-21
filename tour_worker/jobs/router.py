@@ -1,0 +1,46 @@
+"""One entry point for every job: dispatch by job_type, validate the request
+(tour_worker.contract.jobs), run it in a temporary folder and return its result - or, for any
+failure, {"status": "failed", "error": {"code", "message"}}.
+
+Codes: invalid_job_type, invalid_request (request shape), the plan's own codes (invalid_plan,
+unsupported_camera_type, unsupported_easing), and the run's (image_fetch_failed, encode_failed,
+verification_failed, ...; unknown for anything unexpected)."""
+from __future__ import annotations
+
+import tempfile
+
+from pydantic import ValidationError
+
+from tour_worker.config import Settings, get_settings
+from tour_worker.contract.jobs import JOB_TYPES, TourRenderRequest, TourSegmentRequest
+from tour_worker.errors import failure, from_exception
+from tour_worker.io.storage import build_storage
+
+_REQUESTS = {"tour_render": TourRenderRequest, "tour_segment": TourSegmentRequest}
+
+
+def _validation_message(e: ValidationError) -> str:
+    return "; ".join(f"{'.'.join(str(p) for p in err['loc']) or 'input'}: {err['msg']}" for err in e.errors())
+
+
+def run_job(job: dict, settings: Settings | None = None, storage=None) -> dict:
+    """Run one job (the RunPod event's `input`). storage: override (tests); default from settings."""
+    settings = settings or get_settings()
+    job = job if isinstance(job, dict) else {}
+    job_type = job.get("job_type")
+    if job_type not in JOB_TYPES:
+        return failure("invalid_job_type", f"job_type must be one of {', '.join(JOB_TYPES)}")
+    try:
+        _REQUESTS[job_type].model_validate(job)
+    except ValidationError as e:
+        return failure("invalid_request", _validation_message(e))
+    storage = storage or build_storage(settings, job_type)
+    try:
+        with tempfile.TemporaryDirectory() as workdir:
+            if job_type == "tour_segment":
+                from tour_worker.jobs.segment import run_segment
+                return run_segment(job, storage, workdir, settings=settings)
+            from tour_worker.jobs.render import run_tour
+            return run_tour(job, storage, workdir, settings=settings)
+    except Exception as e:                  # e.g. the segmentation model failed to load
+        return from_exception(e)

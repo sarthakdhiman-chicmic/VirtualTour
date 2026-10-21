@@ -18,7 +18,6 @@ import os
 import sys
 import time
 
-os.environ["SEGMENT_MODEL"] = "ade20k"
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import common as C  # noqa: E402
 
@@ -28,7 +27,10 @@ import numpy as np  # noqa: E402
 from tour_worker.vision import segment as S  # noqa: E402
 from tour_worker.vision import fire_detect as F  # noqa: E402
 
-assert S.SEGMENT_MODEL == "ade20k"
+from tour_worker.config import Settings  # noqa: E402
+
+MODEL = "ade20k"
+SETTINGS = Settings.from_env(dict(os.environ, SEGMENT_MODEL=MODEL))   # MODELS_DIR / ONEFORMER_DIR
 
 
 def label_one(seg: S.Segmenter, bgr: np.ndarray) -> tuple[dict, dict[str, np.ndarray]]:
@@ -40,7 +42,7 @@ def label_one(seg: S.Segmenter, bgr: np.ndarray) -> tuple[dict, dict[str, np.nda
         out = seg.model(**inputs)
     res = seg.processor.post_process_panoptic_segmentation(out, target_sizes=[(sh, sw)])[0]
     pan = res["segmentation"].cpu().numpy()
-    regions = S.segments_to_regions(pan, res["segments_info"], seg.id2label, (sw, sh))
+    regions = S.segments_to_regions(pan, res["segments_info"], seg.id2label, (sw, sh), seg.class_map)
     scene = S.scene_summary(pan, res["segments_info"], seg.id2label, (sw, sh))
     fps = [r for r in regions if r["class_name"] == "fireplace"]
     fp = np.zeros((sh, sw), np.uint8)
@@ -94,7 +96,7 @@ def main() -> None:
             n_neg += not j["has_fireplace"]
             n_lit += j["lit"]
     C.log(lg, f"start: {len(items)} items, already fire {n_fire} lit {n_lit} neg {n_neg}")
-    seg = S.Segmenter(threads=a.threads)
+    seg = S.Segmenter(SETTINGS.oneformer_path(), MODEL, threads=a.threads)
     for i, (pid, path) in enumerate(items):
         if not a.known and n_fire >= a.target_fire and n_neg >= a.min_neg:
             C.log(lg, f"targets reached after {i} items")

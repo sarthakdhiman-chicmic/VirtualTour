@@ -24,7 +24,6 @@ import os
 import sys
 import time
 
-os.environ["SEGMENT_MODEL"] = "coco"
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import common as C  # noqa: E402
 
@@ -34,7 +33,10 @@ import numpy as np  # noqa: E402
 from tour_worker.vision import segment as S  # noqa: E402
 from tour_worker.vision import fire_detect as F  # noqa: E402
 
-assert S.SEGMENT_MODEL == "coco"
+from tour_worker.config import Settings  # noqa: E402
+
+MODEL = "coco"
+SETTINGS = Settings.from_env(dict(os.environ, SEGMENT_MODEL=MODEL))   # MODELS_DIR / ONEFORMER_DIR
 
 
 class FeatureHook:
@@ -105,7 +107,7 @@ def main() -> None:
     C.log(lg, f"start: {len(items)} items, {len(todo)} to do")
     if not todo:
         return
-    seg = S.Segmenter(threads=a.threads)
+    seg = S.Segmenter(SETTINGS.oneformer_path(), MODEL, threads=a.threads)
     hook = FeatureHook(seg)
     for i, (pid, path) in enumerate(todo):
         t = time.time()

@@ -1,18 +1,13 @@
-"""Pre-warp shots that use projection "rotate" (addendum 1.3.1) into per-frame images.
+"""Every frame of a shot, drawn with OpenCV (ShotWarp): the camera (ken_burns, keyframe_path or
+compound; projection crop with roll, or rotate) as one homography from output to source pixels,
+beat-sync retiming (time_warp) and zoom punches, and the shot's motion regions.
 
-Chrome's CSS matrix3d path made renders non-deterministic: two renders of the same plan differed
-in ~300-400 of 2250 frames, including crop shots sharing a render chunk with a rotate shot
-(out/tour_v5/report.md); will-change and per-frame remounting did not fix it. So the rotation is
-warped here with OpenCV (exact homography from tour_worker/render/camera_path.rotate_homography, linear
-interpolation, which matches Chrome's sampling of crop shots: SSIM 0.96-0.97, same sharpness)
-and the renderer only shows the finished frames.
-
-Frame f of a shot with n rendered frames is the camera at t = f / (n - 1), as in KenBurnsShot.
-
-Plan 1.4 perceptual motion: a shot with motion regions is warped with one cv2.remap whose maps
-are the camera homography plus the regions' displacement (tour_worker/motion/region.py), so the
-content moves inside its masks with a single resample. Shots without regions keep the exact
-warpPerspective path (byte-identical to before).
+Frame f of a shot with n rendered frames is the camera at t = f / (n - 1). The whole frame is
+warped with warpPerspective (exact homography from tour_worker.render.camera_path, linear
+interpolation); where a motion region can be on screen, that window is redrawn with one cv2.remap
+whose maps are the camera homography plus the regions' displacement (tour_worker.motion.region),
+so the content moves inside its masks with a single resample. Regions too faint to read on screen
+are dropped (visible_motion_px).
 """
 import os
 
@@ -28,8 +23,8 @@ from tour_worker.motion.region import ROI_PROBE, apply_regions, field_align, pro
 
 def crop_roll_homography(cx, cy, zoom, roll_deg, src_w, src_h, out_w, out_h):
     """OUTPUT px -> SOURCE px for a crop window rolled by roll_deg about the frame centre and scaled
-    by roll_fit_scale, exactly as KenBurnsShot renders it (CSS rotate(roll) scale(fit) about the
-    centre over the window)."""
+    by roll_fit_scale, exactly as the old browser renderer drew it (CSS rotate(roll) scale(fit)
+    about the centre over the window)."""
     bw, bh = base_window(src_w, src_h, out_w, out_h)
     w = bw / zoom * src_w
     h = bh / zoom * src_h
@@ -44,20 +39,12 @@ def crop_roll_homography(cx, cy, zoom, roll_deg, src_w, src_h, out_w, out_h):
     return (np.array(m) @ np.array(a)).tolist()
 
 
-def needs_prewarp(cam, shot=None) -> bool:
-    if cam.type not in ("compound", "keyframe_path"):
-        return False
-    if cam.projection == "rotate" or (shot is not None and shot.motion_regions) or getattr(cam, "punches", None):
-        return True
-    return cam.type == "keyframe_path" and any(k.roll_deg for k in cam.keyframes or [])
-
-
 def homography_maps(m: np.ndarray, grid: tuple[np.ndarray, np.ndarray]) -> tuple[np.ndarray, np.ndarray]:
     """Source sampling maps (float32) for OUTPUT px -> SOURCE px homography m, on a regular grid
     (meshgrid of output cols / rows). Each of the three projective terms is a column part plus a
     row part, computed in float64 per row / col and summed per pixel in float32 (remap resolves
     1/32 px; this differs from all-float64 by < 0.001 px) - full-frame float64 passes were the
-    prewarp's main memory traffic."""
+    frame drawing's main memory traffic."""
     x = np.asarray(grid[0][0], np.float64)          # output cols
     y = np.asarray(grid[1][:, 0], np.float64)       # output rows
     ax, ay = (m[0, 0] * x).astype(np.float32), (m[0, 1] * y + m[0, 2]).astype(np.float32)
@@ -78,7 +65,7 @@ _EASINGS = {"linear": lambda t: t, "ease_in": lambda t: t * t,
 
 def ken_burns_frames(cam, n: int, ts: list | None = None) -> list:
     """Plan <= 1.2 "ken_burns" cameras (start -> end with easing), exactly as the browser drew
-    them (remotion/src/math.ts cameraAt): centre linear, zoom in log space, roll linear."""
+    them (the old renderer's cameraAt): centre linear, zoom in log space, roll linear."""
     ease = _EASINGS.get(getattr(cam, "easing", None) or "ease_in_out", _EASINGS["ease_in_out"])
     a, b = cam.start, cam.end
     out = []
@@ -148,8 +135,9 @@ def region_motion_px(sw, region, frames: list[int] | None = None) -> float:
 
 
 class ShotWarp:
-    """Everything needed to draw any frame of one prewarped shot (shared by the render, the
-    parallel workers and tools/quality/perceptual_quality.py, so they cannot drift apart)."""
+    """Everything needed to draw any frame of one shot (shared by the render, the parallel
+    workers and tools/quality/perceptual_quality.py, so they cannot drift apart). Errors keep the
+    code "prewarp" (unreadable image, wrong aspect) as before."""
 
     def __init__(self, plan, shot, n: int, images: str, warnings: list | None = None):
         from tour_worker.contract.plan import compound_path  # plan_io imports camera_path; avoid a cycle
@@ -268,10 +256,11 @@ def _available_memory() -> int | None:
     return None
 
 
-def prewarp_workers() -> int:
-    env = os.environ.get("PREWARP_WORKERS", "").strip()
-    if env:
-        return max(1, int(env))
+def render_workers(configured: int | None = None) -> int:
+    """Processes for drawing + encoding: `configured` (the PREWARP_WORKERS setting) when set, else
+    min(8, CPUs this job may use - 1), capped by available memory."""
+    if configured:
+        return max(1, int(configured))
     n = min(8, len(os.sched_getaffinity(0)) - 1)          # CPUs this job may use
     mem = _available_memory()
     if mem is not None:

@@ -5,7 +5,6 @@ import json
 import hashlib
 from PIL import Image
 import numpy as np
-import math
 from tour_worker.contract.plan import parse_plan
 from tour_worker.render.direct import render_direct
 import copy
