@@ -14,6 +14,9 @@ def main() -> None:
     from tour_worker.service.http import create_app
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    # HTTP client libraries log every request URL at INFO, query string (signature) included
+    for name in ("httpx", "httpx2", "httpcore", "urllib3", "botocore", "boto3", "huggingface_hub"):
+        logging.getLogger(name).setLevel(logging.WARNING)
     settings = get_settings()
     app = create_app(settings)                 # refuses to start without a key (or the opt-out)
     uvicorn.run(app, host=settings.host, port=settings.port, workers=1, log_level="info",
