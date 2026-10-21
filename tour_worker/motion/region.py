@@ -35,12 +35,12 @@ class Effect(NamedTuple):
 EFFECTS = {
     "fabric_sway": Effect(fabric.fields, fabric.feature_px, fabric.displacement),
     "foliage_sway": Effect(foliage.fields, foliage.feature_px, foliage.displacement),
-    "canopy_flutter": Effect(canopy.fields, canopy.feature_px, canopy.legacy_displacement),
+    "canopy_flutter": Effect(canopy.fields, canopy.feature_px, lambda r, u, v, t: canopy.fields(r, u, v, t)[:2]),
     "calm_water": Effect(water.calm_fields, water.calm_feature_px, water.calm_displacement),
     "water_ripple": Effect(water.ripple_fields, water.ripple_feature_px, water.ripple_displacement),
-    # displacement(): fire has none of its own; it always returned the foliage formula (unused by
-    # the render, which calls fields())
-    "fire_flicker": Effect(fire.fields, fire.feature_px, foliage.displacement),
+    # displacement() is the render's own motion (fields() without the light) for every effect:
+    # tests of displacement() test what the renderer draws
+    "fire_flicker": Effect(fire.fields, fire.feature_px, lambda r, u, v, t: fire.fields(r, u, v, t)[:2]),
 }
 # an effect outside the registry (the plan validator rejects them) behaves as before: foliage
 # displacement, no brightness, an exact grid

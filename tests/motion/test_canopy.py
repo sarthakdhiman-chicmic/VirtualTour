@@ -61,7 +61,9 @@ def test_trees_sway_sideways_together_not_in_circles():
         if big.sum() > 10:
             same.append(max((dx[big] > 0).mean(), (dx[big] < 0).mean()))
     dxs, dys = np.array(dxs), np.array(dys)
-    assert np.abs(dys).mean() < 0.25 * np.abs(dxs).mean()               # sideways, not swirling
+    # mostly sideways; since 2026-10-21 some branch clusters swing at an angle (the variety), so
+    # vertical motion is a real share - but each point still moves on a line (test below)
+    assert np.abs(dys).mean() < 0.8 * np.abs(dxs).mean()
     assert np.mean(same) > 0.8                                           # parts move together
     assert np.abs(dxs).max() <= 1.6 * 8.0
 

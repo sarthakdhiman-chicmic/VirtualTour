@@ -122,40 +122,6 @@ def fields(r, u, v, t, irregular=None):
     return dx, dy, light
 
 
-def legacy_displacement(r, u, v, t):
-    """The 2026-10-19 canopy displacement, kept exactly: Region.displacement() still returns it
-    for canopy_flutter (the unit tests in tests/motion/test_canopy.py call it), but the RENDER
-    does not use it - frames go through fields() above. Kept unchanged by the 2026-10 package
-    restructure (behaviour-neutral); whether the tests should move to fields() is an open
-    follow-up."""
-    # review 2026-10-16: leaf jitter at 10 px read as jelly; 2026-10-19: branch-scale
-    # noise in x AND y read as a circular warp. Wind bends the crown SIDEWAYS as one:
-    # a sway travelling across the tree, gusts swelling and fading, branch masses
-    # lagging a little behind it, a slight dip as it bends, leaf shimmer on top.
-    # 2026-10-19 ("can look more natural"): a tree bends from its base, so the top of the
-    # crown sways most (bend); each branch cluster also sways on its own, a little quicker
-    # and at its own phase (a static phase field), so the crown never moves as one sheet;
-    # the leaves shimmer in light (fields(): LEAF_SHIMMER)
-    f = r.freq
-    lb, ll = branch_px(r), leaf_px(r)
-    ab, al = canopy_amps(r)
-    span = max(r.bw, 1.0)
-    ph = (2 * math.pi * SWAY_HZ * t - 2 * math.pi * SWAY_ACROSS * (u - r.x0) / span
-          + r.phase)
-    sway = 0.8 * np.sin(ph) + 0.2 * np.sin(1.63 * ph + r.phase2)
-    gust = 0.6 + 0.4 * np.clip(0.5 + r.noise_b(u / (0.8 * span) - 0.1 * t, v / (0.8 * span),
-                                               0.07 * t), 0, 1)
-    bd = bend(r, u, v)
-    # branch phase: changes slowly across the crown (a branch cluster ~1.5 lb across);
-    # faster phase changes shear neighbouring leaves apart
-    bph = math.pi * r.noise_a(u / (1.5 * lb) + 60.0, v / (1.5 * lb), 0.0)
-    branch = np.sin(2 * math.pi * BRANCH_HZ * t + bph)
-    dx = gust * ab * bd * (0.7 * sway + 0.3 * branch) + al * r.noise_b(u / ll, v / ll, f * t)
-    dy = (gust * ab * bd * (0.06 * sway * sway + 0.08 * np.cos(2 * math.pi * BRANCH_HZ * t + bph))
-          + 0.6 * al * r.noise_b(u / ll + 40.0, v / ll, f * t))
-    return dx, dy
-
-
 def tree_columns(inside: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """Per photo column: the tree mask's bottom row and height, smoothed across ~2% of the width
     (float32): where each part of a crown bends from."""
