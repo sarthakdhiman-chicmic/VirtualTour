@@ -21,11 +21,22 @@ dependencies = [
 [dependency-groups]
 dev = [
     "pytest>=7.0.0",
+    "fastapi>=0.110",        # tests/service (the http extra) ...
+    "uvicorn>=0.29",
+    "httpx>=0.27",           # ... and FastAPI's TestClient
 ]
 
 [project.optional-dependencies]
 dev = [
     "pytest>=7.0.0",
+    "fastapi>=0.110",
+    "uvicorn>=0.29",
+    "httpx>=0.27",
+]
+# The HTTP service (python -m tour_worker.service): RunPod's serverless API on a plain container.
+http = [
+    "fastapi>=0.110",
+    "uvicorn>=0.29",
 ]
 # Music analysis for beat sync (tour_worker/music: offline, once per track; not used by the jobs).
 # librosa is pinned: beat / onset results shift between versions.
