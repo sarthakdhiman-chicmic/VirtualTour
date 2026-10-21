@@ -97,7 +97,9 @@ def deliver(master_path: str, out_path: str, fps: int) -> str:
                   "-pix_fmt", "yuv420p", "-colorspace", "bt470bg", "-color_range", "tv",
                   "-r", str(fps), "-an", part])
             return part
-        workers = max(1, min(len(ranges), os.cpu_count() or 1))
+        # the CPUs this process may use (taskset / container limits), not the machine's count:
+        # each x264 process holds ~0.5 GB, so 20 of them on a 4-CPU job overran its memory
+        workers = max(1, min(len(ranges), len(os.sched_getaffinity(0))))
         with concurrent.futures.ThreadPoolExecutor(workers) as ex:
             parts = list(ex.map(encode, enumerate(ranges)))
         listing = os.path.join(td, "parts.txt")

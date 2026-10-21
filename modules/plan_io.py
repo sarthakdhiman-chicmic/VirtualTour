@@ -64,11 +64,42 @@ class Camera(BaseModel):
     # compound (addendum 1.3.2): start + segments + timing (modules/camera_path.py)
     segments: Optional[List[Segment]] = None
     timing: Optional[Timing] = None
+    # beat sync (plan 1.5): [output t, move t] points, monotone, (0,0) .. (1,1): the move planned
+    # for the shot's normal length, retimed to its synced length (modules/camera_path.time_warp_at)
+    time_warp: Optional[List[List[float]]] = None
+    # beat sync: zoom punches on musical hits (modules/camera_path.punch_scale)
+    punches: Optional[List["Punch"]] = None
+    model_config = ConfigDict(extra='ignore')
+
+class Punch(BaseModel):
+    """A zoom-in pulse on a musical hit: zoom x (1 + amount * pulse), the pulse rising over
+    attack_s to 1 at at_s (s into the shot), easing back to 0 over decay_s."""
+    at_s: float
+    amount: float
+    attack_s: float = 0.0
+    decay_s: float
     model_config = ConfigDict(extra='ignore')
 
 class Transition(BaseModel):
     type: str
     duration_s: float
+    model_config = ConfigDict(extra='ignore')
+
+MOTION_EFFECTS = ("fabric_sway", "foliage_sway", "water_ripple", "calm_water", "canopy_flutter", "fire_flicker")
+MAX_MOTION_AMPLITUDE_PX = 48.0   # validation bound; the backend sets strength on screen (up to 48 source px on large photos)
+
+class MotionRegion(BaseModel):
+    """Plan 1.4 perceptual motion inside an object mask (modules/perceptual)."""
+    id: str
+    effect: str
+    mask_uri: str
+    bbox: List[float]                 # [x1, y1, x2, y2] normalised to the photo
+    amplitude_px: float               # peak displacement, source px
+    freq_hz: float
+    anchor: str                       # "top" | "bottom"
+    seed: int
+    label: Optional[str] = None
+    phase: Optional[float] = None     # sway phase (rad), set by the planner; random when None
     model_config = ConfigDict(extra='ignore')
 
 class Shot(BaseModel):
@@ -84,12 +115,30 @@ class Shot(BaseModel):
     duration_s: float
     camera: Camera
     transition_in: Transition
+    motion_regions: Optional[List[MotionRegion]] = None   # plan 1.4
     model_config = ConfigDict(extra='ignore')
 
 class Provenance(BaseModel):
     scoring_config_version: str
     planner_config_version: str
     plan_hash: str
+    model_config = ConfigDict(extra='ignore')
+
+class Music(BaseModel):
+    """Plan 1.5: the tour's music (backend planner/music_sync.py). The track is queued `loops`
+    times, each copy cut at loop_s (the bar where its beat stops), trimmed to end_s, faded out."""
+    track_id: str
+    uri: str
+    sha256: Optional[str] = None
+    end_s: float
+    loops: int = 1
+    loop_s: Optional[float] = None
+    track_duration_s: Optional[float] = None
+    fade_out_s: float = 1.5
+    synced: bool = False
+    cut_lead_frames: int = 0               # cuts sit this many frames before their beat
+    hooks_required: bool = False           # every hook moment got a cut (tools/sync_quality.py)
+    hooks: Optional[List[dict]] = None     # [{t, kind: cut|accent|missed, reason}]
     model_config = ConfigDict(extra='ignore')
 
 class Plan(BaseModel):
@@ -103,6 +152,7 @@ class Plan(BaseModel):
     shots: List[Shot]
     warnings: List[Any] = Field(default_factory=list)
     provenance: Provenance
+    music: Optional[Music] = None
     model_config = ConfigDict(extra='ignore')
 
 def compute_plan_hash(plan_dict: dict) -> str:
@@ -122,7 +172,9 @@ def validate_plan_hash(original_dict: dict):
         raise ValueError(f"plan_hash mismatch: expected {computed}, got {expected}")
 
 CAMERA_TYPES = {"1.0": {"ken_burns"}, "1.1": {"ken_burns"}, "1.2": {"ken_burns"},
-                "1.3": {"ken_burns", "keyframe_path", "compound"}}
+                "1.3": {"ken_burns", "keyframe_path", "compound"},
+                "1.4": {"ken_burns", "keyframe_path", "compound"},
+                "1.5": {"ken_burns", "keyframe_path", "compound"}}   # 1.5 = 1.4 + a music block
 
 def check_camera_type(plan: Plan):
     allowed = CAMERA_TYPES.get(plan.plan_version, {"ken_burns"})
@@ -160,6 +212,27 @@ def compound_path(shot, out_w: int, out_h: int) -> CompoundPath:
     c = shot.camera
     return CompoundPath(c.start.model_dump(), [s.model_dump() for s in c.segments], c.timing.model_dump(),
                         shot.source.width, shot.source.height, out_w, out_h)
+
+def check_time_warps(plan: Plan):
+    for shot in plan.shots:
+        w = shot.camera.time_warp
+        if w is None:
+            continue
+        ok = (len(w) >= 2 and all(len(p) == 2 for p in w) and w[0] == [0.0, 0.0] and w[-1] == [1.0, 1.0]
+              and all(b[0] > a[0] and b[1] > a[1] for a, b in zip(w, w[1:])))
+        if not ok:
+            raise ValueError(f"invalid_plan: time_warp in shot {shot.shot_id} must rise from (0,0) to (1,1)")
+
+
+MAX_PUNCH = 0.06          # zoom-in share; the backend plans 0.02-0.025
+
+def check_punches(plan: Plan):
+    for shot in plan.shots:
+        for p in shot.camera.punches or []:
+            if not (0 <= p.at_s <= shot.duration_s and 0 < p.amount <= MAX_PUNCH
+                    and 0 <= p.attack_s <= 0.5 and 0.05 <= p.decay_s <= 2.0):
+                raise ValueError(f"invalid_plan: punch in shot {shot.shot_id} out of range")
+
 
 def check_path_bounds(plan: Plan):
     """keyframe_path: the window must stay inside the image at every rendered frame (the planner
@@ -218,7 +291,7 @@ def check_easing(plan: Plan):
             raise ValueError(f"invalid_plan: non-default easing '{shot.camera.easing}' not allowed in plan_version {plan.plan_version}")
 
 def check_transitions(plan: Plan):
-    if plan.plan_version not in ("1.0", "1.1", "1.2", "1.3"):
+    if plan.plan_version not in ("1.0", "1.1", "1.2", "1.3", "1.4", "1.5"):
         raise ValueError(f"unsupported plan version: {plan.plan_version}")
     
     if not plan.shots:
@@ -232,12 +305,30 @@ def check_transitions(plan: Plan):
         if plan.plan_version == "1.0":
             if shot.transition_in.type != "cut":
                 raise ValueError("plan_version 1.0 only supports cut transitions")
-        elif plan.plan_version in ("1.1", "1.2", "1.3"):
+        elif plan.plan_version in ("1.1", "1.2", "1.3", "1.4", "1.5"):
             t = shot.transition_in
             if t.type not in ("cut", "fade"):
                 raise ValueError(f"Unsupported transition type: {t.type}")
             if t.type == "fade" and t.duration_s > shot.duration_s * 0.5:
                 raise ValueError("fade duration cannot exceed 50% of shot duration")
+
+def check_motion_regions(plan: Plan):
+    for shot in plan.shots:
+        if not shot.motion_regions:
+            continue
+        if plan.plan_version not in ("1.4", "1.5"):
+            raise ValueError(f"invalid_plan: motion_regions in shot {shot.shot_id} need plan_version 1.4 or later")
+        for r in shot.motion_regions:
+            if r.effect not in MOTION_EFFECTS:
+                raise ValueError(f"unsupported_motion_effect: {r.effect}")
+            if r.anchor not in ("top", "bottom", "none"):
+                raise ValueError(f"invalid_plan: motion region {r.id} anchor must be top, bottom or none")
+            if not 0 <= r.amplitude_px <= MAX_MOTION_AMPLITUDE_PX or not 0 < r.freq_hz <= 2:
+                raise ValueError(f"invalid_plan: motion region {r.id} amplitude/frequency out of range")
+            if len(r.bbox) != 4 or not (0 <= r.bbox[0] < r.bbox[2] <= 1 and 0 <= r.bbox[1] < r.bbox[3] <= 1):
+                raise ValueError(f"invalid_plan: motion region {r.id} bbox must be normalised x1<x2, y1<y2")
+            if not r.mask_uri.startswith(("s3://", "http://", "https://", "local://")) and "/" not in r.mask_uri:
+                raise ValueError(f"invalid_plan: motion region {r.id} mask_uri")
 
 def parse_plan(data: dict) -> Plan:
     validate_plan_hash(data)
@@ -246,5 +337,8 @@ def parse_plan(data: dict) -> Plan:
     check_bounds(plan)
     check_easing(plan)
     check_transitions(plan)
+    check_time_warps(plan)
+    check_punches(plan)
     check_path_bounds(plan)
+    check_motion_regions(plan)
     return plan

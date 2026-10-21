@@ -1,4 +1,0 @@
-{"out": "out/tour_v2/v2_moves.mp4", "render_seconds": 147.79, "concurrency": 6, "jpeg_quality": "default", "gl": null}
-{"out": "out/tour_v2/determinism/v2_moves.run2.mp4", "render_seconds": 149.26, "concurrency": 6, "jpeg_quality": "default", "gl": null}
-{"out": "out/tour_v2/v0_baseline.mp4", "render_seconds": 150.36, "concurrency": 6, "jpeg_quality": "default", "gl": null}
-{"out": "out/tour_v2/v1_cuts.mp4", "render_seconds": 149.1, "concurrency": 6, "jpeg_quality": "default", "gl": null}

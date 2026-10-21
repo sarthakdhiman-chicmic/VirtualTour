@@ -39,5 +39,18 @@ def fetch_and_prepare(plan, storage, workdir, image_urls=None):
                     img.save(dest_path, "JPEG", quality=95)
         except Exception as e:
             raise RuntimeError(f"image preparation failed: {e}")
-    
+
+        # plan 1.4 motion region masks: a mask that cannot be fetched drops its region (the
+        # renderer never fails on it; modules/perceptual/effects.load_regions skips it)
+        for region in shot.motion_regions or []:
+            from modules.perceptual.effects import mask_relpath
+            mask_dest = os.path.join(images_dir, mask_relpath(shot.shot_id, region.id))
+            os.makedirs(os.path.dirname(mask_dest), exist_ok=True)
+            if os.path.exists(mask_dest):
+                continue
+            try:
+                storage.get(image_urls.get(region.mask_uri, region.mask_uri), mask_dest)
+            except Exception as e:
+                warnings.append(f"motion_mask_fetch_failed:{shot.shot_id}:{region.id} ({e})")
+
     return warnings

@@ -119,6 +119,15 @@ class KeyframePath:
         return [self.at(f / max(1, n - 1)) for f in range(n)]
 
 
+def time_warp_at(points, t: float) -> float:
+    """Beat-sync retiming (plan 1.5): shot output progress t -> the move's progress, a monotone
+    cubic through [output t, move t] points from (0,0) to (1,1). None / empty: identity."""
+    if not points:
+        return t
+    xs, ys = [p[0] for p in points], [p[1] for p in points]
+    return monotone_eval(xs, ys, monotone_slopes(xs, ys), min(1.0, max(0.0, t)))
+
+
 def validate_keyframes(keyframes: list[dict]) -> None:
     if not 2 <= len(keyframes) <= 5:
         raise ValueError(f"keyframe_path needs 2-5 keyframes, got {len(keyframes)}")

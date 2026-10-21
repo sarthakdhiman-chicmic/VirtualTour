@@ -5,7 +5,7 @@ from modules.encode import MASTER_CRF, deliver
 from modules.prewarp import prewarp_rotate_shots
 from modules.timeline import compute_timeline
 
-def render(plan, workdir, scale=1.0, concurrency=2, jpeg_quality=95, gl=None):
+def render(plan, workdir, scale=1.0, concurrency=2, jpeg_quality=95, gl=None, warnings=None):
     """jpeg_quality: frame capture quality, None = Remotion's default (80). gl: Chrome GL backend
     (--gl), None = Remotion's default. Tour v2 renders use jpeg_quality=None, gl=None (the liked
     baseline's sharpness matches default JPEG quality). Passing --gl angle or swangle made two
@@ -19,7 +19,7 @@ def render(plan, workdir, scale=1.0, concurrency=2, jpeg_quality=95, gl=None):
     timeline = compute_timeline(plan)
     # rotate shots are warped to frames outside the browser (modules/prewarp.py: Chrome's 3D path
     # was not deterministic)
-    prewarp = prewarp_rotate_shots(plan, workdir)
+    prewarp = prewarp_rotate_shots(plan, workdir, warnings=warnings)
     shots = []
     fps = plan.output.fps
     

@@ -18,3 +18,45 @@ dependencies = [
 dev = [
     "pytest>=7.0.0",
 ]
+
+[project.optional-dependencies]
+# OneFormer segmentation for the tour_segment job (modules/segment.py).
+#   segment      CPU PyTorch (dev machines, no GPU):   uv sync --extra segment
+#   segment-gpu  CUDA 12.6 PyTorch (RunPod GPU worker): uv sync --extra segment-gpu
+segment = [
+    "torch>=2.6",
+    "torchvision>=0.21",     # transformers' OneFormer post-processing uses it
+    "transformers>=4.46",
+    "huggingface_hub>=0.25",
+    "scipy>=1.10",           # OneFormer's model class imports it at construction
+]
+segment-gpu = [
+    "torch>=2.6",
+    "torchvision>=0.21",     # transformers' OneFormer post-processing uses it
+    "transformers>=4.46",
+    "huggingface_hub>=0.25",
+    "scipy>=1.10",           # OneFormer's model class imports it at construction
+]
+
+[tool.uv]
+conflicts = [[{ extra = "segment" }, { extra = "segment-gpu" }]]
+
+[tool.uv.sources]
+torch = [
+    { index = "pytorch-cpu", extra = "segment" },
+    { index = "pytorch-cu126", extra = "segment-gpu" },
+]
+torchvision = [
+    { index = "pytorch-cpu", extra = "segment" },
+    { index = "pytorch-cu126", extra = "segment-gpu" },
+]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[[tool.uv.index]]
+name = "pytorch-cu126"
+url = "https://download.pytorch.org/whl/cu126"
+explicit = true
