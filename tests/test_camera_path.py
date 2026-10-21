@@ -1,19 +1,12 @@
-"""Plan 1.3 keyframe_path: camera path math, Python/TypeScript parity and contract validation."""
+"""Plan 1.3 keyframe_path: camera path math and contract validation."""
 import copy
-import json
-import os
-import subprocess
-import tempfile
 
 import pytest
 
 from modules.camera_path import (
-    KeyframePath, PROFILE_MIN_SLOPE, hermite_profile, monotone_eval, monotone_slopes,
+    PROFILE_MIN_SLOPE, hermite_profile, monotone_eval, monotone_slopes,
 )
 from modules.plan_io import compute_plan_hash, parse_plan
-
-REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-REMOTION = os.path.join(REPO, "remotion")
 
 PATHS = [
     [{"t": 0, "cx": 0.5, "cy": 0.5, "zoom": 1.03}, {"t": 1, "cx": 0.53, "cy": 0.48, "zoom": 1.1}],
@@ -45,23 +38,6 @@ def test_no_overshoot_between_keyframes(kfs):
                 x = ts[a] + (ts[a + 1] - ts[a]) * i / 100
                 v = monotone_eval(ts, ys, ms, x)
                 assert lo - 1e-12 <= v <= hi + 1e-12
-
-
-def test_python_typescript_parity():
-    with tempfile.TemporaryDirectory() as td:
-        bundle = os.path.join(td, "math.cjs")
-        subprocess.run([os.path.join(REMOTION, "node_modules", ".bin", "esbuild"), "src/math.ts", "--bundle",
-                        "--format=cjs", "--platform=node", f"--outfile={bundle}"], cwd=REMOTION, check=True,
-                       capture_output=True)
-        script = (f"const m=require({json.dumps(bundle)});const P={json.dumps(PATHS)};const T={json.dumps(T_SAMPLES)};"
-                  "console.log(JSON.stringify(P.map(k=>T.map(t=>{const c=m.keyframePathAt(k,t);return [c.cx,c.cy,c.zoom]}))))")
-        out = json.loads(subprocess.run(["node", "-e", script], check=True, capture_output=True, text=True).stdout)
-    worst = 0.0
-    for kfs, ts_vals in zip(PATHS, out):
-        path = KeyframePath(kfs)
-        for t, js in zip(T_SAMPLES, ts_vals):
-            worst = max(worst, max(abs(a - b) for a, b in zip(path.at(t), js)))
-    assert worst < 1e-12, worst
 
 
 def _plan_13(camera: dict, version: str = "1.3") -> dict:
@@ -147,24 +123,6 @@ def test_rotate_aims_at_target_and_keeps_horizon_level(cx, cy, z, hfov):
         assert abs(top[0] - bottom[0]) < 1e-6
 
 
-def test_rotate_python_typescript_parity():
-    with tempfile.TemporaryDirectory() as td:
-        bundle = os.path.join(td, "math.cjs")
-        subprocess.run([os.path.join(REMOTION, "node_modules", ".bin", "esbuild"), "src/math.ts", "--bundle",
-                        "--format=cjs", "--platform=node", f"--outfile={bundle}"], cwd=REMOTION, check=True,
-                       capture_output=True)
-        script = (f"const m=require({json.dumps(bundle)});const C={json.dumps(ROT_CASES)};"
-                  "console.log(JSON.stringify(C.map(([cx,cy,z,h])=>{const M=m.rotateHomography(cx,cy,z,1920,1280,1920,1080,h);"
-                  "const I=m.invert3(m.invert3(M));return [M,I]})))")
-        out = json.loads(subprocess.run(["node", "-e", script], check=True, capture_output=True, text=True).stdout)
-    for (cx, cy, z, h), (js, js_round_trip) in zip(ROT_CASES, out):
-        py = rotate_homography(cx, cy, z, 1920, 1280, 1920, 1080, h)
-        for i in range(3):
-            for j in range(3):
-                assert abs(py[i][j] - js[i][j]) <= 1e-9 * max(1.0, abs(py[i][j]))
-                assert abs(js[i][j] - js_round_trip[i][j]) <= 1e-9 * max(1.0, abs(js[i][j]))
-
-
 def test_unknown_projection_rejected():
     cam = dict(KP, projection="fisheye")
     with pytest.raises(ValueError, match="unsupported_projection"):
@@ -220,25 +178,6 @@ def test_compound_slope_above_1_slows_the_middle():
     start, segs, _ = COMPOUNDS[2]
     sp = _frame_speeds(CompoundPath(start, segs, {"s0": 3, "s1": 3}, 1920, 1280, 1920, 1080))
     assert min(sp) < 0.01 * max(sp)
-
-
-def test_compound_python_typescript_parity():
-    with tempfile.TemporaryDirectory() as td:
-        bundle = os.path.join(td, "math.cjs")
-        subprocess.run([os.path.join(REMOTION, "node_modules", ".bin", "esbuild"), "src/math.ts", "--bundle",
-                        "--format=cjs", "--platform=node", f"--outfile={bundle}"], cwd=REMOTION, check=True,
-                       capture_output=True)
-        cams = [{"start": a, "segments": b, "timing": c} for a, b, c in COMPOUNDS]
-        script = (f"const m=require({json.dumps(bundle)});const C={json.dumps(cams)};const T={json.dumps(T_SAMPLES)};"
-                  "console.log(JSON.stringify(C.map(c=>{const p=new m.CompoundPath(c,1920,1280,1920,1080);"
-                  "return T.map(t=>{const s=p.at(t);return [s.cx,s.cy,s.zoom]})})))")
-        out = json.loads(subprocess.run(["node", "-e", script], check=True, capture_output=True, text=True).stdout)
-    worst = 0.0
-    for (a, b, c), js in zip(COMPOUNDS, out):
-        p = CompoundPath(a, b, c, 1920, 1280, 1920, 1080)
-        for t, v in zip(T_SAMPLES, js):
-            worst = max(worst, max(abs(x - y) for x, y in zip(p.at(t), v)))
-    assert worst < 1e-9, worst
 
 
 CP = {"type": "compound", "move": "swoop", "start": COMPOUNDS[0][0], "segments": COMPOUNDS[0][1],

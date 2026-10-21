@@ -25,24 +25,19 @@ def run_tour(request, storage, workdir, scale=1.0):
         image_urls = request.get("image_urls", {})
         warnings = fetch_and_prepare(plan, storage, workdir, image_urls)
 
-        # direct renderer (OpenCV + ffmpeg, modules/direct_render.py); TOUR_RENDERER=remotion
-        # keeps the old Remotion / Chrome path available
-        if os.environ.get("TOUR_RENDERER", "direct") == "remotion":
-            from modules.remotion_render import render
-            out_path = render(plan, workdir, scale, warnings=warnings)
-        else:
-            from modules.direct_render import render_direct
-            music_path = None
-            if plan.music is not None:                 # plan 1.5: fetch the track
-                music_path = os.path.join(workdir, "music", os.path.basename(plan.music.uri) or "track")
-                os.makedirs(os.path.dirname(music_path), exist_ok=True)
-                try:
-                    storage.get(plan.music.uri, music_path)
-                except Exception:
-                    warnings.append("music_fetch_failed")
-                    music_path = None
-            out_path = render_direct(plan, workdir, warnings=warnings, music_path=music_path)
-        
+        # direct renderer (OpenCV + ffmpeg, modules/direct_render.py)
+        from modules.direct_render import render_direct
+        music_path = None
+        if plan.music is not None:                 # plan 1.5: fetch the track
+            music_path = os.path.join(workdir, "music", os.path.basename(plan.music.uri) or "track")
+            os.makedirs(os.path.dirname(music_path), exist_ok=True)
+            try:
+                storage.get(plan.music.uri, music_path)
+            except Exception:
+                warnings.append("music_fetch_failed")
+                music_path = None
+        out_path = render_direct(plan, workdir, warnings=warnings, music_path=music_path)
+
         verify(out_path, plan)
         
         # Upload

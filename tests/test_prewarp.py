@@ -1,4 +1,4 @@
-"""modules/prewarp.py: rotate shots are warped to one frame per rendered frame, exactly."""
+"""modules/prewarp.py: a rotate shot's frames are the exact homography warp of the photo."""
 import os
 import tempfile
 
@@ -7,7 +7,8 @@ import numpy as np
 
 from modules.camera_path import rotate_homography
 from modules.plan_io import compound_path, compute_plan_hash, parse_plan
-from modules.prewarp import frame_name, prewarp_rotate_shots
+from modules.prewarp import ShotWarp
+from modules.timeline import compute_timeline
 
 
 def _plan(projection):
@@ -25,25 +26,22 @@ def _plan(projection):
     return parse_plan(plan)
 
 
-def test_prewarp_writes_exact_frames_for_rotate_shots_only():
+def test_rotate_shot_frames_are_the_exact_homography_warp():
     rng = np.random.default_rng(0)
-    # photo-like (smooth) content: random noise is JPEG's worst case and would test JPEG, not the warp
     img = cv2.GaussianBlur((rng.random((1280, 1920, 3)) * 255).astype(np.uint8), (0, 0), 6)
     with tempfile.TemporaryDirectory() as wd:
         os.makedirs(os.path.join(wd, "images"))
         cv2.imwrite(os.path.join(wd, "images", "x.jpg"), img, [cv2.IMWRITE_JPEG_QUALITY, 100])
-        assert prewarp_rotate_shots(_plan("crop"), wd) == {}
         plan = _plan("rotate")
-        out = prewarp_rotate_shots(plan, wd)
-        assert out == {"s01": {"dir": "prewarp/s01", "frames": 30}}
-        files = sorted(os.listdir(os.path.join(wd, "images", "prewarp", "s01")))
-        assert files == [frame_name(f) for f in range(30)]
+        n = compute_timeline(plan)[0]["render_frames"]
+        assert n == 30
+        sw = ShotWarp(plan, plan.shots[0], n, os.path.join(wd, "images"))
         src = cv2.imread(os.path.join(wd, "images", "x.jpg"))
         cx, cy, z = compound_path(plan.shots[0], 1920, 1080).frames(30)[17]
         ref = cv2.warpPerspective(src, np.array(rotate_homography(cx, cy, z, 1920, 1280, 1920, 1080)), (1920, 1080),
                                   flags=cv2.WARP_INVERSE_MAP | cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
-        got = cv2.imread(os.path.join(wd, "images", "prewarp", "s01", frame_name(17)))
-        assert np.abs(got.astype(int) - ref.astype(int)).mean() < 3.0   # JPEG q95 round trip only
-        first = open(os.path.join(wd, "images", "prewarp", "s01", frame_name(0)), "rb").read()
-        prewarp_rotate_shots(plan, wd)
-        assert open(os.path.join(wd, "images", "prewarp", "s01", frame_name(0)), "rb").read() == first
+        got = sw.frame(17)
+        assert np.abs(got.astype(int) - ref.astype(int)).mean() < 3.0
+        first = sw.frame(0).tobytes()
+        again = ShotWarp(plan, plan.shots[0], n, os.path.join(wd, "images"))
+        assert again.frame(0).tobytes() == first                     # deterministic

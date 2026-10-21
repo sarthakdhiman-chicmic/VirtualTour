@@ -3,7 +3,9 @@
 .ruff_cache/
 __pycache__/
 *.pyc
-node_modules/
+*.egg-info/
 models/
 out/
 *.mp4
+# local reference renders for the refactor (not part of the repo)
+.ref/

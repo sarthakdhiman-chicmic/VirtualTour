@@ -7,7 +7,7 @@ from PIL import Image
 import numpy as np
 import math
 from modules.plan_io import parse_plan
-from modules.remotion_render import render
+from modules.direct_render import render_direct
 import copy
 
 def fix_plan_hash(p):
@@ -60,7 +60,7 @@ def test_fade_no_dip():
         Image.new('RGB', (320, 180), color=(200, 200, 200)).save(os.path.join(d, "images", "img_gray.jpg"))
         
         plan = parse_plan(plan_dict)
-        out_path = render(plan, d, scale=1.0, concurrency=1)
+        out_path = render_direct(plan, d, workers=1)
         
         frames = get_frames(out_path, os.path.join(d, "frames"))
         
@@ -106,7 +106,7 @@ def test_fade_formula_and_identity():
         Image.new('RGB', (320, 180), color=(0, 0, 255)).save(os.path.join(d, "images", "img_blue.jpg"))
         
         plan = parse_plan(plan_dict)
-        out_fade = render(plan, d, scale=1.0, concurrency=1)
+        out_fade = render_direct(plan, d, workers=1)
         frames_fade = get_frames(out_fade, os.path.join(d, "frames_fade"))
         
         # compare before fade starts to a cut version
@@ -116,7 +116,7 @@ def test_fade_formula_and_identity():
         
         fix_plan_hash(plan_dict_cut)
         plan_cut = parse_plan(plan_dict_cut)
-        out_cut = render(plan_cut, d, scale=1.0, concurrency=1)
+        out_cut = render_direct(plan_cut, d, workers=1)
         frames_cut = get_frames(out_cut, os.path.join(d, "frames_cut"))
         
         # fade is D=12 frames. Cut is at B_1 = 24. 
@@ -183,10 +183,10 @@ def test_fade_determinism():
         Image.new('RGB', (320, 180), color=(128, 128, 128)).save(os.path.join(d, "images", "img.jpg"))
         
         plan = parse_plan(plan_dict)
-        out1 = render(plan, d, scale=1.0, concurrency=1)
+        out1 = render_direct(plan, d, workers=1)
         hash1 = subprocess.run(["ffmpeg", "-i", out1, "-f", "framemd5", "-"], capture_output=True).stdout
         
-        out2 = render(plan, d, scale=1.0, concurrency=1)
+        out2 = render_direct(plan, d, workers=1)
         hash2 = subprocess.run(["ffmpeg", "-i", out2, "-f", "framemd5", "-"], capture_output=True).stdout
         
         assert hash1 == hash2, "Determinism failed! framemd5 differs between runs."

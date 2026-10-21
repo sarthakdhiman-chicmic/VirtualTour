@@ -24,15 +24,6 @@ import math
 from modules.camera_path import (KeyframePath, base_window, roll_fit_scale, rotate_homography, DEFAULT_HFOV_DEG,
                                  time_warp_at)
 from modules.perceptual.effects import ROI_PROBE, apply_regions, field_align, load_regions, probe_box
-from modules.timeline import compute_timeline
-
-PREWARP_DIR = "prewarp"
-JPEG_QUALITY = 95
-
-
-def frame_name(f: int) -> str:
-    return f"{f:05d}.jpg"
-
 
 def crop_roll_homography(cx, cy, zoom, roll_deg, src_w, src_h, out_w, out_h):
     """OUTPUT px -> SOURCE px for a crop window rolled by roll_deg about the frame centre and scaled
@@ -261,12 +252,9 @@ class ShotWarp:
         return frame
 
 
-# Frames are independent (frame f depends only on f), so they are drawn in parallel processes;
-# the output is byte-identical to drawing them one by one. Workers are SPAWNED (a fork after
-# OpenCV has used its thread pool deadlocks) and each rebuilds the shot it draws from the plan,
-# so nothing big is pickled. One pool serves the whole tour.
+# Frames are independent (frame f depends only on f), so they are drawn in parallel processes
+# (modules/direct_render.py); the output is byte-identical to drawing them one by one.
 WORKER_MEM_BYTES = 600 * 2**20          # a generous per-worker peak (4K photo, 3 masks, 1080p maps)
-_CACHE: dict = {}
 
 
 def _available_memory() -> int | None:
@@ -288,53 +276,3 @@ def prewarp_workers() -> int:
     if mem is not None:
         n = min(n, int(mem * 0.6 // WORKER_MEM_BYTES))   # never crowd the machine's memory
     return max(1, n)
-
-
-def _init_worker(plan, images: str) -> None:
-    cv2.setNumThreads(1)
-    _CACHE.clear()
-    _CACHE.update(plan=plan, images=images)
-
-
-def _draw(task) -> None:
-    shot_idx, n, frames, out_dir = task
-    sw = _CACHE.get(shot_idx)
-    if sw is None:
-        for k in [k for k in _CACHE if isinstance(k, int)]:      # hold one shot at a time
-            del _CACHE[k]
-        plan = _CACHE["plan"]
-        sw = _CACHE[shot_idx] = ShotWarp(plan, plan.shots[shot_idx], n, _CACHE["images"])
-    for f in frames:
-        cv2.imwrite(os.path.join(out_dir, frame_name(f)), sw.frame(f), [cv2.IMWRITE_JPEG_QUALITY, JPEG_QUALITY])
-
-
-def prewarp_rotate_shots(plan, workdir: str, warnings: list | None = None, workers: int | None = None) -> dict:
-    """Writes <workdir>/images/prewarp/<shot_id>/<frame>.jpg for every rotate shot. Returns
-    {shot_id: {"dir": "prewarp/<shot_id>", "frames": n}} for the renderer's props."""
-    out, tasks = {}, []
-    images = os.path.join(workdir, "images")
-    workers = prewarp_workers() if workers is None else workers
-    for i, (shot, tl) in enumerate(zip(plan.shots, compute_timeline(plan))):
-        if not needs_prewarp(shot.camera, shot):
-            continue
-        n = tl["render_frames"]
-        ShotWarp(plan, shot, n, images, warnings)   # validates the shot and collects mask warnings
-        rel = f"{PREWARP_DIR}/{shot.shot_id}"
-        os.makedirs(os.path.join(images, rel), exist_ok=True)
-        size = max(4, -(-n // workers))             # contiguous chunks: each worker keeps one shot
-        tasks += [(i, n, list(range(a, min(n, a + size))), os.path.join(images, rel)) for a in range(0, n, size)]
-        out[shot.shot_id] = {"dir": rel, "frames": n}
-    if workers <= 1 or len(tasks) <= 1:
-        _init_worker(plan, images)
-        try:
-            for t in tasks:
-                _draw(t)
-        finally:
-            _CACHE.clear()
-        return out
-    import multiprocessing as mp
-    from concurrent.futures import ProcessPoolExecutor
-    with ProcessPoolExecutor(max_workers=workers, mp_context=mp.get_context("spawn"),
-                             initializer=_init_worker, initargs=(plan, images)) as pool:
-        list(pool.map(_draw, tasks))
-    return out

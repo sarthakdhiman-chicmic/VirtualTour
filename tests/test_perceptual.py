@@ -1,4 +1,4 @@
-"""Plan 1.4 perceptual motion: noise, effects, prewarp integration and plan validation."""
+"""Plan 1.4 perceptual motion: noise, effects, frame drawing (ShotWarp) and plan validation."""
 import copy
 import hashlib
 import os
@@ -13,7 +13,8 @@ from modules.perceptual.effects import (Region, apply_regions, load_feather, loa
                                         sample_bilinear)
 from modules.perceptual.noise import GradientNoise3D
 from modules.plan_io import compute_plan_hash, parse_plan
-from modules.prewarp import frame_name, homography_maps, prewarp_rotate_shots
+from modules.prewarp import ShotWarp, homography_maps
+from modules.timeline import compute_timeline
 
 SW, SH = 960, 640
 CURTAIN_BBOX = [0.2, 0.1, 0.45, 0.8]
@@ -70,9 +71,15 @@ def _workdir(td, regions, leafy=False):
         cv2.imwrite(os.path.join(td, "images", mask_relpath("s01", "obj_000")), _mask())
 
 
-def _frames(td):
-    d = os.path.join(td, "images", "prewarp", "s01")
-    return [cv2.imread(os.path.join(d, frame_name(f))) for f in range(len(os.listdir(d)))]
+def _shot(plan, td, warnings=None):
+    """The plan's first shot as the renderer draws it (images in <td>/images)."""
+    return ShotWarp(plan, plan.shots[0], compute_timeline(plan)[0]["render_frames"], os.path.join(td, "images"),
+                    warnings)
+
+
+def _frames(plan, td):
+    sw = _shot(plan, td)
+    return [sw.frame(f) for f in range(sw.n)]
 
 
 # ---- noise ------------------------------------------------------------------------------------
@@ -141,13 +148,12 @@ def test_zero_amplitude_matches_the_plain_warp():
     with tempfile.TemporaryDirectory() as a, tempfile.TemporaryDirectory() as b:
         _workdir(a, True)
         _workdir(b, False)
-        prewarp_rotate_shots(parse_plan(_plan([_region(amp=0.0)])), a)
-        # same camera through the old path: a roll keyframe forces prewarp without regions
+        moving = _frames(parse_plan(_plan([_region(amp=0.0)])), a)
+        # the same camera without regions (a tiny roll keyframe, as before the direct renderer)
         plain = _plan(None, version="1.3")
         plain["shots"][0]["camera"]["keyframes"][0]["roll_deg"] = 0.0001
         plain["provenance"]["plan_hash"] = compute_plan_hash(plain)
-        prewarp_rotate_shots(parse_plan(plain), b)
-        for fa, fb in zip(_frames(a), _frames(b)):
+        for fa, fb in zip(moving, _frames(parse_plan(plain), b)):
             assert np.abs(fa.astype(int) - fb.astype(int)).mean() < 0.6
 
 
@@ -173,26 +179,25 @@ def test_motion_stays_inside_the_mask():
         assert moved.any() and not moved[~inside].any()
 
 
-def test_prewarp_with_motion_moves_and_is_deterministic():
+def test_frames_with_motion_move_and_are_deterministic():
     with tempfile.TemporaryDirectory() as a, tempfile.TemporaryDirectory() as b, \
             tempfile.TemporaryDirectory() as still:
         for td in (a, b, still):
             _workdir(td, True)
-        prewarp_rotate_shots(parse_plan(_plan([_region()])), a)
-        prewarp_rotate_shots(parse_plan(_plan([_region()])), b)
-        prewarp_rotate_shots(parse_plan(_plan([_region(amp=0.0)])), still)
-        digest = [hashlib.md5(f.tobytes()).hexdigest() for f in _frames(a)]
-        assert digest == [hashlib.md5(f.tobytes()).hexdigest() for f in _frames(b)]
-        assert any(np.abs(fm.astype(int) - fs.astype(int)).max() > 20
-                   for fm, fs in zip(_frames(a), _frames(still)))
+        fa = _frames(parse_plan(_plan([_region()])), a)
+        fb = _frames(parse_plan(_plan([_region()])), b)
+        fs = _frames(parse_plan(_plan([_region(amp=0.0)])), still)
+        digest = [hashlib.md5(f.tobytes()).hexdigest() for f in fa]
+        assert digest == [hashlib.md5(f.tobytes()).hexdigest() for f in fb]
+        assert any(np.abs(fm.astype(int) - fz.astype(int)).max() > 20 for fm, fz in zip(fa, fs))
 
 
 def test_region_with_missing_mask_is_dropped_with_a_warning():
     with tempfile.TemporaryDirectory() as td:
         _workdir(td, False)
         warnings = []
-        out = prewarp_rotate_shots(parse_plan(_plan([_region()])), td, warnings=warnings)
-        assert "s01" in out and warnings == ["motion_region_dropped:s01:obj_000:missing"]
+        sw = _shot(parse_plan(_plan([_region()])), td, warnings)
+        assert sw.regions == [] and warnings == ["motion_region_dropped:s01:obj_000:missing"]
 
 
 # ---- plan validation --------------------------------------------------------------------------
@@ -266,7 +271,7 @@ def test_new_effects_are_bounded_smooth_and_light_is_gentle(effect, amp):
 
 
 def _time_slice_motion(effect, amp):
-    """Render 3 s through the real prewarp; stack one row inside the region over time (a
+    """Draw 3 s through the real frame path (ShotWarp); stack one row inside the region over time (a
     time-slice). A static row gives straight stripes; return how far the stripes wander (px)."""
     with tempfile.TemporaryDirectory() as td:
         _workdir(td, True, leafy=effect == "canopy_flutter")
@@ -274,8 +279,7 @@ def _time_slice_motion(effect, amp):
         plan["shots"][0]["camera"] = {"type": "keyframe_path", "move": "hold", "keyframes": [
             {"t": 0, "cx": 0.5, "cy": 0.5, "zoom": 1.0}, {"t": 1, "cx": 0.5, "cy": 0.5, "zoom": 1.0}]}
         plan["provenance"]["plan_hash"] = compute_plan_hash(plan)
-        prewarp_rotate_shots(parse_plan(plan), td)
-        frames = _frames(td)
+        frames = _frames(parse_plan(plan), td)
     row = int(0.55 * 360)
     x0, x1 = int((CURTAIN_BBOX[0] + 0.03) * 640), int((CURTAIN_BBOX[2] - 0.03) * 640)
     sl = np.stack([cv2.cvtColor(f, cv2.COLOR_BGR2GRAY)[row, x0:x1].astype(np.float64) for f in frames])
@@ -348,15 +352,15 @@ def test_run_segment_writes_masks_and_returns_json_only():
 
 # ---- speed paths: parallel frames, coarse fields, windowed drawing ------------------------------
 
-def test_parallel_prewarp_is_byte_identical_to_serial():
+def test_parallel_render_is_byte_identical_to_serial():
+    from modules.direct_render import render_direct
     with tempfile.TemporaryDirectory() as a, tempfile.TemporaryDirectory() as b:
         for td in (a, b):
             _workdir(td, True)
-        plan = parse_plan(_plan([_region()]))
-        prewarp_rotate_shots(plan, a, workers=1)
-        prewarp_rotate_shots(plan, b, workers=3)
-        assert [hashlib.md5(f.tobytes()).hexdigest() for f in _frames(a)] == \
-               [hashlib.md5(f.tobytes()).hexdigest() for f in _frames(b)]
+        plan = parse_plan(_plan([_region()], dur=5.0))      # 150 frames: two encode chunks
+        out_a = render_direct(plan, a, workers=1)
+        out_b = render_direct(plan, b, workers=3)
+        assert open(out_a, "rb").read() == open(out_b, "rb").read()
 
 
 @pytest.mark.parametrize("effect, anchor, amp", [("fabric_sway", "top", 4.0), ("foliage_sway", "bottom", 4.0),

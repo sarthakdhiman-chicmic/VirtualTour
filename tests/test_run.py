@@ -8,7 +8,7 @@ import json
 import hashlib
 
 from modules.plan_io import parse_plan, Plan
-from modules.remotion_render import render
+from modules.direct_render import render_direct
 from modules.probe import verify
 
 class TestPlanIO(unittest.TestCase):
@@ -122,8 +122,8 @@ class TestRender(unittest.TestCase):
             img.save(os.path.join(d1, "images", "img.jpg"))
             img.save(os.path.join(d2, "images", "img.jpg"))
             
-            out1 = render(plan, d1, scale=1.0)
-            out2 = render(plan, d2, scale=1.0)
+            out1 = render_direct(plan, d1)
+            out2 = render_direct(plan, d2)
             
             # Get framemd5
             def get_md5(vid):
@@ -175,7 +175,7 @@ class TestRender(unittest.TestCase):
             draw.rectangle([960, 540, 1920, 1080], fill='yellow')
             img.save(os.path.join(d, "images", "img.jpg"))
             
-            out = render(plan, d, scale=1.0)
+            out = render_direct(plan, d)
             
             # extract first frame and check color
             frame_path = os.path.join(d, "frame.png")
@@ -223,7 +223,7 @@ class TestRender(unittest.TestCase):
                 img = Image.new('RGB', (source_w, source_h), color='white')
                 img.save(os.path.join(d, "images", "img.jpg"))
                 
-                out = render(plan, d, scale=1.0)
+                out = render_direct(plan, d)
                 
                 # extract first frame
                 frame_path = os.path.join(d, "frame.png")
