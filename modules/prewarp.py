@@ -200,7 +200,8 @@ class ShotWarp:
         for r in self.regions:
             px = region_motion_px(self, r)
             self.motion_px[r.spec.id] = px
-            if px >= visible_motion_px(self.ow, self.oh):
+            # fire lives mostly in its light (2026-10-21): the displacement floor does not apply
+            if r.effect == "fire_flicker" or px >= visible_motion_px(self.ow, self.oh):
                 keep.append(r)
             else:
                 region_warnings.append(f"motion_region_dropped:{shot.shot_id}:{r.spec.id}:faint_{px:.1f}px")

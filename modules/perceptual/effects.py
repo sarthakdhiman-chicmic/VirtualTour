@@ -89,16 +89,20 @@ CALM_TRAINS = ((-12, 0.090, 0.050, 1.00), (18, 0.060, 0.042, 0.70), (-35, 0.038,
 _SX_MAX = sum(a * abs(math.sin(math.radians(d))) * 2 * math.pi / lam for d, lam, _, a in CALM_TRAINS)
 _SZ_MAX = sum(a * abs(math.cos(math.radians(d))) * 2 * math.pi / lam for d, lam, _, a in CALM_TRAINS)
 CALM_BRIGHTNESS = 0.04
-FIRE_GLOW = 0.10            # the warm light's flicker on the hearth and walls around a fire
+FIRE_GLOW = 0.08            # the warm light's flicker on the hearth and walls around a fire
 FIRE_PLUME = 0.45           # flames may stretch above their tips by this share of their height
 # 2026-10-21 (user: "too much flame motion will warp the mantles"): the flames move only inside the
 # fire's own box - the dark cavity connected to them, at most FIREBOX_SIDE of their width beside
 # them and FIRE_PLUME of their height above - and their strength follows their own size
 FIREBOX_SIDE = 0.25
+STRUCT_EDGE = 0.25          # gradient (x 255) above which an edge is hard: structure, not flame
+STRUCT_LIT_V = 0.28         # in a fire's box, non-flame pixels at least this bright are held ...
+STRUCT_ABOVE = 0.15         # ... above the fire (rows above its top + this share of its height)
 FIRE_AMP_OF_HEIGHT = 0.15   # worker cap: peak flame displacement <= this x the flames' height
 SWAY_HZ = 0.22              # trees: the crown's sway (the plan's freq_hz drives the leaf shimmer)
 BRANCH_HZ = 0.55            # each branch cluster's own, quicker sway, at its own phase
 LEAF_SHIMMER = 0.03         # leaves turning in the wind: +-3% light at leaf-cluster scale
+GUST_PERIOD_S = 6.5         # a gust front crosses each tree this often
 SWAY_ACROSS = 0.35          # of a sway cycle across a tree's width: the wind's travel
 # the approved prototype's slope -> light weights (tanh(0.0009 * raw slopes)), on normalised slopes
 _SHADE_Z, _SHADE_X = 0.0009 * 0.6 * _SZ_MAX, 0.0009 * 0.4 * _SX_MAX
@@ -204,24 +208,35 @@ class Region:
         return max(3.0, 0.18 * getattr(self, "flame_h", self.bh))
 
     def _fire(self, u, v, t):
+        """Fire (reviews 2026-10-21): the v1 licking tongues read best; "only one kind of motion"
+        was the fault. Layers: tongues licking up and travelling up the flames; the fire surging
+        (growing / shrinking) over a second or two; a slight lean with the draft; a fast small
+        flutter at the flame edges; brightness flicker rising through the flames, a quick
+        sparkle, the fire's pulse, and a soft glow on its surroundings. Structure inside the
+        fire's box (walls, glass frame, grate, glass reflections) is held still (load_regions)."""
         fw = sample_bilinear(self.flame, u, v)
-        # the plume: the flames and the air above their tips (review 2026-10-19: "the flames are
-        # too small"); points there sample the flames below them, so the tongues lick upward
-        # past where the photo caught them
         plume = getattr(self, "plume", None)
         pw = sample_bilinear(plume, u, v) if plume is not None else fw
         fh, fb = self.flame_h, self.flame_bottom
         s = np.clip((fb - v) / max(fh, 1.0), 0.0, 1.0) ** 0.8          # still at the base (logs)
         lam = self.flame_px()
         rise = 0.9 * fh * t                                             # tongues travel upward
+        A = self.amp
+        surge = 0.75 + 0.35 * float(self.noise_b(1.7, 0.2, 0.6 * t))    # the fire grows / shrinks
+        lean = 0.15 * math.sin(2 * math.pi * 0.31 * t + self.phase)     # the draft
         n1 = self.noise_a(u / lam, (v + rise) / lam, 1.3 * t)
         n2 = self.noise_b(u / lam + 7.0, (v + rise) / lam, 1.7 * t)
-        A = self.amp
-        dx = A * 0.45 * n1 * s * pw
-        dy = -A * 0.6 * (1.0 + n2) * s * pw                             # flames stretch up and drop
+        ff = 0.5 * lam                                                  # fast flutter, finer
+        n3 = self.noise_a(u / ff + 11.0, (v + 1.4 * rise) / ff, 4.0 * t)
+        n4 = self.noise_b(u / ff + 23.0, (v + 1.4 * rise) / ff, 4.0 * t)
+        dx = A * (0.4 * n1 + lean + 0.15 * n4) * s * pw
+        dy = -A * (0.5 * surge * (1.0 + n2) + 0.2 * n3) * s * pw         # lick up, surge, flutter
         whole = float(self.noise_b(0.3, 0.7, 2.4 * t))                  # the fire's overall flicker
         local = self.noise_a(u / lam + 3.0, (v + 1.6 * rise) / lam, 3.0 * t)
-        b = 1.0 + fw * (0.30 * local + 0.12 * whole) + (1.0 - fw) * FIRE_GLOW * whole
+        sparkle = self.noise_b(u / ff + 5.0, (v + 2.0 * rise) / ff, 6.0 * t)
+        # light rides on the moving tongues; the whole fire blinking reads as "a light flickering"
+        b = (1.0 + fw * (0.22 * local + 0.04 * whole + 0.06 * sparkle + 0.05 * (surge - 0.75))
+             + (1.0 - fw) * FIRE_GLOW * whole)
         return dx, dy, b
 
     def brightness(self, u, v, t):
@@ -234,9 +249,159 @@ class Region:
         if self.effect == "fire_flicker":
             return self._fire(u, v, t)
         if self.effect == "canopy_flutter":
+            return self._canopy(u, v, t)
+        if self.effect != "calm_water":
             dx, dy = self.displacement(u, v, t)
-            ll = self.leaf_px()
-            return dx, dy, 1.0 + LEAF_SHIMMER * self.noise_b(u / ll + 80.0, v / ll, 1.6 * self.freq * t)
+            return dx, dy, None
+        sx, sz, near = self._calm_slopes(u, v, t, irregular)
+        return (self.amp * near * sx / 1.35, 0.5 * self.amp * near * sz / 1.35,
+                1.0 + CALM_BRIGHTNESS * np.tanh(_SHADE_Z * sz + _SHADE_X * sx))
+
+    def _canopy(self, u, v, t):
+        """Trees (dx, dy, light). History: 2026-10-16 leaf jitter read as jelly; 2026-10-19 x/y
+        branch noise read as a circular warp, then a coherent sideways sway with bend, branch
+        phases and leaf shimmer read better but "a simple omni-directional sway". 2026-10-21
+        ("varied motions ... like they would in a jungle"), layers:
+          - the crown's sway, travelling across the tree; small trees sway quicker than big ones
+          - branch clusters each swinging along their OWN line (mostly sideways, some angled up
+            to ~55 deg) at their own phase, blending two rates across the crown; every point
+            moves back and forth on its line, never in a loop (2026-10-21: loops read as
+            "circular motion")
+          - gust fronts sweeping across the canopy every few seconds: branches push harder and
+            the leaves flip lighter as a front passes
+          - rustling patches of leaves, on and off in different places
+        Direction, phase and rate fields change slowly across the crown, so neighbouring leaves
+        never shear apart (stretch <= ~0.25 px per px, tests)."""
+        lb, ll = self.branch_px(), self.leaf_px()
+        ab, al = self.canopy_amps()
+        f = self.freq
+        span = max(self.bw, 1.0)
+        bend = self.bend(u, v)
+        # stiffness: a tree a third of the photo high sways at SWAY_HZ; smaller ones quicker
+        hz = SWAY_HZ * min(1.8, max(0.75, (0.33 * self.src_w / max(self.bh, 1.0)) ** 0.4))
+        ph = 2 * math.pi * hz * t - 2 * math.pi * SWAY_ACROSS * (u - self.x0) / span + self.phase
+        sway = 0.8 * np.sin(ph) + 0.2 * np.sin(1.63 * ph + self.phase2)
+        gust = 0.6 + 0.4 * np.clip(0.5 + self.noise_b(u / (0.8 * span) - 0.1 * t, v / (0.8 * span),
+                                                      0.07 * t), 0, 1)
+        # a gust front sweeping across the crown (period GUST_PERIOD_S, off the crown between)
+        p = (t / GUST_PERIOD_S + self.phase / (2 * math.pi)) % 1.0
+        x_front = self.x0 + (2.2 * p - 0.6) * span
+        front = np.exp(-(((u - x_front) / (0.3 * span)) ** 2))
+        # branch clusters: own direction (mostly sideways, up to ~55 deg off), own phase, two rates
+        cs = 1.5 * lb
+        theta = 0.6 * math.pi * self.noise_a(u / cs + 90.0, v / cs, 0.0)
+        bph = math.pi * self.noise_a(u / cs + 60.0, v / cs, 0.0)
+        mix = np.clip(0.5 + self.noise_b(u / cs + 30.0, v / cs, 0.0), 0.0, 1.0)
+        osc = ((1.0 - mix) * np.sin(2 * math.pi * BRANCH_HZ * t + bph)
+               + mix * np.sin(2 * math.pi * 1.45 * BRANCH_HZ * t + 1.7 * bph))
+        # rustling patches (on / off slowly), leaves flutter there
+        rustle = np.clip(1.6 * (self.noise_a(u / (2.0 * lb) + 140.0, v / (2.0 * lb), 0.12 * t) + 0.1), 0.0, 1.0)
+        push = gust * (1.0 + 0.5 * front) / 1.25
+        # ONE line of motion per point (review 2026-10-21: "a circular motion ... unsettling"): the
+        # crown's sway and the cluster's own swing are summed into one signal and applied along
+        # the cluster's direction, so every point moves back and forth on a line - never a loop
+        # (a sine in x with a cosine in y, or two rates on two axes, traces circles / Lissajous
+        # loops). The direction varies slowly across the crown: mostly sideways, some branches
+        # angled, which is the variety
+        swing = ab * bend * push * (0.6 * sway + 0.4 * osc)
+        jitter = al * (0.4 + 0.8 * rustle) * self.noise_b(u / ll, v / ll, f * t)   # leaves, tiny
+        dx = swing * np.cos(theta) + jitter
+        dy = swing * np.sin(theta) + 0.6 * jitter
+        light = 1.0 + LEAF_SHIMMER * (0.5 + 0.7 * rustle + 1.0 * front) * self.noise_b(
+            u / ll + 80.0, v / ll, 1.6 * f * t)
+        return dx, dy, light
+
+    def bend(self, u, v):
+        """Trees: 0.3 at the crown's base .. 1 at its top, per column (col_bottom / col_span set
+        by load_regions; without them, 1)."""
+        cb = getattr(self, "col_bottom", None)
+        if cb is None:
+            return np.ones_like(u)
+        i = np.clip(u.astype(np.int64), 0, cb.shape[0] - 1)
+        hh = np.clip((cb[i] - v) / np.maximum(self.col_span[i], 1.0), 0.0, 1.0)
+        return 0.3 + 0.7 * hh ** 1.5
+
+    def anchor_weight(self, v):
+        if self.anchor == "none":           # water: the whole surface moves
+            return np.ones_like(v), np.ones_like(v)
+        if self.anchor == "top":            # hangs from a rod: still at the top, freest at the hem
+            s = np.clip((v - self.y0) / self.bh, 0.0, 1.0)
+            return s ** 1.3, s
+        s = np.clip((self.y0 + self.bh - v) / self.bh, 0.0, 1.0)   # rooted: still at the base
+        return s ** 1.5, s
+
+    def displacement(self, u, v, t):
+        """(dx, dy) in source px at source points (u, v), time t seconds."""
+        a, s = self.anchor_weight(v)
+        A, f = self.amp, self.freq
+        if self.effect == "fabric_sway":
+            ph = 2 * math.pi * f * t - 2 * math.pi * 0.6 * s + self.phase
+            fold = 1.0 + 0.35 * np.sin(2 * math.pi * (u - self.x0) / max(40.0, 0.12 * self.bw) + self.phase2)
+            n = self.noise_a(u / (0.5 * self.bw), v / (0.5 * self.bh), 0.8 * f * t)
+            dx = A * a * (0.75 * np.sin(ph) * fold + 0.35 * n)
+            dy = 0.12 * A * a * np.cos(ph)
+            return dx, dy
+        if self.effect == "calm_water":
+            sx, sz, near = self._calm_slopes(u, v, t)
+            return A * near * sx / 1.35, 0.5 * A * near * sz / 1.35
+        if self.effect == "canopy_flutter":
+            dx, dy, _ = self._canopy(u, v, t)
+            return dx, dy
+        if self.effect == "water_ripple":
+            return min(max(30.0, 0.08 * self.bw), max(10.0, 0.03 * self.bh)) * 0.5
+        if self.effect == "foliage_sway":
+            return min(0.35 * self.bw, 0.35 * self.bh)
+        if self.effect == "fire_flicker":
+            return self.flame_px()                                                   # flame tongues
+        return 0.0                                                                   # calm_water: exact
+
+    # ---- fire_flicker (modules/perceptual/fire.py): this region's feather is the glow (1 on the
+    # flames, fading out around them); self.flame (set by load_regions) is the flames alone.
+    def flame_px(self) -> float:
+        return max(3.0, 0.18 * getattr(self, "flame_h", self.bh))
+
+    def _fire(self, u, v, t):
+        """Fire (reviews 2026-10-21): the v1 licking tongues read best; "only one kind of motion"
+        was the fault. Layers: tongues licking up and travelling up the flames; the fire surging
+        (growing / shrinking) over a second or two; a slight lean with the draft; a fast small
+        flutter at the flame edges; brightness flicker rising through the flames, a quick
+        sparkle, the fire's pulse, and a soft glow on its surroundings. Structure inside the
+        fire's box (walls, glass frame, grate, glass reflections) is held still (load_regions)."""
+        fw = sample_bilinear(self.flame, u, v)
+        plume = getattr(self, "plume", None)
+        pw = sample_bilinear(plume, u, v) if plume is not None else fw
+        fh, fb = self.flame_h, self.flame_bottom
+        s = np.clip((fb - v) / max(fh, 1.0), 0.0, 1.0) ** 0.8          # still at the base (logs)
+        lam = self.flame_px()
+        rise = 0.9 * fh * t                                             # tongues travel upward
+        A = self.amp
+        surge = 0.75 + 0.35 * float(self.noise_b(1.7, 0.2, 0.6 * t))    # the fire grows / shrinks
+        lean = 0.15 * math.sin(2 * math.pi * 0.31 * t + self.phase)     # the draft
+        n1 = self.noise_a(u / lam, (v + rise) / lam, 1.3 * t)
+        n2 = self.noise_b(u / lam + 7.0, (v + rise) / lam, 1.7 * t)
+        ff = 0.5 * lam                                                  # fast flutter, finer
+        n3 = self.noise_a(u / ff + 11.0, (v + 1.4 * rise) / ff, 4.0 * t)
+        n4 = self.noise_b(u / ff + 23.0, (v + 1.4 * rise) / ff, 4.0 * t)
+        dx = A * (0.4 * n1 + lean + 0.15 * n4) * s * pw
+        dy = -A * (0.5 * surge * (1.0 + n2) + 0.2 * n3) * s * pw         # lick up, surge, flutter
+        whole = float(self.noise_b(0.3, 0.7, 2.4 * t))                  # the fire's overall flicker
+        local = self.noise_a(u / lam + 3.0, (v + 1.6 * rise) / lam, 3.0 * t)
+        sparkle = self.noise_b(u / ff + 5.0, (v + 2.0 * rise) / ff, 6.0 * t)
+        b = (1.0 + fw * (0.28 * local + 0.10 * whole + 0.08 * sparkle + 0.08 * (surge - 0.75))
+             + (1.0 - fw) * FIRE_GLOW * whole)
+        return dx, dy, b
+
+    def brightness(self, u, v, t):
+        """Multiplicative brightness inside the region, or None (displacement-only effects)."""
+        return self.fields(u, v, t)[2]
+
+    def fields(self, u, v, t, irregular=None):
+        """(dx, dy, brightness or None) at source points; calm_water's waves are computed once
+        (irregular: calm_irregular at these points when already known)."""
+        if self.effect == "fire_flicker":
+            return self._fire(u, v, t)
+        if self.effect == "canopy_flutter":
+            return self._canopy(u, v, t)
         if self.effect != "calm_water":
             dx, dy = self.displacement(u, v, t)
             return dx, dy, None
@@ -368,6 +533,52 @@ HEDGE_BOTTOM = 0.55         # a short mask part ending below this share of the p
 #                             part of the photo is a distant tree line (moves). 0.72 caught the
 #                             hedges in front of a house (review 2026-10-19)
 BASE_HOLD = (0.3, 0.12)     # share of each tree column held still at its base (near, far trees)
+
+
+POT_REACH_BOTTOM = 0.15     # a pot: a non-green part reaching the lowest 15% of a plant's mask,
+POT_MAX_SHARE = 0.6         # at most this share of it
+
+
+def plant_weight(src: np.ndarray, feather: np.ndarray, reach: float) -> tuple[np.ndarray, np.ndarray, float | None]:
+    """Potted plants (review 2026-10-21: "we are moving the pots alongside the plants" - the
+    segmentation mask covers plant AND pot). The pot (basket, planter, stand) is a non-green part
+    of the mask reaching its bottom; it is held still, with the foliage near it held back by the
+    motion's reach so nothing drags it. Flowers are not green either, but sit up in the plant:
+    they keep moving. Returns (weight, pot mask, the pot's top row or None) - the plant sways
+    from the pot's rim, not from the bottom of the pot."""
+    box = _crop_box(feather, int(reach) + 20)
+    if box is None:
+        return feather, np.zeros(feather.shape, bool), None
+    y0, y1, x0, x1 = box
+    crop, m = src[y0:y1, x0:x1], feather[y0:y1, x0:x1]
+    inside = m > 0
+    ys = np.nonzero(inside.any(axis=1))[0]
+    bottom, top = ys.max(), ys.min()
+    nonleaf = (_leafiness(crop, soften=False) < 0.15) & inside
+    nonleaf = cv2.morphologyEx(nonleaf.astype(np.uint8), cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
+    n, lab, st, _ = cv2.connectedComponentsWithStats(nonleaf, connectivity=8)
+    low = bottom - POT_REACH_BOTTOM * (bottom - top + 1)
+    pot = np.zeros(inside.shape, bool)
+    for i in range(1, n):
+        if st[i, cv2.CC_STAT_TOP] + st[i, cv2.CC_STAT_HEIGHT] - 1 >= low and \
+                max(st[i, cv2.CC_STAT_WIDTH], st[i, cv2.CC_STAT_HEIGHT]) >= max(12.0, 2.0 * reach):
+            pot |= lab == i
+    # a pot is a minority of the mask in its lower part; a non-green part that is most of the
+    # mask or reaches its top is the plant itself (dried stems, coloured foliage, a dark photo)
+    if pot.any():
+        rows = np.nonzero(pot.any(axis=1))[0]
+        if pot.sum() > POT_MAX_SHARE * inside.sum() or rows.min() < top + 0.3 * (bottom - top + 1):
+            pot[:] = False
+    if pot.any():                                  # the pot is solid below its rim
+        rows = np.nonzero(pot.any(axis=1))[0]
+        pot_top = rows.min()
+        pot[pot_top:] |= inside[pot_top:] & (cv2.dilate(pot.astype(np.uint8), np.ones((1, 15), np.uint8)) > 0)[pot_top:]
+    w = m * _guard(pot, 1.5 * reach + 2.0)
+    out = np.zeros_like(feather)
+    out[y0:y1, x0:x1] = w
+    full = np.zeros(feather.shape, bool)
+    full[y0:y1, x0:x1] = pot
+    return out, full, (float(y0 + np.nonzero(pot.any(axis=1))[0].min()) if pot.any() else None)
 
 
 def tree_columns(inside: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
@@ -536,6 +747,54 @@ def fire_box(src: np.ndarray, flame: np.ndarray) -> np.ndarray:
     return out
 
 
+def fire_structure(src: np.ndarray, flame: np.ndarray, box: np.ndarray) -> np.ndarray:
+    """Inside a fire's box, what is not fire (bool): everything that is neither flame nor dark
+    empty space - firebox walls and back panels (herringbone, brick), logs, glass reflections,
+    the frame - plus hard straight edges even when dark (a grate, andirons, frame bars).
+    Review 2026-10-21: side views warped the walls; behind glass the reflections slid with the
+    flames. The flames themselves (and a few px around them) never count."""
+    out = np.zeros(flame.shape, bool)
+    ys, xs = np.nonzero(box > 0.5)
+    if not len(ys):
+        return out
+    pad = 6
+    y0, y1 = max(0, ys.min() - pad), min(flame.shape[0], ys.max() + 1 + pad)
+    x0, x1 = max(0, xs.min() - pad), min(flame.shape[1], xs.max() + 1 + pad)
+    crop = src[y0:y1, x0:x1]
+    hsv = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV).astype(np.float32)
+    sat, val = hsv[..., 1] / 255, hsv[..., 2] / 255
+    g = cv2.GaussianBlur(cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY).astype(np.float32), (0, 0), 1.0)
+    edge = np.hypot(cv2.Sobel(g, cv2.CV_32F, 1, 0), cv2.Sobel(g, cv2.CV_32F, 0, 1))
+    hard = edge > STRUCT_EDGE * 255
+    # long straight-ish runs only: walls, frames, bars (flames make short broken edges)
+    lines = np.zeros_like(hard, np.uint8)
+    k = max(9, int(0.15 * max(1, min(y1 - y0, x1 - x0))))
+    for kern in (np.ones((1, k), np.uint8), np.ones((k, 1), np.uint8)):
+        lines |= cv2.morphologyEx(hard.astype(np.uint8), cv2.MORPH_OPEN, kern)
+    # only flames and dark empty space may move: anything lit that is not flame - a back wall's
+    # herringbone or brick, logs, glass reflections (grey, often dim), the frame - is held
+    lit = val >= STRUCT_LIT_V
+    # the flame PIXELS (flame-coloured and bright inside the fire's zone - the zone itself is
+    # closed over the gaps between tongues, where the back wall shows through)
+    from modules.perceptual.fire import FLAME_HUE, FLAME_SAT, FLAME_VAL
+    hue = hsv[..., 0]
+    tongues = ((flame[y0:y1, x0:x1] > 0) & (hue >= FLAME_HUE[0]) & (hue <= FLAME_HUE[1])
+               & (sat > FLAME_SAT) & (val > FLAME_VAL))
+    near_flame = cv2.dilate(tongues.astype(np.uint8), np.ones((7, 7), np.uint8)) > 0
+    # lit non-flame pixels are held only ABOVE the fire (the back wall, glass reflections over
+    # the flames): logs and what shows between the tongues may move with the fire (2026-10-21:
+    # holding them too left some fires only flickering in light)
+    fz = flame[y0:y1, x0:x1] > 0
+    fy = np.nonzero(fz.any(axis=1))[0]
+    above = np.zeros_like(lit)
+    if len(fy):
+        above[: max(0, int(fy.min() + STRUCT_ABOVE * (fy.max() - fy.min() + 1)))] = True
+    st = ((lines > 0) | (lit & above & ~fz)) & ~near_flame
+    st = cv2.dilate(st.astype(np.uint8), np.ones((3, 3), np.uint8)) > 0
+    out[y0:y1, x0:x1] = st & (box[y0:y1, x0:x1] > 0.5)
+    return out
+
+
 def fire_glow(flame: np.ndarray) -> np.ndarray:
     """1 on the flames, a soft warm halo around them (about the fire's own size), 0 beyond."""
     ys, xs = np.nonzero(flame > 0)
@@ -577,10 +836,12 @@ def load_regions(shot, images_dir: str, src_w: int, src_h: int,
         if feather is None:
             warnings.append(f"motion_region_dropped:{shot.shot_id}:{spec.id}:{reason}")
             continue
-        solid = cols = None
+        solid = cols = pot_top = None
         if src is not None and spec.effect == "canopy_flutter":
             cols = tree_columns(feather > 0)
             feather, solid = leaf_weight(src, feather, float(spec.amplitude_px))
+        elif src is not None and spec.effect == "foliage_sway":
+            feather, solid, pot_top = plant_weight(src, feather, float(spec.amplitude_px))
         elif src is not None and spec.effect == "calm_water":
             feather, solid = water_guard(src, feather, float(spec.amplitude_px))
         flame = plume = None
@@ -589,17 +850,25 @@ def load_regions(shot, images_dir: str, src_w: int, src_h: int,
             fh = float(ys.max() - ys.min() + 1)
             plume = flame_plume(feather, FIRE_PLUME * fh)
             if src is not None:
-                # inside the fire's own box only, held back from its edge by the motion's reach,
-                # so no moving pixel samples the mantel or surround
+                # inside the fire's own box only, held back from its edge and from the structure
+                # inside it by the motion's reach, so no moving pixel samples the mantel, the
+                # firebox walls, the glass frame or the glass's reflections
                 box = fire_box(src, feather)
-                reach = 1.5 * min(float(spec.amplitude_px), FIRE_AMP_OF_HEIGHT * fh) + 2.0
-                plume *= _guard(box < 0.5, reach)
-                solid = (box < 0.5) & (cv2.dilate((plume > 0).astype(np.uint8), np.ones((9, 9), np.uint8)) > 0)
+                amp = min(float(spec.amplitude_px), FIRE_AMP_OF_HEIGHT * fh)
+                struct = fire_structure(src, feather, box)
+                # the tongues lick UP (sampling from below) and only ~0.55 x amp sideways:
+                # what lies above or beside them needs a margin of the sideways reach only
+                reach = 0.7 * amp + 2.0
+                plume *= _guard((box < 0.5) | struct, reach)
+                solid = ((box < 0.5) | struct) & (cv2.dilate((plume > 0).astype(np.uint8),
+                                                             np.ones((9, 9), np.uint8)) > 0)
             flame, feather = feather, np.maximum(fire_glow(feather), plume)
         region = Region(spec, feather, src_w, src_h)
         region.solid = solid                       # for the quality gate's drag check
         if cols is not None:
             region.col_bottom, region.col_span = cols
+        if pot_top is not None and pot_top > region.y0 + 0.2 * region.bh:
+            region.bh = pot_top - region.y0                # sway from the pot's rim
         if flame is not None:
             ys, xs = np.nonzero(flame > 0)
             region.flame, region.flame_h = flame, float(ys.max() - ys.min() + 1)

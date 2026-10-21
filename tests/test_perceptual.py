@@ -259,8 +259,8 @@ def test_new_effects_are_bounded_smooth_and_light_is_gentle(effect, amp):
         b = r.brightness(x, y, f / 30)
         if effect == "calm_water":                      # smooth light, never a flicker
             assert np.abs(b - 1.0).max() <= 0.04
-        else:                                           # leaves turning: a faint shimmer
-            assert np.abs(b - 1.0).max() <= 0.03
+        else:                                           # leaves turning: a faint shimmer,
+            assert np.abs(b - 1.0).max() <= 0.07        # brighter as a gust front passes
     assert 0.4 * amp < max(peaks) <= 1.6 * amp
     assert max(steps) < 0.25 * amp
 
@@ -606,7 +606,7 @@ def test_fire_tongues_reach_above_the_photos_flame_tips():
     r = Region(spec, np.maximum(fire_glow(flame), plume), 600, 400)
     r.flame, r.flame_h, r.flame_bottom, r.plume = flame, fh, float(ys.max()), plume
     cx = int(np.median(xs[ys == ys.min()]))
-    above = np.array([float(ys.min() - 0.25 * fh)])
+    above = np.array([float(ys.min() - 0.1 * fh)])               # within the (shorter) plume
     assert plume[int(above[0]), cx] > 0.3
     lift = max(-r.fields(np.array([float(cx)]), above, f / 30)[1][0] for f in range(60))
     assert lift > 2.0                                   # the air above the tips draws flame up
@@ -731,3 +731,44 @@ def test_fire_moves_only_inside_its_box_and_scales_with_its_size():
         moved = np.hypot(w * dx, w * dy).reshape(u.shape) > 0.05
         assert not moved[100 // 3:170 // 3].any()                        # the mantel / surround
         assert not moved[:, :225 // 3].any()
+
+
+def test_a_potted_plants_pot_stays_still_and_the_plant_sways_from_its_rim():
+    """Review 2026-10-21: the plant mask covers the pot, and the pot swayed with the plant."""
+    from modules.perceptual.effects import plant_weight
+    rng = np.random.default_rng(4)
+    img = np.full((400, 300, 3), (200, 205, 210), np.uint8)
+    leaves = (np.clip(rng.normal(0, 40, (400, 300)), -80, 80)[..., None] + [40, 140, 60]).clip(0, 255)
+    mask = np.zeros((400, 300), np.float32)
+    mask[40:260, 60:240] = 1.0                                       # foliage
+    mask[260:380, 100:200] = 1.0                                     # the pot below it
+    img[40:260, 60:240] = leaves[40:260, 60:240].astype(np.uint8)
+    img[260:380, 100:200] = (90, 120, 170)                           # a terracotta pot
+    img[80:110, 120:150] = (230, 230, 245)                           # a white flower up in it
+    w, pot, pot_top = plant_weight(img, mask, 4.0)
+    assert w[262:380, 100:200].max() == 0.0                          # the pot is still
+    assert pot_top is not None and 255 <= pot_top <= 265             # sway from the rim
+    assert w[60:200, 80:220].mean() > 0.8                            # the plant moves ...
+    assert w[85:105, 125:145].mean() > 0.8                           # ... flowers too
+
+
+def test_tree_points_swing_on_a_line_not_in_circles():
+    """Review 2026-10-21: "the trees look like they are doing a circular motion". A point's path
+    over time must be a line (its 2-D spread nearly one-dimensional), not a loop."""
+    from modules.perceptual.effects import tree_columns
+    mask = np.zeros((SH, SW), bool)
+    mask[64:384, 192:576] = True
+    r = Region(_Spec(effect="canopy_flutter", anchor="none", amp=8.0, bbox=[0.2, 0.1, 0.6, 0.6], freq=1.1),
+               mask.astype(np.float32), SW, SH)
+    r.col_bottom, r.col_span = tree_columns(mask)
+    r.amp = 8.0
+    ab, al = r.canopy_amps()
+    rng = np.random.default_rng(0)
+    u = rng.uniform(0.25 * SW, 0.55 * SW, 30)
+    v = rng.uniform(0.12 * SH, 0.5 * SH, 30)
+    path = np.array([np.stack(r.displacement(u, v, f / 30)) for f in range(0, 600, 2)])  # (T, 2, N)
+    for k in range(len(u)):
+        p = path[:, :, k] - path[:, :, k].mean(axis=0)
+        ev = np.linalg.eigvalsh(np.cov(p.T))
+        # the minor axis is only the tiny leaf jitter: well under a tenth of the swing
+        assert np.sqrt(ev[0]) < 0.1 * np.sqrt(ev[1]) + 0.5 * al, (k, ev)

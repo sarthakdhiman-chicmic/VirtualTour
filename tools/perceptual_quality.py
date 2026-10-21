@@ -167,7 +167,9 @@ def check_shot(sw: ShotWarp, n_frames: int, baseline: str | None) -> dict:
                 rep["baseline_diff_share"] = max(rep["baseline_diff_share"] or 0.0, float((d > 0).mean()))
     # visibility: the same measure the render used to keep or still each region
     # (modules/prewarp.region_motion_px: exact field, probe frames across the whole shot)
-    rep["motion_p95_px"] = {r.spec.id: sw.motion_px[r.spec.id] for r in sw.regions}
+    # (fire is judged by its light, not its displacement: not listed)
+    rep["motion_p95_px"] = {r.spec.id: sw.motion_px[r.spec.id] for r in sw.regions
+                            if r.effect != "fire_flicker"}
     rep["motion_floor_px"] = LIMITS["motion_min_p95_px"] * min(sw.ow, sw.oh) / 1080
     return rep
 
@@ -210,7 +212,9 @@ def main(argv=None) -> int:
         report["shots"][shot.shot_id] = rep
         fails = failures(rep)
         bad += [f"{shot.shot_id}: {x}" for x in fails]
-        motion = "  ".join(f"{r.spec.label}/{r.spec.effect} {rep['motion_p95_px'][r.spec.id]:.1f}px"
+        motion = "  ".join(f"{r.spec.label}/{r.spec.effect} "
+                           + (f"{rep['motion_p95_px'][r.spec.id]:.1f}px" if r.spec.id in rep["motion_p95_px"]
+                              else f"{sw.motion_px[r.spec.id]:.1f}px (light-led)")
                            for r in sw.regions)
         dropped = [f"{k} {v:.1f}px" for k, v in sw.motion_px.items() if k not in rep["motion_p95_px"]]
         if dropped:
