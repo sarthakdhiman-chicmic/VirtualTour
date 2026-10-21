@@ -7,9 +7,9 @@ from PIL import Image, ImageDraw
 import json
 import hashlib
 
-from modules.plan_io import parse_plan, Plan
-from modules.direct_render import render_direct
-from modules.probe import verify
+from tour_worker.contract.plan import parse_plan, Plan
+from tour_worker.render.direct import render_direct
+from tour_worker.render.probe import verify
 
 class TestPlanIO(unittest.TestCase):
     def setUp(self):

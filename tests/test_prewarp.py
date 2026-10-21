@@ -1,14 +1,14 @@
-"""modules/prewarp.py: a rotate shot's frames are the exact homography warp of the photo."""
+"""tour_worker/render/frames.py: a rotate shot's frames are the exact homography warp of the photo."""
 import os
 import tempfile
 
 import cv2
 import numpy as np
 
-from modules.camera_path import rotate_homography
-from modules.plan_io import compound_path, compute_plan_hash, parse_plan
-from modules.prewarp import ShotWarp
-from modules.timeline import compute_timeline
+from tour_worker.render.camera_path import rotate_homography
+from tour_worker.contract.plan import compound_path, compute_plan_hash, parse_plan
+from tour_worker.render.frames import ShotWarp
+from tour_worker.render.timeline import compute_timeline
 
 
 def _plan(projection):

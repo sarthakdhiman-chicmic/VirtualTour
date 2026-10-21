@@ -1,9 +1,9 @@
-"""modules/encode.py: the delivery file is capped, keyframed every 2 s, faststart, deterministic."""
+"""tour_worker/render/encode.py: the delivery file is capped, keyframed every 2 s, faststart, deterministic."""
 import os
 import subprocess
 import tempfile
 
-from modules.encode import GOP_S, deliver, playback_stats, vbv_min_fullness
+from tour_worker.render.encode import GOP_S, deliver, playback_stats, vbv_min_fullness
 
 
 def _master(path, seconds=6):

@@ -1,7 +1,7 @@
 import os
 import tempfile
-from run_tour import run_tour
-from modules.storage import S3Storage, HttpStorage, CompositeStorage, LocalMapStorage
+from tour_worker.jobs.render import run_tour
+from tour_worker.io.storage import S3Storage, HttpStorage, CompositeStorage, LocalMapStorage
 
 def handler(event):
     input_data = event.get("input", {})
@@ -16,8 +16,8 @@ def handler(event):
         
     with tempfile.TemporaryDirectory() as workdir:
         if job_type == "tour_segment":
-            # OneFormer masks before planning (modules/segment_job.py); masks go to S3, JSON back
-            from modules.segment_job import run_segment
+            # OneFormer masks before planning (tour_worker/jobs/segment.py); masks go to S3, JSON back
+            from tour_worker.jobs.segment import run_segment
             res = run_segment(input_data, CompositeStorage(s3=S3Storage(), http=HttpStorage()), workdir)
         else:
             res = run_tour(input_data, storage, workdir)

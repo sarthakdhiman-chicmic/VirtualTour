@@ -1,9 +1,9 @@
 import json
 import pytest
 
-from modules.plan_io import parse_plan
-from run_tour import run_tour
-from modules.storage import LocalMapStorage
+from tour_worker.contract.plan import parse_plan
+from tour_worker.jobs.render import run_tour
+from tour_worker.io.storage import LocalMapStorage
 
 def build_valid_plan_dict(easing="ease_in_out", plan_version="1.2", preset="push_in_gentle"):
     import hashlib

@@ -1,5 +1,5 @@
 """Render a tour plan through the worker renderer from a local image folder. Images are resolved by
-the basename of each shot's image_uri. The direct renderer (modules/direct_render.py: OpenCV +
+the basename of each shot's image_uri. The direct renderer (tour_worker/render/direct.py: OpenCV +
 ffmpeg) is the default; TOUR_RENDERER=remotion uses the old Remotion / Chrome path.
 
   python -m tools.render --plan <plan.json> --images-dir <dir> --out <mp4>
@@ -12,8 +12,8 @@ import shutil
 import tempfile
 import time
 
-from modules.plan_io import parse_plan
-from modules.probe import verify
+from tour_worker.contract.plan import parse_plan
+from tour_worker.render.probe import verify
 
 
 def main() -> None:
@@ -49,7 +49,7 @@ def main() -> None:
             jq = None if args.jpeg_quality == "default" else int(args.jpeg_quality)
             out = render(plan, wd, 1.0, concurrency=args.concurrency, jpeg_quality=jq, gl=args.gl)
         else:
-            from modules.direct_render import render_direct
+            from tour_worker.render.direct import render_direct
             music = args.music_file
             if music is None and plan.music is not None and plan.music.uri.startswith("file://"):
                 music = plan.music.uri[len("file://"):]

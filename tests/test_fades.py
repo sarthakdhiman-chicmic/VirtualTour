@@ -6,8 +6,8 @@ import hashlib
 from PIL import Image
 import numpy as np
 import math
-from modules.plan_io import parse_plan
-from modules.direct_render import render_direct
+from tour_worker.contract.plan import parse_plan
+from tour_worker.render.direct import render_direct
 import copy
 
 def fix_plan_hash(p):

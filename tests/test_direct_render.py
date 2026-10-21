@@ -1,4 +1,4 @@
-"""modules/direct_render.py: OpenCV draws every frame, ffmpeg encodes (no Remotion / Chrome)."""
+"""tour_worker/render/direct.py: OpenCV draws every frame, ffmpeg encodes (no Remotion / Chrome)."""
 import hashlib
 import json
 import os
@@ -9,12 +9,12 @@ import cv2
 import numpy as np
 import pytest
 
-from modules.direct_render import render_direct, total_frames
-from modules.perceptual.effects import mask_relpath
-from modules.plan_io import compute_plan_hash, parse_plan
-from modules.prewarp import ShotWarp
-from modules.probe import verify
-from modules.timeline import compute_timeline
+from tour_worker.render.direct import render_direct, total_frames
+from tour_worker.motion.masks import mask_relpath
+from tour_worker.contract.plan import compute_plan_hash, parse_plan
+from tour_worker.render.frames import ShotWarp
+from tour_worker.render.probe import verify
+from tour_worker.render.timeline import compute_timeline
 
 pytestmark = pytest.mark.skipif(subprocess.run(["which", "ffmpeg"], capture_output=True).returncode != 0,
                                 reason="ffmpeg not installed")

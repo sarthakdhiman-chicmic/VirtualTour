@@ -9,12 +9,13 @@ import cv2
 import numpy as np
 import pytest
 
-from modules.perceptual.effects import (Region, apply_regions, load_feather, load_regions, mask_relpath,
-                                        sample_bilinear)
-from modules.perceptual.noise import GradientNoise3D
-from modules.plan_io import compute_plan_hash, parse_plan
-from modules.prewarp import ShotWarp, homography_maps
-from modules.timeline import compute_timeline
+from tour_worker.motion.loader import load_regions
+from tour_worker.motion.masks import load_feather, mask_relpath, sample_bilinear
+from tour_worker.motion.region import Region, apply_regions
+from tour_worker.motion.noise import GradientNoise3D
+from tour_worker.contract.plan import compute_plan_hash, parse_plan
+from tour_worker.render.frames import ShotWarp, homography_maps
+from tour_worker.render.timeline import compute_timeline
 
 SW, SH = 960, 640
 CURTAIN_BBOX = [0.2, 0.1, 0.45, 0.8]
@@ -167,7 +168,7 @@ def test_motion_stays_inside_the_mask():
         feather, _ = load_feather(p, SW, SH, (CURTAIN_BBOX[0] * SW, CURTAIN_BBOX[1] * SH,
                                               CURTAIN_BBOX[2] * SW, CURTAIN_BBOX[3] * SH))
     r = Region(_Spec(), feather, SW, SH)
-    from modules.prewarp import crop_roll_homography
+    from tour_worker.render.frames import crop_roll_homography
     m = np.array(crop_roll_homography(0.5, 0.5, 1.05, 0, SW, SH, 640, 360))
     grid = np.meshgrid(np.arange(640.0), np.arange(360.0))
     for t in (0.0, 0.5, 1.3):
@@ -302,7 +303,7 @@ def test_time_slice_shows_visible_motion(effect, amp):
 
 
 def test_segments_to_regions_splits_stuff_and_maps_classes():
-    from modules.segment import segments_to_regions
+    from tour_worker.vision.segment import segments_to_regions
     seg = np.zeros((200, 300), np.int32)
     seg[20:180, 10:60] = 1        # curtain panel left
     seg[20:180, 240:290] = 1      # curtain panel right (same COCO "curtain" segment)
@@ -310,7 +311,7 @@ def test_segments_to_regions_splits_stuff_and_maps_classes():
     seg[0:3, 0:3] = 3             # a wall: not a class we animate
     info = [{"id": 1, "label_id": 10, "score": 0.99}, {"id": 2, "label_id": 20, "score": 0.95},
             {"id": 3, "label_id": 30, "score": 0.99}]
-    from modules.segment import MODELS
+    from tour_worker.vision.segment import MODELS
     regs = segments_to_regions(seg, info, {10: "curtain", 20: "potted plant", 30: "wall-other-merged"}, (300, 200),
                                class_map=MODELS["coco"]["class_map"])
     assert sorted(r["class_name"] for r in regs) == ["curtain", "curtain", "potted_plant"]
@@ -321,7 +322,7 @@ def test_segments_to_regions_splits_stuff_and_maps_classes():
 
 
 def test_run_segment_writes_masks_and_returns_json_only():
-    from modules.segment_job import run_segment
+    from tour_worker.jobs.segment import run_segment
 
     class FakeStorage:
         def __init__(self):
@@ -353,7 +354,7 @@ def test_run_segment_writes_masks_and_returns_json_only():
 # ---- speed paths: parallel frames, coarse fields, windowed drawing ------------------------------
 
 def test_parallel_render_is_byte_identical_to_serial():
-    from modules.direct_render import render_direct
+    from tour_worker.render.direct import render_direct
     with tempfile.TemporaryDirectory() as a, tempfile.TemporaryDirectory() as b:
         for td in (a, b):
             _workdir(td, True)
@@ -367,10 +368,10 @@ def test_parallel_render_is_byte_identical_to_serial():
                                                  ("canopy_flutter", "none", 5.0), ("calm_water", "none", 6.0)])
 def test_fast_path_matches_the_exact_path_within_the_quality_limits(effect, anchor, amp):
     """The render's fast path (coarse fields, moving window) against the exact per-pixel path,
-    with the limits of tools/perceptual_quality.py."""
-    from modules.prewarp import ShotWarp
-    from modules.timeline import compute_timeline
-    from tools.perceptual_quality import LIMITS, check_shot, failures
+    with the limits of tools/quality/perceptual_quality.py."""
+    from tour_worker.render.frames import ShotWarp
+    from tour_worker.render.timeline import compute_timeline
+    from tools.quality.perceptual_quality import LIMITS, check_shot, failures
     with tempfile.TemporaryDirectory() as td:
         _workdir(td, True)
         plan = parse_plan(_plan([_region(effect=effect, anchor=anchor, amp=amp, freq=FREQ.get(effect, 0.3))]))
@@ -387,7 +388,7 @@ def test_fast_path_matches_the_exact_path_within_the_quality_limits(effect, anch
 # ---- review 2026-10-16: leaves only on trees; curtains and plants sway opposite ways ------------
 
 def test_trunks_and_open_sky_stay_still_in_trees():
-    from modules.perceptual.effects import leaf_weight
+    from tour_worker.motion.canopy import leaf_weight
     rng = np.random.default_rng(1)
     img = np.zeros((300, 200, 3), np.uint8)
     img[:] = (230, 180, 120)                                         # sky (BGR: blue)
@@ -430,7 +431,7 @@ def test_plan_15_with_music_is_accepted():
 
 def test_solid_objects_in_a_tree_stay_rigid_and_hedges_still():
     """Review 2026-10-16: lantern frames inside a tree mask bent; hedges boiled."""
-    from modules.perceptual.effects import leaf_weight
+    from tour_worker.motion.canopy import leaf_weight
     rng = np.random.default_rng(2)
     H, W = 600, 400
     img = (np.clip(rng.normal(0, 40, (H, W)), -80, 80)[..., None] + [40, 140, 60]).clip(0, 255).astype(np.uint8)
@@ -450,7 +451,7 @@ def test_solid_objects_in_a_tree_stay_rigid_and_hedges_still():
 
 
 def test_scene_summary_lists_every_class_with_its_place():
-    from modules.segment import scene_summary
+    from tour_worker.vision.segment import scene_summary
     seg = np.zeros((100, 200), np.int32)
     seg[60:100, 40:160] = 1                    # a bed, lower middle
     seg[0:30, :] = 2                           # ceiling across the top
@@ -467,7 +468,7 @@ def test_scene_summary_lists_every_class_with_its_place():
     assert c["window-other"]["centroid"][0] > 0.85
 
 
-# ---- lit fires (modules/perceptual/fire.py, "fire_flicker") -----------------------------------
+# ---- lit fires (tour_worker/vision/fire_detect.py, "fire_flicker") -----------------------------------
 
 def _fireplace_scene(lit=True):
     rng = np.random.default_rng(5)
@@ -485,7 +486,7 @@ def _fireplace_scene(lit=True):
 
 
 def test_lit_fire_is_found_inside_the_fireplace_and_warm_stone_is_not():
-    from modules.perceptual.fire import flame_mask
+    from tour_worker.vision.fire_detect import flame_mask
     img, fp = _fireplace_scene(lit=True)
     fm = flame_mask(img, fp) > 0
     assert fm[225:290, 240:360].mean() > 0.15                             # the flames
@@ -495,9 +496,9 @@ def test_lit_fire_is_found_inside_the_fireplace_and_warm_stone_is_not():
 
 
 def test_fire_flicker_moves_the_flames_from_their_base_and_glows():
-    from modules.perceptual.effects import fire_glow
+    from tour_worker.motion.fire import fire_glow
     img, fp = _fireplace_scene(lit=True)
-    from modules.perceptual.fire import flame_mask
+    from tour_worker.vision.fire_detect import flame_mask
     flame = (flame_mask(img, fp) > 0).astype(np.float32)
     glow = fire_glow(flame)
     ys, xs = np.nonzero(flame)
@@ -525,7 +526,7 @@ def test_fire_flicker_moves_the_flames_from_their_base_and_glows():
 
 
 def test_ade20k_class_map_covers_our_classes_and_fireplaces():
-    from modules.segment import MODELS, segments_to_regions
+    from tour_worker.vision.segment import MODELS, segments_to_regions
     seg = np.zeros((200, 300), np.int32)
     seg[20:180, 10:60] = 1
     seg[100:190, 120:180] = 2
@@ -541,9 +542,9 @@ def test_ade20k_class_map_covers_our_classes_and_fireplaces():
 def test_a_region_too_faint_to_read_is_left_still():
     """Review 2026-10-19: trees whose visible part is trunk / hedge (held still by leaf_weight)
     moved 0-0.6 px. The render leaves such regions still, with a warning, and the quality gate
-    measures visibility the same way (modules/prewarp.region_motion_px)."""
-    from modules.prewarp import ShotWarp, visible_motion_px
-    from modules.timeline import compute_timeline
+    measures visibility the same way (tour_worker/render/frames.region_motion_px)."""
+    from tour_worker.render.frames import ShotWarp, visible_motion_px
+    from tour_worker.render.timeline import compute_timeline
     with tempfile.TemporaryDirectory() as td:
         _workdir(td, True)
         plan = parse_plan(_plan([_region(effect="canopy_flutter", anchor="none", amp=0.3,
@@ -581,7 +582,7 @@ def test_trees_sway_sideways_together_not_in_circles():
 
 
 def test_a_distant_tree_line_moves_but_a_hedge_stays_still():
-    from modules.perceptual.effects import leaf_weight
+    from tour_worker.motion.canopy import leaf_weight
     rng = np.random.default_rng(3)
     img = np.zeros((1000, 1000, 3), np.uint8)
     img[:] = (230, 180, 120)
@@ -598,9 +599,9 @@ def test_a_distant_tree_line_moves_but_a_hedge_stays_still():
 def test_fire_tongues_reach_above_the_photos_flame_tips():
     """Review 2026-10-19: "the flames are too small". Points just above the flame tips now sample
     the flames below them (the plume), so the fire licks higher than the photo caught it."""
-    from modules.perceptual.effects import FIRE_PLUME, fire_glow, flame_plume
+    from tour_worker.motion.fire import FIRE_PLUME, fire_glow, flame_plume
     img, fp = _fireplace_scene(lit=True)
-    from modules.perceptual.fire import flame_mask
+    from tour_worker.vision.fire_detect import flame_mask
     flame = (flame_mask(img, fp) > 0).astype(np.float32)
     ys, xs = np.nonzero(flame)
     fh = float(ys.max() - ys.min() + 1)
@@ -619,7 +620,7 @@ def test_fire_tongues_reach_above_the_photos_flame_tips():
 def test_thin_distant_water_keeps_most_of_its_surface_moving():
     """Review 2026-10-19: a lake band lost most of its surface to an edge band sized for the near
     water; the held band now narrows with the ripples' own (perspective) reach."""
-    from modules.perceptual.effects import water_guard
+    from tour_worker.motion.water import water_guard
     img = np.full((800, 1200, 3), (140, 120, 90), np.uint8)
     feather = np.zeros((800, 1200), np.float32)
     feather[400:440, 50:1150] = 1.0                       # a 40 px lake band
@@ -630,9 +631,9 @@ def test_thin_distant_water_keeps_most_of_its_surface_moving():
 def test_the_gate_catches_a_solid_that_moves_inside_a_tree():
     """2026-10-19: a leaf_weight rule emptied its own solid map, a lantern frame bent and the gate
     passed. The gate now holds tree solids to an independent reference: none may move."""
-    from modules.prewarp import ShotWarp
-    from modules.timeline import compute_timeline
-    from tools.perceptual_quality import LIMITS, check_shot
+    from tour_worker.render.frames import ShotWarp
+    from tour_worker.render.timeline import compute_timeline
+    from tools.quality.perceptual_quality import LIMITS, check_shot
     with tempfile.TemporaryDirectory() as td:
         _workdir(td, True, leafy=True)
         p = os.path.join(td, "images", "x.jpg")
@@ -655,7 +656,7 @@ def test_the_gate_catches_a_solid_that_moves_inside_a_tree():
 def test_tree_tops_sway_most_and_branches_keep_their_own_timing():
     """2026-10-19 "more natural": a tree bends from its base (the top of each column moves most),
     and branch clusters sway at their own phase, so the crown is not one rigid sheet."""
-    from modules.perceptual.effects import tree_columns
+    from tour_worker.motion.canopy import tree_columns
     mask = np.zeros((SH, SW), bool)
     mask[int(0.1 * SH):int(0.6 * SH), int(0.2 * SW):int(0.6 * SW)] = True
     r = Region(_Spec(effect="canopy_flutter", anchor="none", amp=8.0, bbox=[0.2, 0.1, 0.6, 0.6], freq=1.1),
@@ -679,7 +680,7 @@ def test_tree_tops_sway_most_and_branches_keep_their_own_timing():
 # ---- review 2026-10-21: firebox rules, fire scaled to its own size, kept off the mantel ---------
 
 def _with_firebox(img, fp):
-    from modules.perceptual.fire import firebox, flame_mask
+    from tour_worker.vision.fire_detect import firebox, flame_mask
     return flame_mask(img, fp, firebox(img, fp)) > 0
 
 
@@ -712,7 +713,7 @@ def test_firelight_on_the_lintel_is_not_a_flame():
 def test_fire_moves_only_inside_its_box_and_scales_with_its_size():
     """User 2026-10-21: flames scaled to their own size and the firepit; too much motion warps
     the mantel. Nothing outside the fire's box moves; the strength is capped by flame height."""
-    from modules.perceptual.effects import FIRE_AMP_OF_HEIGHT, fire_box
+    from tour_worker.motion.fire import FIRE_AMP_OF_HEIGHT, fire_box
     img, fp = _fireplace_scene(lit=True)
     flame = (_with_firebox(img, fp)).astype(np.uint8) * 255
     box = fire_box(img, flame)
@@ -739,7 +740,7 @@ def test_fire_moves_only_inside_its_box_and_scales_with_its_size():
 
 def test_a_potted_plants_pot_stays_still_and_the_plant_sways_from_its_rim():
     """Review 2026-10-21: the plant mask covers the pot, and the pot swayed with the plant."""
-    from modules.perceptual.effects import plant_weight
+    from tour_worker.motion.foliage import plant_weight
     rng = np.random.default_rng(4)
     img = np.full((400, 300, 3), (200, 205, 210), np.uint8)
     leaves = (np.clip(rng.normal(0, 40, (400, 300)), -80, 80)[..., None] + [40, 140, 60]).clip(0, 255)
@@ -759,7 +760,7 @@ def test_a_potted_plants_pot_stays_still_and_the_plant_sways_from_its_rim():
 def test_tree_points_swing_on_a_line_not_in_circles():
     """Review 2026-10-21: "the trees look like they are doing a circular motion". A point's path
     over time must be a line (its 2-D spread nearly one-dimensional), not a loop."""
-    from modules.perceptual.effects import tree_columns
+    from tour_worker.motion.canopy import tree_columns
     mask = np.zeros((SH, SW), bool)
     mask[64:384, 192:576] = True
     r = Region(_Spec(effect="canopy_flutter", anchor="none", amp=8.0, bbox=[0.2, 0.1, 0.6, 0.6], freq=1.1),
@@ -781,7 +782,7 @@ def test_tree_points_swing_on_a_line_not_in_circles():
 def test_a_faint_rod_across_the_opening_is_held():
     """Review 2026-10-21: a dark screen rod across the top of a brick fireplace's opening (dark on
     the dark cavity, so low contrast) warped as the flames licked up into it."""
-    from modules.perceptual.effects import fire_box, fire_structure
+    from tour_worker.motion.fire import fire_box, fire_structure
     img, fp = _fireplace_scene(lit=True)
     img[206:210, 232:368] = (40, 40, 44)                             # a faint rod inside the box
     flame = _with_firebox(img, fp).astype(np.uint8) * 255

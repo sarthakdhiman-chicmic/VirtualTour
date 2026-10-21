@@ -3,10 +3,10 @@ import copy
 
 import pytest
 
-from modules.camera_path import (
+from tour_worker.render.camera_path import (
     PROFILE_MIN_SLOPE, hermite_profile, monotone_eval, monotone_slopes,
 )
-from modules.plan_io import compute_plan_hash, parse_plan
+from tour_worker.contract.plan import compute_plan_hash, parse_plan
 
 PATHS = [
     [{"t": 0, "cx": 0.5, "cy": 0.5, "zoom": 1.03}, {"t": 1, "cx": 0.53, "cy": 0.48, "zoom": 1.1}],
@@ -97,7 +97,7 @@ def test_path_leaving_image_between_keyframes_rejected():
 
 
 # ---- projection "rotate" (addendum 1.3.1) ----------------------------------------------------
-from modules.camera_path import apply_homography, frame_margin_out_px, frame_spp, rotate_homography  # noqa: E402
+from tour_worker.render.camera_path import apply_homography, frame_margin_out_px, frame_spp, rotate_homography  # noqa: E402
 
 ROT_CASES = [(0.5, 0.5, 1.2, 75), (0.56, 0.62, 1.25, 75), (0.43, 0.41, 1.1, 60), (0.6, 0.5, 1.3, 90)]
 
@@ -140,7 +140,7 @@ def test_rotate_path_bounds_checked():
 
 
 # ---- camera type "compound" (addendum 1.3.2) ---------------------------------------------------
-from modules.camera_path import CompoundPath, corner_rms_px, hermite_slope_max  # noqa: E402
+from tour_worker.render.camera_path import CompoundPath, corner_rms_px, hermite_slope_max  # noqa: E402
 
 COMPOUNDS = [
     ({"cx": 0.5, "cy": 0.5, "zoom": 1.1}, [{"t0": 0, "t1": 0.4, "cx": 0.39, "cy": 0.6, "zoom": 1.3},

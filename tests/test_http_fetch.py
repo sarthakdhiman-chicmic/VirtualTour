@@ -70,8 +70,8 @@ def test_handler_http_storage(monkeypatch):
             }
             
             # Monkeypatch the check in storage.py to allow our local http server for this test
-            import modules.storage
-            orig_get = modules.storage.HttpStorage.get
+            import tour_worker.io.storage
+            orig_get = tour_worker.io.storage.HttpStorage.get
             
             def mock_get(self, uri, dest):
                 if uri.startswith("http://127.0.0.1"):
@@ -93,8 +93,8 @@ def test_handler_http_storage(monkeypatch):
                 except Exception as e:
                     raise RuntimeError(f"HTTP fetch failed for {uri}: {e}")
                     
-            modules.storage.HttpStorage.get = mock_get
-            orig_comp_get = modules.storage.CompositeStorage.get
+            tour_worker.io.storage.HttpStorage.get = mock_get
+            orig_comp_get = tour_worker.io.storage.CompositeStorage.get
             
             def mock_comp_get(self, uri, dest):
                 if uri.startswith("http://127.0.0.1"):
@@ -102,12 +102,12 @@ def test_handler_http_storage(monkeypatch):
                 else:
                     orig_comp_get(self, uri, dest)
                     
-            modules.storage.CompositeStorage.get = mock_comp_get
+            tour_worker.io.storage.CompositeStorage.get = mock_comp_get
             try:
                 res = handler(event)
                 assert res.get("status") == "completed", f"Failed: {res.get('error')}"
             finally:
-                modules.storage.HttpStorage.get = orig_get
-                modules.storage.CompositeStorage.get = orig_comp_get
+                tour_worker.io.storage.HttpStorage.get = orig_get
+                tour_worker.io.storage.CompositeStorage.get = orig_comp_get
         finally:
             server.shutdown()

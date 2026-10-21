@@ -1,7 +1,7 @@
 import random
 import pytest
-from modules.plan_io import Plan
-from modules.timeline import compute_timeline
+from tour_worker.contract.plan import Plan
+from tour_worker.render.timeline import compute_timeline
 
 def make_random_plan(num_shots, with_fades=True):
     shots = []
