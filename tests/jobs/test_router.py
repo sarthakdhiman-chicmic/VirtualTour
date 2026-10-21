@@ -31,3 +31,32 @@ def test_a_crash_inside_a_job_is_a_failure_not_an_exception(monkeypatch):
     res = run_job({"job_type": "tour_segment", "images": [{"photo_id": "p", "uri": "s3://b/p.jpg"}],
                    "output_prefix": "s3://b/s/"})
     assert res == {"status": "failed", "error": {"code": "model_load_failed", "message": "model_load_failed: no weights"}}
+
+
+@pytest.mark.parametrize("job, code", [
+    ({}, "invalid_job_type"),
+    ("not a dict", "invalid_job_type"),
+    ({"job_type": "tour_render", "plan": {}}, "invalid_request"),
+    ({"job_type": "tour_segment", "images": [], "output_prefix": "s3://b/s/"}, "invalid_request"),
+    ({"job_type": "tour_render", "plan": {"plan_version": "1.5"}, "output_prefix": "s3://b/o/"}, "invalid_plan"),
+])
+def test_validate_request_matches_run_job(job, code):
+    from tour_worker.jobs.router import validate_request
+    bad = validate_request(job)
+    assert bad["error"]["code"] == code
+    assert bad == run_job(job if isinstance(job, dict) else {})
+
+
+def test_validate_request_accepts_the_examples_and_checks_the_plan_hash():
+    import copy
+    import json
+    import os
+    from tour_worker.config import REPO_ROOT
+    from tour_worker.jobs.router import validate_request
+    for name in ("tour_render.json", "tour_segment.json"):
+        req = json.load(open(os.path.join(REPO_ROOT, "examples", name)))["input"]
+        assert validate_request(req) is None
+    req = json.load(open(os.path.join(REPO_ROOT, "examples", "tour_render.json")))["input"]
+    bad = copy.deepcopy(req)
+    bad["plan"]["total_duration_s"] += 1                    # the plan no longer matches its hash
+    assert validate_request(bad)["error"]["code"] == "invalid_plan"

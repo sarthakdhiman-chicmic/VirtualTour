@@ -342,3 +342,14 @@ def parse_plan(data: dict) -> Plan:
     check_path_bounds(plan)
     check_motion_regions(plan)
     return plan
+
+
+def plan_failure(e: ValueError) -> dict:
+    """The job failure for a plan parse_plan rejected: unsupported_camera_type, unsupported_easing,
+    or invalid_plan for anything else (the message is the full text)."""
+    from tour_worker.errors import failure
+    msg = str(e)
+    for code in ("unsupported_camera_type", "unsupported_easing"):
+        if code in msg:
+            return failure(code, msg)
+    return failure("invalid_plan", msg)

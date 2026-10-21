@@ -8,7 +8,7 @@ import os
 import time
 
 from tour_worker.config import Settings, get_settings
-from tour_worker.contract.plan import parse_plan
+from tour_worker.contract.plan import parse_plan, plan_failure
 from tour_worker.errors import failure, from_exception
 from tour_worker.io.images import fetch_and_prepare
 from tour_worker.render.direct import render_direct
@@ -24,12 +24,7 @@ def run_tour(request: dict, storage, workdir: str, settings: Settings | None = N
         try:
             plan = parse_plan(plan_dict)
         except ValueError as e:
-            msg = str(e)
-            if "unsupported_camera_type" in msg:
-                return failure("unsupported_camera_type", msg)
-            if "unsupported_easing" in msg:
-                return failure("unsupported_easing", msg)
-            return failure("invalid_plan", msg)
+            return plan_failure(e)
 
         # required (it defaulted to "s3://dummy/out/" before 2026-10: a render nobody could find)
         output_prefix = request.get("output_prefix")

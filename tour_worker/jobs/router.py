@@ -23,17 +23,40 @@ def _validation_message(e: ValidationError) -> str:
     return "; ".join(f"{'.'.join(str(p) for p in err['loc']) or 'input'}: {err['msg']}" for err in e.errors())
 
 
-def run_job(job: dict, settings: Settings | None = None, storage=None) -> dict:
-    """Run one job (the RunPod event's `input`). storage: override (tests); default from settings."""
-    settings = settings or get_settings()
-    job = job if isinstance(job, dict) else {}
-    job_type = job.get("job_type")
+def _request_failure(job) -> dict | None:
+    """The failure for a request of the wrong shape (job_type, required fields), or None."""
+    job_type = job.get("job_type") if isinstance(job, dict) else None
     if job_type not in JOB_TYPES:
         return failure("invalid_job_type", f"job_type must be one of {', '.join(JOB_TYPES)}")
     try:
         _REQUESTS[job_type].model_validate(job)
     except ValidationError as e:
         return failure("invalid_request", _validation_message(e))
+    return None
+
+
+def validate_request(job) -> dict | None:
+    """Check a request before queueing it (the HTTP service: callers fail fast): the failure
+    run_job would return for it without fetching anything, or None. Checks the request's shape
+    and, for tour_render, the plan (schema, plan_hash, camera / easing / bounds rules). No I/O."""
+    bad = _request_failure(job)
+    if bad is None and job["job_type"] == "tour_render":
+        from tour_worker.contract.plan import parse_plan, plan_failure
+        try:
+            parse_plan(job["plan"])
+        except ValueError as e:              # pydantic's ValidationError is a ValueError
+            bad = plan_failure(e)
+    return bad
+
+
+def run_job(job: dict, settings: Settings | None = None, storage=None) -> dict:
+    """Run one job (the RunPod event's `input`). storage: override (tests); default from settings."""
+    settings = settings or get_settings()
+    job = job if isinstance(job, dict) else {}
+    bad = _request_failure(job)
+    if bad is not None:
+        return bad
+    job_type = job["job_type"]
     storage = storage or build_storage(settings, job_type)
     try:
         with tempfile.TemporaryDirectory() as workdir:
