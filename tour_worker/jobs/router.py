@@ -2,9 +2,10 @@
 (tour_worker.contract.jobs), run it in a temporary folder and return its result - or, for any
 failure, {"status": "failed", "error": {"code", "message"}}.
 
+Jobs: tour_render (jobs/render.py), tour_segment (jobs/segment.py), tour_plan (jobs/plan.py).
 Codes: invalid_job_type, invalid_request (request shape), the plan's own codes (invalid_plan,
 unsupported_camera_type, unsupported_easing), and the run's (image_fetch_failed, encode_failed,
-verification_failed, ...; unknown for anything unexpected)."""
+verification_failed, planning_failed, ...; unknown for anything unexpected)."""
 from __future__ import annotations
 
 import tempfile
@@ -12,11 +13,17 @@ import tempfile
 from pydantic import ValidationError
 
 from tour_worker.config import Settings, get_settings
-from tour_worker.contract.jobs import JOB_TYPES, TourRenderRequest, TourSegmentRequest
+from tour_worker.contract.jobs import (
+    JOB_TYPES,
+    TourPlanRequest,
+    TourRenderRequest,
+    TourSegmentRequest,
+)
 from tour_worker.errors import failure, from_exception
 from tour_worker.io.storage import build_storage
 
-_REQUESTS = {"tour_render": TourRenderRequest, "tour_segment": TourSegmentRequest}
+_REQUESTS = {"tour_render": TourRenderRequest, "tour_segment": TourSegmentRequest,
+             "tour_plan": TourPlanRequest}
 
 
 def _validation_message(e: ValidationError) -> str:
@@ -63,6 +70,9 @@ def run_job(job: dict, settings: Settings | None = None, storage=None) -> dict:
             if job_type == "tour_segment":
                 from tour_worker.jobs.segment import run_segment
                 return run_segment(job, storage, workdir, settings=settings)
+            if job_type == "tour_plan":
+                from tour_worker.jobs.plan import run_plan
+                return run_plan(job, storage, workdir)
             from tour_worker.jobs.render import run_tour
             return run_tour(job, storage, workdir, settings=settings)
     except Exception as e:                  # e.g. the segmentation model failed to load

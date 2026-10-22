@@ -144,8 +144,8 @@ class CompositeStorage(Storage):
 
 def build_storage(settings, job_type: str = "tour_render") -> CompositeStorage:
     """The storage a job runs with. tour_segment always reads photos from S3 / HTTPS and writes
-    masks to S3 (as it always did); tour_render honours WORKER_STORAGE=local."""
-    if job_type == "tour_render" and settings.storage == "local":
+    masks to S3 (as it always did); tour_render and tour_plan honour WORKER_STORAGE=local."""
+    if job_type in ("tour_render", "tour_plan") and settings.storage == "local":
         return CompositeStorage(s3=S3Storage(), http=HttpStorage(), local=LocalMapStorage(settings.images_dir),
                                 local_for_remote=True)
     return CompositeStorage(s3=S3Storage(), http=HttpStorage())

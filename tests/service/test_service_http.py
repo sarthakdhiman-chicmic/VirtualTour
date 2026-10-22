@@ -145,7 +145,7 @@ def test_health(make_client):
     h = c.get("/health").json()
     assert h["jobs"] == {"inQueue": 0, "inProgress": 0, "completed": 1, "failed": 0, "cancelled": 0}
     assert h["workers"] == {"running": 0, "idle": 2, "concurrency": 2}
-    assert h["jobTypes"] == ["tour_render", "tour_segment"]
+    assert h["jobTypes"] == ["tour_render", "tour_segment", "tour_plan"]
     assert h["segmentModel"] == "shi-labs/oneformer_coco_swin_large@3a263017ca"
     assert "version" in h and "workerId" in h
 
@@ -162,6 +162,7 @@ def _bad_plan():
     ({"input": {"job_type": "virtual_tour"}}, "invalid_job_type"),
     ({"input": {"job_type": "tour_render", "plan": {}}}, "invalid_request"),   # no output_prefix
     ({"input": {**SEGMENT, "images": []}}, "invalid_request"),
+    ({"input": {"job_type": "tour_plan", "listing_id": "L", "photos": []}}, "invalid_request"),
     ({"input": "a string"}, "invalid_request"),
     ({"input": None}, "invalid_request"),
     ({}, "invalid_request"),                                                  # no input
@@ -190,7 +191,7 @@ def test_a_body_that_is_not_json_is_400_and_not_echoed(make_client):
 
 def test_the_examples_are_accepted(make_client):
     c = make_client(runner=lambda inp: {"status": "completed"})
-    for name in ("tour_render.json", "tour_segment.json"):
+    for name in ("tour_render.json", "tour_segment.json", "tour_plan.json"):
         assert c.post("/run", headers=AUTH, json={"input": _example(name)}).status_code == 200
 
 
@@ -237,3 +238,26 @@ def test_a_real_tiny_render_through_the_service(make_client, monkeypatch, tmp_pa
     out = body["output"]
     assert out["video_uri"] == "s3://bucket/out/master.mp4" and (out["width"], out["height"]) == (320, 180)
     assert "error" not in out and os.path.getsize(tmp_path / "master.mp4") > 0
+
+
+# ---- a real plan ---------------------------------------------------------------------------------
+
+def test_a_real_tour_plan_through_the_service(make_client, tmp_path):
+    """tour_plan behind POST /runsync: photos from file:// URIs, the plan back as JSON."""
+    import cv2
+    import numpy as np
+    from tour_worker.contract.jobs import TourPlanResult
+    rooms = ["exterior", "living_room", "living_room", "kitchen", "kitchen", "bedroom"]
+    photos = []
+    for i, rt in enumerate(rooms):
+        rng = np.random.default_rng(i)
+        img = cv2.GaussianBlur((rng.random((360, 540, 3)) * 255).astype(np.uint8), (0, 0), 3)
+        cv2.line(img, (int(rng.integers(0, 540)), 0), (int(rng.integers(0, 540)), 359), (20, 20, 20), 3)
+        cv2.imwrite(str(tmp_path / f"p{i}.jpg"), img)
+        photos.append({"photo_id": f"img_{i}", "uri": f"file://{tmp_path}/p{i}.jpg", "room_type": rt})
+    c = make_client(settings=Settings(api_key=KEY))
+    body = c.post("/runsync", headers=AUTH, json={"input": {
+        "job_type": "tour_plan", "listing_id": "L1", "photos": photos}}).json()
+    assert body["status"] == "COMPLETED", body
+    TourPlanResult.model_validate(body["output"])
+    assert body["output"]["plan"]["shots"]

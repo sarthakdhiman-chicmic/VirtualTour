@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "tour-worker"
-version = "0.2.0"
-description = "Articulait cinematic tour worker: renders tour plans to MP4 and segments tour photos"
+version = "0.3.0"
+description = "Articulait cinematic tour worker: segments tour photos, plans tours and renders them to MP4"
 readme = "README.md"
 requires-python = ">=3.10"
 # system tools (not pip packages): ffmpeg and ffprobe on PATH (README.md)

@@ -1,0 +1,24 @@
+{
+  "input": {
+    "job_type": "tour_plan",
+    "job_id": "job1",
+    "listing_id": "L123",
+    "photos": [
+      {"photo_id": "img_0", "uri": "s3://example-bucket/listings/L123/photos/living.jpg", "room_type": "Living Room"},
+      {"photo_id": "img_1", "uri": "s3://example-bucket/listings/L123/photos/pool.jpg", "room_type": "Pool Area"}
+    ],
+    "image_urls": {},
+    "segments": {
+      "img_0": [{"object_id": "seg_000", "class_name": "curtain", "confidence": 0.98,
+                 "bbox": [120, 40, 380, 900], "space": [2048, 1365],
+                 "mask_url": "s3://example-bucket/listings/L123/segments/job1/img_0/seg_000.png"}],
+      "img_1": null
+    },
+    "scenes": {
+      "img_0": {"space": [2048, 1365], "classes": {"couch": {"area": 0.12, "count": 1, "bbox": [400, 700, 1500, 1200], "centroid": [950, 950]}}},
+      "img_1": null
+    },
+    "options": {"preset": "property_showcase", "budget_blocked": false, "output_width": 1920,
+                "output_height": 1080, "max_total_s": 120}
+  }
+}

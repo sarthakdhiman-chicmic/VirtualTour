@@ -3,7 +3,7 @@ import json
 import os
 
 from tour_worker.config import REPO_ROOT
-from tour_worker.contract.jobs import TourRenderRequest, TourSegmentRequest
+from tour_worker.contract.jobs import TourPlanRequest, TourRenderRequest, TourSegmentRequest
 from tour_worker.contract.plan import parse_plan
 
 
@@ -20,3 +20,7 @@ def test_tour_render_example_is_a_valid_plan_15_request():
 
 def test_tour_segment_example_is_valid():
     TourSegmentRequest.model_validate(_load("tour_segment.json"))
+
+
+def test_tour_plan_example_is_valid():
+    TourPlanRequest.model_validate(_load("tour_plan.json"))

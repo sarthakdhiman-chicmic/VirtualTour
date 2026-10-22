@@ -1,9 +1,13 @@
 # tour-worker
 
-The Articulait cinematic tour worker. It runs two jobs for the backend, on RunPod (serverless)
-or locally:
+The Articulait cinematic tour worker. It runs three jobs for the backend, on RunPod (serverless)
+or locally. A tour is `tour_segment` -> `tour_plan` -> `tour_render`; the backend only orchestrates.
 
-- **`tour_render`**: renders a tour **plan** (made by the backend planner) into an H.264 MP4.
+- **`tour_plan`**: scores a tour's photos (coverage, framing, lighting, depth of field, motion
+  signals), picks heroes and the room order, and plans every shot: lengths, camera moves (the
+  cinematic engine), motion regions from `tour_segment`'s masks and beat sync to a music track.
+  It returns the **plan** (JSON, validated with the renderer's own checks) and its `plan_hash`.
+- **`tour_render`**: renders a tour **plan** (made by `tour_plan`) into an H.264 MP4.
   It fetches the photos, motion-region masks and music, draws every frame with OpenCV (the
   camera moves, beat-sync retiming and zoom punches, and perceptual motion: curtains, plants,
   trees, water and fire), encodes with ffmpeg, checks that the file plays smoothly, and uploads
@@ -40,10 +44,11 @@ through `tour_worker.jobs.router.run_job`, which validates the request
 
 | code | when |
 |---|---|
-| `invalid_job_type` | `job_type` is not `tour_render` or `tour_segment` |
+| `invalid_job_type` | `job_type` is not `tour_render`, `tour_segment` or `tour_plan` |
 | `invalid_request` | the request is missing required fields (for example `output_prefix`) |
-| `invalid_plan`, `unsupported_camera_type`, `unsupported_easing` | the plan failed validation (`tour_worker/contract/plan.py`) |
-| `image_fetch_failed` | a shot's photo could not be fetched |
+| `invalid_plan`, `unsupported_camera_type`, `unsupported_easing` | the plan failed validation (`tour_worker/contract/plan.py`); for `tour_plan`, the plan it made did |
+| `image_fetch_failed` | a shot's photo could not be fetched; for `tour_plan`, no photo could be fetched and decoded |
+| `planning_failed` | `tour_plan`: scoring or planning raised (a bug or an input the planner cannot handle; not transient) |
 | `prewarp` | a photo cannot be read, or its aspect ratio does not match the plan |
 | `encode_failed`, `verification_failed` | ffmpeg failed, or the file failed the playback checks (codec, size, fps, duration, faststart, keyframe gap, VBV, level) |
 | `unknown` | anything unexpected |
@@ -120,6 +125,55 @@ Result:
 The scene summary lists every OneFormer class in the photo; the planner uses it to choose camera
 moves.
 
+### `tour_plan`
+
+Request (example: `examples/tour_plan.json`; contract `TourPlanRequest` in
+`tour_worker/contract/jobs.py`):
+
+```json
+{"job_type": "tour_plan", "job_id": "job1", "listing_id": "L123",
+ "photos": [{"photo_id": "img_0", "uri": "s3://bucket/listings/L123/photos/living.jpg", "room_type": "Living Room"}],
+ "image_urls": {"s3://bucket/listings/L123/photos/living.jpg": "https://...presigned..."},
+ "segments": {"img_0": [{"object_id": "seg_000", "class_name": "curtain", "...": "a tour_segment region"}]},
+ "scenes": {"img_0": {"space": [2048, 1365], "classes": {"...": "..."}}},
+ "music_track": {"track_id": "solarflex.mp3", "s3_uri": "s3://bucket/music/solarflex.mp3",
+                 "sha256": "...", "analysis": {"...": "tour_worker.music analysis"}},
+ "options": {"preset": "property_showcase", "budget_blocked": false,
+             "output_width": 1920, "output_height": 1080, "max_total_s": 120}}
+```
+
+- `listing_id` (required) goes into the plan and seeds the motion regions.
+- `photos` (at least one, unique `photo_id`s). `uri` is the photo's canonical URI: it becomes the
+  shot's `image_uri` and is hashed with the plan. `room_type` is the user's choice at upload, or null.
+- `image_urls` (optional) maps a photo's `uri` to the URL to fetch instead, as for `tour_render`;
+  fetch URLs never enter the plan.
+- `segments` / `scenes` (optional): `tour_segment`'s `results` / `scenes`, by `photo_id`. Without
+  them there are no motion regions, and camera moves come from the photos' saliency alone. A photo
+  whose segments are `null` gets a `perceptual_unavailable:<shot>` plan warning.
+- `music_track` (optional): a music-library track; shots are cut on its beats (plan 1.5).
+- `options` (optional, no other keys): `max_total_s` is the tour's ceiling; `budget_blocked`
+  makes a slideshow. Everything else is the planner's default (`tour_worker/planner/config.py`).
+
+Result (`TourPlanResult`):
+
+```json
+{"status": "completed",
+ "plan": {"plan_version": "1.5", "listing_id": "L123", "shots": [...], "provenance": {"plan_hash": "..."}},
+ "plan_hash": "...",
+ "scoring": {"config_version": "0.3.0", "photos": 21,
+             "rooms": [{"room_key": "living_room", "room_type": "living_room", "narrative_order": 3,
+                        "hero_photo_id": "img_4", "photo_ids": ["img_4", "img_3"]}],
+             "sequence": ["front_exterior", "entry", "living_room"], "warnings": []},
+ "warnings": ["photo_fetch_failed:img_7:RuntimeError"], "seconds": 2.4}
+```
+
+- `plan` is checked with `contract.plan.parse_plan`, the validator `tour_render` runs; send it to
+  `tour_render` unchanged. The same request always gives the same plan and `plan_hash`.
+- A photo that cannot be fetched (`photo_fetch_failed:<photo_id>:<error>`) or decoded
+  (`photo_unreadable:<photo_id>`) is left out with a warning; with none left the job fails with
+  `image_fetch_failed`. The plan's own warnings are in `plan.warnings`.
+- It needs no GPU: run it on the render image. Scoring takes about 0.1 s a photo.
+
 ## Layout
 
 ```
@@ -128,10 +182,15 @@ tour_worker/
   config.py               Settings: read once from the environment (table below)
   errors.py               WorkerError(code, message), the failure shape
   contract/plan.py        plan schema, plan_hash, validators
-  contract/jobs.py        request / result models of both jobs
+  contract/jobs.py        request / result models of the three jobs
   jobs/router.py          dispatch by job_type, validate, run in a temp folder
+  jobs/plan.py            tour_plan (run_plan)
   jobs/render.py          tour_render (run_tour)
   jobs/segment.py         tour_segment (run_segment)
+  scoring/                photo scoring: coverage, framing, lighting, depth of field, motion
+                          signals; rooms, heroes and narrative order (pipeline.score_photos)
+  planner/                the shot planner (planner.build_shot_plan): allocation, the cinematic
+                          camera engine, perceptual motion regions, beat sync, scene context
   service/jobs.py         HTTP service: job store + executor (states, records, TTL, webhook)
   service/http.py         HTTP service: RunPod's serverless API (FastAPI)
   service/redact.py       keeps signed URLs and keys out of the service's logs
@@ -165,7 +224,7 @@ tests/                    mirrors tour_worker/
 
 | variable | default | meaning |
 |---|---|---|
-| `WORKER_STORAGE` | (unset) | `local`: dev mode for `tour_render`. Every image, mask and output URI that is not `file://` or an absolute path (s3://, https://, bare names) is served from `IMAGES_DIR` by basename. A missing image becomes a red placeholder. Unset: URIs are routed by scheme (`s3://` to S3, `https://` to HTTPS, `file://` or a path to the filesystem). `tour_segment` always uses S3 / HTTPS. |
+| `WORKER_STORAGE` | (unset) | `local`: dev mode for `tour_render` and `tour_plan`. Every image, mask and output URI that is not `file://` or an absolute path (s3://, https://, bare names) is served from `IMAGES_DIR` by basename. A missing image becomes a red placeholder. Unset: URIs are routed by scheme (`s3://` to S3, `https://` to HTTPS, `file://` or a path to the filesystem). `tour_segment` always uses S3 / HTTPS. |
 | `IMAGES_DIR` | `/tmp` | the folder `WORKER_STORAGE=local` reads from and writes to |
 | `PREWARP_WORKERS` | auto | processes that draw and encode frames. Auto is min(8, CPUs available - 1), capped by available memory at about 600 MB each. Output is identical for any count. |
 | `MODELS_DIR` | `<repo>/models` | folder holding the model weights, one subfolder per model. Set it when the package is installed outside the repo. |
@@ -259,7 +318,7 @@ unchanged.
 ```json
 {"jobs": {"inQueue": 0, "inProgress": 1, "completed": 12, "failed": 1, "cancelled": 0},
  "workers": {"running": 1, "idle": 0, "concurrency": 1},
- "version": "0.2.0", "jobTypes": ["tour_render", "tour_segment"],
+ "version": "0.3.0", "jobTypes": ["tour_render", "tour_segment", "tour_plan"],
  "segmentModel": "shi-labs/oneformer_coco_swin_large@3a263017ca", "workerId": "<hostname>"}
 ```
 
@@ -323,10 +382,10 @@ result JSON are identical; two differences the client must allow for:
    on GPU), 5 to 10 s for `tour_render` (minutes), with backoff. A webhook can replace most polls,
    but keep a slow poll in case it is lost.
 3. **Read** `output` on `COMPLETED`: `video_uri` for a render, `results` / `scenes` for a
-   segmentation. Show `warnings`; they never fail a job.
+   segmentation, `plan` / `plan_hash` for a plan. Show `warnings`; they never fail a job.
    On `FAILED` read `error.code`. Retry only transient codes (`image_fetch_failed`,
    `encode_failed`, `worker_restarted`, `unknown`); the plan codes and `invalid_request` will fail
-   again.
+   again, and so will `planning_failed`.
 4. **Time out** on the caller's side: give up (and `POST /cancel/{id}`, which only helps while it
    is queued) after a deadline that fits the job, e.g. 30 min for a render. A 404 on `/status`
    means the job is gone (TTL, or a service without `JOBS_DIR` restarted): resubmit.
@@ -343,7 +402,8 @@ to `s3://` (`output_prefix` must be `s3://...` in production; `https://` cannot 
 URL when the worker has no read access to the bucket). `music.uri` is mapped the same way (fetched
 as written when `image_urls` has no entry for it); a failed fetch renders without music
 (`music_fetch_failed`). `tour_segment` reads `images[].uri` (s3:// or https://) and writes masks
-under its `output_prefix`.
+under its `output_prefix`. `tour_plan` reads `photos[].uri` (or its `image_urls` entry) and writes
+nothing.
 
 ## Run locally
 

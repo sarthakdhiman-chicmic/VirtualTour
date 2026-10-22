@@ -4,7 +4,7 @@ Every setting, its environment variable and default (also in README.md):
 
   WORKER_STORAGE       ""         "local": dev mode - every image / mask / output URI, s3:// and
                                   https:// included, is served from IMAGES_DIR by basename
-                                  (tour_render only; tour_segment always uses S3 / HTTPS).
+                                  (tour_render and tour_plan; tour_segment always uses S3 / HTTPS).
                                   Anything else: by URI scheme (s3://, https://, file:// or a path)
   IMAGES_DIR           "/tmp"     the folder WORKER_STORAGE=local reads from and writes to
   PREWARP_WORKERS      (auto)     processes drawing + encoding frames; auto = min(8, CPUs - 1),
