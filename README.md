@@ -63,7 +63,8 @@ Request (full example: `examples/tour_render.json`):
 ```
 
 - `output_prefix` is **required**. The video is written to `<output_prefix>master.mp4`.
-- `image_urls` is optional. It maps a URI in the plan to the URL the worker should fetch instead.
+- `image_urls` is optional. It maps a URI in the plan (a shot's `image_uri`, a region's
+  `mask_uri`, or `music.uri`) to the URL the worker should fetch instead.
 - Plan versions 1.0 to 1.5 are accepted:
   - 1.0: ken_burns cameras and cuts only.
   - 1.1: adds fades.
@@ -339,9 +340,10 @@ URLs (presigned is fine; 15 s timeout, 50 MB limit, no redirect to http). It wri
 to `s3://` (`output_prefix` must be `s3://...` in production; `https://` cannot be written). For
 `tour_render`, a plan's URIs stay as the backend hashed them; `image_urls` maps a shot's
 `image_uri` or a region's `mask_uri` to a URL to fetch instead (for example a presigned https
-URL when the worker has no read access to the bucket). `music.uri` is not mapped: it is fetched
-as written (s3:// or https://), and a failed fetch renders without music (`music_fetch_failed`). `tour_segment` reads `images[].uri` (s3:// or
-https://) and writes masks under its `output_prefix`.
+URL when the worker has no read access to the bucket). `music.uri` is mapped the same way (fetched
+as written when `image_urls` has no entry for it); a failed fetch renders without music
+(`music_fetch_failed`). `tour_segment` reads `images[].uri` (s3:// or https://) and writes masks
+under its `output_prefix`.
 
 ## Run locally
 

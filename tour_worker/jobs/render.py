@@ -36,10 +36,12 @@ def run_tour(request: dict, storage, workdir: str, settings: Settings | None = N
 
         music_path = None
         if plan.music is not None:                 # plan 1.5: fetch the track
+            # named after the plan's URI (not the fetch URL, whose query string is a signature)
             music_path = os.path.join(workdir, "music", os.path.basename(plan.music.uri) or "track")
             os.makedirs(os.path.dirname(music_path), exist_ok=True)
             try:
-                storage.get(plan.music.uri, music_path)
+                # like photos and masks: image_urls may map the track's URI to a fetch URL
+                storage.get(image_urls.get(plan.music.uri, plan.music.uri), music_path)
             except Exception:
                 warnings.append("music_fetch_failed")
                 music_path = None
