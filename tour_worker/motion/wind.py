@@ -1,5 +1,5 @@
-"""One wind per shot (2026-10-22): every tree, plant, curtain and water surface in a shot responds
-to the same breeze, instead of each running its own random timing - the scene reads as one real
+"""One wind per shot (2026-10-22): every tree, plant and curtain in a shot responds to the same
+breeze (fire and water keep their own motion), instead of each running its own random timing - the scene reads as one real
 moment.
 
 The wind is seeded from the shot, so renders stay deterministic and the plan contract does not

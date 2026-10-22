@@ -66,7 +66,7 @@ def load_regions(shot, images_dir: str, src_w: int, src_h: int,
             flame, feather = feather, np.maximum(fire_glow(feather), plume)
         region = Region(spec, feather, src_w, src_h)
         region.solid = solid                       # for the quality gate's drag check
-        if spec.effect != "fire_flicker":          # fire burns on its own; everything else feels the wind
+        if spec.effect not in ("fire_flicker", "calm_water", "water_ripple"):   # fire, water: their own
             region.wind = wind
             region.wind_delay = wind.delay(region.x0 + region.bw / 2)
         if raw is not None:                        # touching crowns: separate trees

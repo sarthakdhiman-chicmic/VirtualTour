@@ -65,9 +65,10 @@ def calm_displacement(r, u, v, t):
 
 
 def _calm_amp(r, t: float) -> float:
-    """Water feels the shot's breeze gently: 0.85 of its amplitude when calm, 1.0 in a gust."""
-    w = getattr(r, "wind", None)
-    return r.amp if w is None else r.amp * (0.85 + 0.15 * w.gust(t - getattr(r, "wind_delay", 0.0)))
+    """Water does not follow the shot's wind (2026-10-22: calming it to 0.85 between gusts left
+    thin distant lake bands under the readability floor; ripples at this scale barely respond
+    to a breeze anyway)."""
+    return r.amp
 
 
 def calm_fields(r, u, v, t, irregular=None):
