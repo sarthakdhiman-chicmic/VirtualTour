@@ -281,30 +281,27 @@ class Region:
         bend = self.bend(u, v)
         # stiffness: a tree a third of the photo high sways at SWAY_HZ; smaller ones quicker
         hz = SWAY_HZ * min(1.8, max(0.75, (0.33 * self.src_w / max(self.bh, 1.0)) ** 0.4))
-        ph = 2 * math.pi * hz * t - 2 * math.pi * SWAY_ACROSS * (u - self.x0) / span + self.phase
+        # ONE timing signal for the whole tree (review 2026-10-22: at the turnaround "it can still
+        # be confused with circular rotational motion"): when parts of a crown reverse at
+        # different moments - a sway travelling across it, branch clusters on their own phases -
+        # the reversal sweeps across the tree and reads as rotation. A tree bending in wind stops
+        # and comes back all at once; variety is in how FAR each part moves (height, branch
+        # clusters, gusts), never in when.
+        ph = 2 * math.pi * hz * t + self.phase
         sway = 0.8 * np.sin(ph) + 0.2 * np.sin(1.63 * ph + self.phase2)
         gust = 0.6 + 0.4 * np.clip(0.5 + self.noise_b(u / (0.8 * span) - 0.1 * t, v / (0.8 * span),
                                                       0.07 * t), 0, 1)
-        # a gust front sweeping across the crown (period GUST_PERIOD_S, off the crown between)
+        # a gust front passing (light only, below)
         p = (t / GUST_PERIOD_S + self.phase / (2 * math.pi)) % 1.0
         x_front = self.x0 + (2.2 * p - 0.6) * span
         front = np.exp(-(((u - x_front) / (0.3 * span)) ** 2))
-        # branch clusters: own phase, two rates blended across the crown - SIDEWAYS only. Review
-        # 2026-10-22: angled swings made the crown breathe ("something pushing from behind,
-        # bulging out and in"): vertical motion that grows toward the top stretches and squashes
-        # the crown; a tree bends sideways from its trunk. Gust fronts now only brighten the
-        # leaves (light) - as displacement they squeezed the crown sideways as they passed.
-        # neighbouring clusters stay close in step (phase changes slowly and by at most ~half a
-        # turn across the crown): clusters swinging against each other squeeze the leaves
-        # between them - the same breathing, sideways
+        # branch clusters: some swing further than others (a static amount field, smooth across
+        # the crown so neighbours never squeeze or stretch the leaves between them)
         cs = 3.0 * lb
-        bph = 0.5 * math.pi * self.noise_a(u / cs + 60.0, v / cs, 0.0)
-        mix = np.clip(0.5 + self.noise_b(u / cs + 30.0, v / cs, 0.0), 0.0, 1.0)
-        osc = ((1.0 - mix) * np.sin(2 * math.pi * BRANCH_HZ * t + bph)
-               + mix * np.sin(2 * math.pi * 1.45 * BRANCH_HZ * t + 1.7 * bph))
+        reach = 1.0 + 0.35 * self.noise_a(u / cs + 60.0, v / cs, 0.0)
         # rustling patches (on / off slowly), leaves flutter there
         rustle = np.clip(1.6 * (self.noise_a(u / (2.0 * lb) + 140.0, v / (2.0 * lb), 0.12 * t) + 0.1), 0.0, 1.0)
-        swing = ab * bend * gust * (0.75 * sway + 0.25 * osc)
+        swing = ab * bend * gust * reach * sway
         jitter = al * (0.4 + 0.8 * rustle) * self.noise_b(u / ll, v / ll, f * t)   # leaves, tiny
         dx = swing + jitter
         dy = 0.4 * jitter
