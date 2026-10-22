@@ -289,26 +289,25 @@ class Region:
         p = (t / GUST_PERIOD_S + self.phase / (2 * math.pi)) % 1.0
         x_front = self.x0 + (2.2 * p - 0.6) * span
         front = np.exp(-(((u - x_front) / (0.3 * span)) ** 2))
-        # branch clusters: own direction (mostly sideways, up to ~55 deg off), own phase, two rates
-        cs = 1.5 * lb
-        theta = 0.6 * math.pi * self.noise_a(u / cs + 90.0, v / cs, 0.0)
-        bph = math.pi * self.noise_a(u / cs + 60.0, v / cs, 0.0)
+        # branch clusters: own phase, two rates blended across the crown - SIDEWAYS only. Review
+        # 2026-10-22: angled swings made the crown breathe ("something pushing from behind,
+        # bulging out and in"): vertical motion that grows toward the top stretches and squashes
+        # the crown; a tree bends sideways from its trunk. Gust fronts now only brighten the
+        # leaves (light) - as displacement they squeezed the crown sideways as they passed.
+        # neighbouring clusters stay close in step (phase changes slowly and by at most ~half a
+        # turn across the crown): clusters swinging against each other squeeze the leaves
+        # between them - the same breathing, sideways
+        cs = 3.0 * lb
+        bph = 0.5 * math.pi * self.noise_a(u / cs + 60.0, v / cs, 0.0)
         mix = np.clip(0.5 + self.noise_b(u / cs + 30.0, v / cs, 0.0), 0.0, 1.0)
         osc = ((1.0 - mix) * np.sin(2 * math.pi * BRANCH_HZ * t + bph)
                + mix * np.sin(2 * math.pi * 1.45 * BRANCH_HZ * t + 1.7 * bph))
         # rustling patches (on / off slowly), leaves flutter there
         rustle = np.clip(1.6 * (self.noise_a(u / (2.0 * lb) + 140.0, v / (2.0 * lb), 0.12 * t) + 0.1), 0.0, 1.0)
-        push = gust * (1.0 + 0.5 * front) / 1.25
-        # ONE line of motion per point (review 2026-10-21: "a circular motion ... unsettling"): the
-        # crown's sway and the cluster's own swing are summed into one signal and applied along
-        # the cluster's direction, so every point moves back and forth on a line - never a loop
-        # (a sine in x with a cosine in y, or two rates on two axes, traces circles / Lissajous
-        # loops). The direction varies slowly across the crown: mostly sideways, some branches
-        # angled, which is the variety
-        swing = ab * bend * push * (0.6 * sway + 0.4 * osc)
+        swing = ab * bend * gust * (0.75 * sway + 0.25 * osc)
         jitter = al * (0.4 + 0.8 * rustle) * self.noise_b(u / ll, v / ll, f * t)   # leaves, tiny
-        dx = swing * np.cos(theta) + jitter
-        dy = swing * np.sin(theta) + 0.6 * jitter
+        dx = swing + jitter
+        dy = 0.4 * jitter
         light = 1.0 + LEAF_SHIMMER * (0.5 + 0.7 * rustle + 1.0 * front) * self.noise_b(
             u / ll + 80.0, v / ll, 1.6 * f * t)
         return dx, dy, light
