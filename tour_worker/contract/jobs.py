@@ -32,7 +32,7 @@ class SegmentImage(BaseModel):
 
 
 class TourSegmentRequest(_Request):
-    """OneFormer masks for a tour's photos, before the backend plans."""
+    """OneFormer masks for a tour's photos, before tour_plan plans."""
     job_type: Literal["tour_segment"]
     images: list[SegmentImage] = Field(min_length=1)
     output_prefix: str = Field(min_length=1)  # masks go to <output_prefix><photo_id>/<object_id>.png

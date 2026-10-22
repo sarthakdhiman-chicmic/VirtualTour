@@ -5,7 +5,7 @@ window blinds, potted plants, trees and water. Model `shi-labs/oneformer_coco_sw
 pinned below; trained on COCO panoptic (annotations CC BY 4.0, images under their Flickr licences,
 COCO disclaims them: the dataset question needs a legal sign-off before production use).
 
-Output per photo: the same shape as a detect result, so the backend planner treats both alike:
+Output per photo: the same shape as a detect result, so the planner (tour_worker/planner) treats both alike:
   {object_id, class_name, confidence, bbox: [x1, y1, x2, y2], mask: 0/255 uint8, space: [w, h]}
 bbox and mask are in `space` pixels: the photo scaled to at most MAX_SIDE on its long side.
 COCO "stuff" classes (curtain, tree, water) come back as one merged region per class; they are split

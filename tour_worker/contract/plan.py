@@ -125,7 +125,7 @@ class Provenance(BaseModel):
     model_config = ConfigDict(extra='ignore')
 
 class Music(BaseModel):
-    """Plan 1.5: the tour's music (backend planner/music_sync.py). The track is queued `loops`
+    """Plan 1.5: the tour's music (tour_worker/planner/music_sync.py). The track is queued `loops`
     times, each copy cut at loop_s (the bar where its beat stops), trimmed to end_s, faded out."""
     track_id: str
     uri: str

@@ -61,7 +61,7 @@ Request (full example: `examples/tour_render.json`):
 {
   "job_type": "tour_render",
   "job_id": "optional",
-  "plan": { "plan_version": "1.5", "...": "the plan, exactly as the backend hashed it" },
+  "plan": { "plan_version": "1.5", "...": "the plan, exactly as tour_plan returned it (hashed)" },
   "output_prefix": "s3://bucket/virtual_tour/<job>/",
   "image_urls": { "<shot image_uri or mask_uri>": "<URL to fetch it from, e.g. presigned https>" }
 }
@@ -397,7 +397,7 @@ result JSON are identical; two differences the client must allow for:
 **Inputs.** The worker reads `s3://` URIs with its own AWS credentials (boto3) and `https://`
 URLs (presigned is fine; 15 s timeout, 50 MB limit, no redirect to http). It writes outputs only
 to `s3://` (`output_prefix` must be `s3://...` in production; `https://` cannot be written). For
-`tour_render`, a plan's URIs stay as the backend hashed them; `image_urls` maps a shot's
+`tour_render`, a plan's URIs stay as tour_plan hashed them; `image_urls` maps a shot's
 `image_uri` or a region's `mask_uri` to a URL to fetch instead (for example a presigned https
 URL when the worker has no read access to the bucket). `music.uri` is mapped the same way (fetched
 as written when `image_urls` has no entry for it); a failed fetch renders without music

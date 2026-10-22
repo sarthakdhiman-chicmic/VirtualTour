@@ -1,4 +1,4 @@
-"""`tour_segment` job: OneFormer masks for a tour's photos, before the backend plans.
+"""`tour_segment` job: OneFormer masks for a tour's photos, before tour_plan plans.
 
 Request:  {"job_type": "tour_segment", "job_id": ..., "images": [{"photo_id": ..., "uri": ...}],
            "output_prefix": "s3://bucket/.../segments/<job_id>/"}
@@ -9,7 +9,7 @@ window, stairs, ceiling, sky ... - for the planner's choice of camera move.
 
 Each region is shaped like a detect result plus `space` (tour_worker.vision.segment); its mask is written to
 <output_prefix><photo_id>/<object_id>.png and returned as `mask_url`. No images go back to the
-backend: it plans from the JSON, and the render job fetches the masks it needs. A photo that cannot
+backend: tour_plan plans from the JSON, and the render job fetches the masks it needs. A photo that cannot
 be fetched or segmented gets None (the tour still renders, without motion on that photo).
 Contracts: tour_worker.contract.jobs (TourSegmentRequest / TourSegmentResult). Settings used:
 SEGMENT_MODEL, ONEFORMER_DIR / MODELS_DIR, COCO_FIRE_SEARCH, FIREPLACE_MODEL / FIREPLACE_DIR
