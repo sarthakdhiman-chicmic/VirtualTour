@@ -15,6 +15,9 @@ Every setting, its environment variable and default (also in README.md):
   ONEFORMER_DIR        (unset)    that checkpoint's folder; default MODELS_DIR/<its dir name>
   COCO_FIRE_SEARCH     "0"        "1": look for lit fires by colour with the COCO model (off: it
                                   failed validation, 4/11 fires found)
+  FIREPLACE_MODEL      "ade20k"   a second OneFormer pass that finds fireplaces (COCO has no such
+                                  class); lit fires are looked for inside them. "" = off
+  FIREPLACE_DIR        (unset)    that checkpoint's folder; default MODELS_DIR/<its dir name>
 
 The HTTP service (python -m tour_worker.service; handler.py, the RunPod entry, ignores these):
 
@@ -51,6 +54,8 @@ class Settings:
     segment_model: str = "coco"
     oneformer_dir: str | None = None
     coco_fire_search: bool = False
+    fireplace_model: str = "ade20k"         # "" = no fireplace pass
+    fireplace_dir: str | None = None
     # the HTTP service (tour_worker.service)
     api_key: str | None = field(default=None, repr=False)     # never in a repr / log
     allow_no_auth: bool = False
@@ -73,6 +78,8 @@ class Settings:
             segment_model=env.get("SEGMENT_MODEL", "coco"),
             oneformer_dir=env.get("ONEFORMER_DIR") or None,
             coco_fire_search=env.get("COCO_FIRE_SEARCH", "") == "1",
+            fireplace_model=env.get("FIREPLACE_MODEL", "ade20k").strip(),
+            fireplace_dir=env.get("FIREPLACE_DIR") or None,
             api_key=env.get("WORKER_API_KEY") or None,
             allow_no_auth=env.get("WORKER_ALLOW_NO_AUTH", "") == "1",
             job_concurrency=max(1, int(env.get("JOB_CONCURRENCY") or 1)),
@@ -87,6 +94,14 @@ class Settings:
         """The folder of the configured OneFormer checkpoint."""
         from tour_worker.vision.segment import MODELS
         return self.oneformer_dir or os.path.join(self.models_dir, MODELS[self.segment_model]["dir"])
+
+
+    def fireplace_path(self) -> str | None:
+        """The folder of the fireplace pass's checkpoint (None: the pass is off)."""
+        if not self.fireplace_model:
+            return None
+        from tour_worker.vision.segment import MODELS
+        return self.fireplace_dir or os.path.join(self.models_dir, MODELS[self.fireplace_model]["dir"])
 
 
 @functools.lru_cache(maxsize=1)

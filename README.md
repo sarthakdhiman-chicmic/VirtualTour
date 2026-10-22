@@ -171,6 +171,8 @@ tests/                    mirrors tour_worker/
 | `SEGMENT_MODEL` | `coco` | OneFormer checkpoint for `tour_segment`: `coco` (primary) or `ade20k` (knows fireplaces) |
 | `ONEFORMER_DIR` | `MODELS_DIR/<checkpoint dir>` | folder of that checkpoint: `oneformer_coco_swin_large` or `oneformer_ade20k_swin_large` |
 | `COCO_FIRE_SEARCH` | `0` | `1`: look for lit fires by colour with the COCO model. Off by default because it failed validation (it found 4 of 11 fires). |
+| `FIREPLACE_MODEL` | `ade20k` | A second OneFormer pass in `tour_segment` that finds fireplaces (COCO has no fireplace class); lit fires are detected inside them and added as `fire` regions. Empty: off. About 7 s per photo on CPU. |
+| `FIREPLACE_DIR` | (unset) | That checkpoint's folder; default `MODELS_DIR/<its dir name>`. |
 
 The HTTP service (`python -m tour_worker.service`) adds these; `handler.py` ignores them:
 

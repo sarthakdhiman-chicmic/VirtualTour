@@ -78,4 +78,5 @@ class TourSegmentResult(BaseModel):
     scenes: dict[str, Optional[dict[str, Any]]]         # photo_id -> scene summary (None: failed)
     warnings: list[str]
     model: str                                          # "<hf id>@<revision[:10]>"
+    fireplace_model: Optional[str] = None               # the fireplace pass's model (None: off)
     seconds: float

@@ -10,6 +10,7 @@ import cv2
 import numpy as np
 
 from tour_worker.motion.masks import crop_box, guard, leafiness
+from tour_worker.motion.wind import envelope_at
 
 POT_REACH_BOTTOM = 0.15     # a pot: a non-green part reaching the lowest 15% of a plant's mask,
 POT_MAX_SHARE = 0.6         # at most this share of it
@@ -22,7 +23,7 @@ def feature_px(r) -> float:
 def displacement(r, u, v, t):
     """(dx, dy) in source px at source points (u, v), time t seconds."""
     a, s = r.anchor_weight(v)
-    A, f = r.amp, r.freq
+    A, f = r.amp * envelope_at(r, t), r.freq       # the shot's breeze sets how strongly it moves
     sway = np.sin(2 * math.pi * f * t + r.phase + 0.5 * s)
     n1 = r.noise_a(u / (0.35 * r.bw), v / (0.35 * r.bh), 0.6 * f * t)
     flutter = r.noise_b(u / 18.0, v / 18.0, 2.2 * f * t)

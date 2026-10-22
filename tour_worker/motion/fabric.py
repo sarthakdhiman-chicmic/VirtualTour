@@ -8,6 +8,8 @@ import math
 
 import numpy as np
 
+from tour_worker.motion.wind import envelope_at
+
 
 def feature_px(r) -> float:
     return min(max(40.0, 0.12 * r.bw), 0.5 * r.bw, 0.5 * r.bh)       # folds
@@ -16,7 +18,7 @@ def feature_px(r) -> float:
 def displacement(r, u, v, t):
     """(dx, dy) in source px at source points (u, v), time t seconds."""
     a, s = r.anchor_weight(v)
-    A, f = r.amp, r.freq
+    A, f = r.amp * envelope_at(r, t), r.freq       # the shot's breeze sets how strongly it moves
     ph = 2 * math.pi * f * t - 2 * math.pi * 0.6 * s + r.phase
     fold = 1.0 + 0.35 * np.sin(2 * math.pi * (u - r.x0) / max(40.0, 0.12 * r.bw) + r.phase2)
     n = r.noise_a(u / (0.5 * r.bw), v / (0.5 * r.bh), 0.8 * f * t)

@@ -125,6 +125,28 @@ class Segmenter:
         return regions, scene
 
 
+    def fires(self, bgr: np.ndarray) -> list[dict]:
+        """The fireplace pass (FIREPLACE_MODEL, 2026-10-22): this model's fireplaces, and inside
+        each the lit fire if there is one (tour_worker.vision.fire_detect.fire_regions: the
+        firebox, a glowing core, reflections and glints rejected). Only "fire" regions return -
+        the rest of this model's classes are the primary model's job."""
+        h, w = bgr.shape[:2]
+        k = min(1.0, MAX_SIDE / max(w, h))
+        if k < 1.0:
+            bgr = cv2.resize(bgr, (round(w * k), round(h * k)), interpolation=cv2.INTER_AREA)
+        sh, sw = bgr.shape[:2]
+        rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+        inputs = self.processor(images=rgb, task_inputs=["panoptic"], return_tensors="pt").to(self.device)
+        with self.torch.no_grad():
+            out = self.model(**inputs)
+        res = self.processor.post_process_panoptic_segmentation(out, target_sizes=[(sh, sw)])[0]
+        seg = res["segmentation"].cpu().numpy()
+        from tour_worker.vision.fire_detect import fire_regions
+        fireplaces = segments_to_regions(seg, res["segments_info"], self.id2label, (sw, sh),
+                                         {lab: c for lab, c in self.class_map.items() if c == "fireplace"})
+        return [r for r in fire_regions(bgr, fireplaces) if r["class_name"] == "fire"]
+
+
 def outdoor_plants(regions: list[dict], scene: dict, model: str = DEFAULT_MODEL) -> list[dict]:
     """ADE20K's "plant" covers potted plants and shrubs alike. A photo showing sky (1% or more)
     is outdoors: its plants are shrubs and hedges, which stay still (user decision 2026-10-16), so

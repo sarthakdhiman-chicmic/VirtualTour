@@ -9,13 +9,14 @@ import os
 import cv2
 import numpy as np
 
-from tour_worker.motion.canopy import leaf_weight, tree_columns
+from tour_worker.motion.canopy import build_instances, leaf_weight, tree_columns
 from tour_worker.motion.fire import (FIRE_AMP_OF_HEIGHT, FIRE_PLUME, fire_box, fire_glow, fire_structure,
                                      fire_zone_file, flame_plume)
 from tour_worker.motion.foliage import plant_weight
 from tour_worker.motion.masks import guard, load_feather, mask_relpath
 from tour_worker.motion.region import Region
 from tour_worker.motion.water import water_guard
+from tour_worker.motion.wind import shot_wind
 
 
 def load_regions(shot, images_dir: str, src_w: int, src_h: int,
@@ -24,6 +25,7 @@ def load_regions(shot, images_dir: str, src_w: int, src_h: int,
     src (the photo, BGR): tree regions are narrowed to their leaves with solid objects and hedges
     held still (leaf_weight); water regions hold solid dark objects still (water_guard)."""
     out, warnings = [], []
+    wind = shot_wind(shot, src_w)                   # one breeze for every region of the shot
     for spec in shot.motion_regions or []:
         path = os.path.join(images_dir, mask_relpath(shot.shot_id, spec.id))
         x1, y1, x2, y2 = spec.bbox
@@ -34,8 +36,9 @@ def load_regions(shot, images_dir: str, src_w: int, src_h: int,
         if feather is None:
             warnings.append(f"motion_region_dropped:{shot.shot_id}:{spec.id}:{reason}")
             continue
-        solid = cols = pot_top = None
+        solid = cols = pot_top = raw = None
         if src is not None and spec.effect == "canopy_flutter":
+            raw = feather.copy()
             cols = tree_columns(feather > 0)
             feather, solid = leaf_weight(src, feather, float(spec.amplitude_px))
         elif src is not None and spec.effect == "foliage_sway":
@@ -63,6 +66,11 @@ def load_regions(shot, images_dir: str, src_w: int, src_h: int,
             flame, feather = feather, np.maximum(fire_glow(feather), plume)
         region = Region(spec, feather, src_w, src_h)
         region.solid = solid                       # for the quality gate's drag check
+        if spec.effect != "fire_flicker":          # fire burns on its own; everything else feels the wind
+            region.wind = wind
+            region.wind_delay = wind.delay(region.x0 + region.bw / 2)
+        if raw is not None:                        # touching crowns: separate trees
+            region.instances = build_instances(region, src, raw, wind)
         if cols is not None:
             region.col_bottom, region.col_span = cols
         if pot_top is not None and pot_top > region.y0 + 0.2 * region.bh:

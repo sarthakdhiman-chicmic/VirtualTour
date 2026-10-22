@@ -2,7 +2,7 @@
 # tour_segment worker: OneFormer on CUDA 12.6 PyTorch, with the pinned weights baked in (no job
 # downloads them). Build from the repo root:
 #   docker build -f docker/segment.Dockerfile -t tour-worker-segment .
-#   ... --build-arg BAKE_ADE20K=1            also bake the ADE20K checkpoint (SEGMENT_MODEL=ade20k)
+#   ... --build-arg BAKE_ADE20K=0            skip the ADE20K checkpoint (only with FIREPLACE_MODEL="")
 #   ... --build-arg TORCH_EXTRA=segment      CPU PyTorch instead (local development, no GPU)
 # Default: the HTTP service on :8000 (needs WORKER_API_KEY).
 # RunPod serverless (GPU): same image, container start command `python -u handler.py`.
@@ -11,7 +11,7 @@
 FROM nvidia/cuda:12.6.3-base-ubuntu24.04
 
 ARG TORCH_EXTRA=segment-gpu
-ARG BAKE_ADE20K=0
+ARG BAKE_ADE20K=1
 
 COPY --from=ghcr.io/astral-sh/uv:0.11.22 /uv /bin/uv
 
@@ -34,7 +34,8 @@ COPY LICENSES.md handler.py ./
 COPY tour_worker ./tour_worker
 RUN uv sync --frozen --no-dev --extra "${TORCH_EXTRA}" --extra http
 
-# Pinned OneFormer weights (sha256-checked by ensure_model). COCO is the production default.
+# Pinned OneFormer weights (sha256-checked by ensure_model): COCO (the primary model) and ADE20K
+# (the fireplace pass, FIREPLACE_MODEL - on by default since 2026-10-22).
 ENV MODELS_DIR=/models HF_HUB_DISABLE_TELEMETRY=1
 RUN /opt/venv/bin/python -c "from tour_worker.vision.segment import MODELS, ensure_model; \
 import os; ensure_model(os.path.join('/models', MODELS['coco']['dir']), 'coco')" \

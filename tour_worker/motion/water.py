@@ -60,14 +60,21 @@ def calm_feature_px(r) -> float:
 
 def calm_displacement(r, u, v, t):
     sx, sz, near = calm_slopes(r, u, v, t)
-    A = r.amp
+    A = _calm_amp(r, t)
     return A * near * sx / 1.35, 0.5 * A * near * sz / 1.35
+
+
+def _calm_amp(r, t: float) -> float:
+    """Water feels the shot's breeze gently: 0.85 of its amplitude when calm, 1.0 in a gust."""
+    w = getattr(r, "wind", None)
+    return r.amp if w is None else r.amp * (0.85 + 0.15 * w.gust(t - getattr(r, "wind_delay", 0.0)))
 
 
 def calm_fields(r, u, v, t, irregular=None):
     """(dx, dy, brightness); irregular: calm_irregular at these points when already known."""
     sx, sz, near = calm_slopes(r, u, v, t, irregular)
-    return (r.amp * near * sx / 1.35, 0.5 * r.amp * near * sz / 1.35,
+    A = _calm_amp(r, t)
+    return (A * near * sx / 1.35, 0.5 * A * near * sz / 1.35,
             1.0 + CALM_BRIGHTNESS * np.tanh(_SHADE_Z * sz + _SHADE_X * sx))
 
 

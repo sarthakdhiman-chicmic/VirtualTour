@@ -83,9 +83,9 @@ def test_a_distant_tree_line_moves_but_a_hedge_stays_still():
     assert w[860:950].max() == 0.0            # the hedge stays still
 
 
-def test_tree_tops_sway_most_and_branches_keep_their_own_timing():
-    """2026-10-19 "more natural": a tree bends from its base (the top of each column moves most),
-    and branch clusters sway at their own phase, so the crown is not one rigid sheet."""
+def test_tree_tops_sway_most_and_the_whole_crown_reverses_together():
+    """A tree bends from its base (the top moves most) and, review 2026-10-22, reverses all at
+    once: parts reversing at different moments read as rotation."""
     from tour_worker.motion.canopy import tree_columns
     mask = np.zeros((SH, SW), bool)
     mask[int(0.1 * SH):int(0.6 * SH), int(0.2 * SW):int(0.6 * SW)] = True
@@ -98,13 +98,57 @@ def test_tree_tops_sway_most_and_branches_keep_their_own_timing():
     for f in range(0, 300, 2):
         amp = np.maximum(amp, np.abs(r.displacement(x, top_bottom, f / 30)[0]))
     assert amp[0] > 1.8 * amp[1]                                     # the top sways most
+    r.canopy_amps = lambda: (r.amp, 0.0)                             # the sway alone (no leaf jitter)
     u = np.linspace(0.25 * SW, 0.55 * SW, 40)
     v = np.full(40, 0.2 * SH)
     series = np.array([r.displacement(u, v, f / 30)[0] for f in range(0, 300, 2)])
-    corr = np.corrcoef(series.T)
-    assert corr[0, -1] < 0.97                                        # not one rigid sheet
-    # neighbours move together: displacement changes by < 0.2 px per px (no tearing / shear)
-    assert (np.abs(np.diff(series, axis=1)) / (u[1] - u[0])).max() < 0.2
+    assert np.corrcoef(series.T)[0, -1] > 0.98                       # one timing across the crown
+    assert (np.abs(np.diff(series, axis=1)) / (u[1] - u[0])).max() < 0.2   # no tearing / shear
+
+
+def test_touching_crowns_split_into_trees_that_blend_without_tearing():
+    """2026-10-22: COCO's "tree" is one mask for a whole tree line; the skyline's dips split it
+    into trees, each with its own timing, blended over a soft band."""
+    from tour_worker.motion.canopy import build_instances, tree_instances
+    from tour_worker.motion.wind import Wind
+    rng = np.random.default_rng(5)
+    img = (np.clip(rng.normal(0, 30, (SH, SW)), -60, 60)[..., None] + [40, 140, 60]).clip(0, 255).astype(np.uint8)
+    mask = np.zeros((SH, SW), np.float32)
+    yy, xx = np.mgrid[0:SH, 0:SW]
+    for cx in (300, 520):                                           # two round crowns, touching
+        mask[((xx - cx) / 130.0) ** 2 + ((yy - 260) / 170.0) ** 2 <= 1.0] = 1.0
+    mask[260:430, 300:520] = 1.0
+    parts = tree_instances(img, mask)
+    assert len(parts) == 2
+    total = sum(w[mask[y0:y0 + w.shape[0], x0:x0 + w.shape[1]] > 0].sum() for w, (y0, x0) in parts)
+    assert abs(total / mask.sum() - 1.0) < 1e-3                     # weights share the mask
+    one = np.zeros((SH, SW), np.float32)
+    one[((xx - 400) / 150.0) ** 2 + ((yy - 260) / 180.0) ** 2 <= 1.0] = 1.0
+    assert tree_instances(img, one)[0][0] is None                   # a single crown stays one tree
+    r = Region(_Spec(effect="canopy_flutter", anchor="none", amp=8.0, bbox=[0.15, 0.1, 0.7, 0.7], freq=1.1),
+               mask, SW, SH)
+    r.wind = Wind(7, SW)
+    r.instances = build_instances(r, img, mask, r.wind)
+    assert len(r.instances) == 2
+    r.canopy_amps = lambda: (r.amp, 0.0)
+    u = np.arange(200, 620, 4, dtype=float)
+    v = np.full(len(u), 200.0)
+    series = np.array([r.displacement(u, v, f / 30)[0] for f in range(0, 450, 3)])
+    left, right = series[:, np.argmin(np.abs(u - 260))], series[:, np.argmin(np.abs(u - 560))]
+    assert np.corrcoef(left, right)[0, 1] < 0.9                     # two trees: their own timing
+    assert (np.abs(np.diff(series, axis=1)) / 4.0).max() < 0.25     # the band between: no tear
+
+
+def test_the_shot_wind_is_shared_delayed_across_the_frame_and_never_overdrives():
+    from tour_worker.motion.wind import CALM, Wind
+    a, b = Wind(11, 1920), Wind(11, 1920)
+    ts = np.arange(0, 60, 0.1)
+    assert [a.envelope(t) for t in ts] == [b.envelope(t) for t in ts]      # deterministic
+    env = np.array([a.envelope(t) for t in ts])
+    assert env.min() >= CALM - 1e-9 and env.max() <= 1.0 + 1e-9           # never above the plan
+    assert env.max() - env.min() > 0.15                                    # gusts are felt
+    up, down = (0.0, 1920.0) if a.direction > 0 else (1920.0, 0.0)
+    assert a.delay(up) == 0.0 and a.delay(down) > 1.5                      # crosses the frame
 
 
 def test_tree_points_swing_on_a_line_not_in_circles():

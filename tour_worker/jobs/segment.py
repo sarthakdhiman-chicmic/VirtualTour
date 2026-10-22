@@ -12,7 +12,9 @@ Each region is shaped like a detect result plus `space` (tour_worker.vision.segm
 backend: it plans from the JSON, and the render job fetches the masks it needs. A photo that cannot
 be fetched or segmented gets None (the tour still renders, without motion on that photo).
 Contracts: tour_worker.contract.jobs (TourSegmentRequest / TourSegmentResult). Settings used:
-SEGMENT_MODEL, ONEFORMER_DIR / MODELS_DIR, COCO_FIRE_SEARCH (tour_worker.config).
+SEGMENT_MODEL, ONEFORMER_DIR / MODELS_DIR, COCO_FIRE_SEARCH, FIREPLACE_MODEL / FIREPLACE_DIR
+(tour_worker.config). The fireplace pass (FIREPLACE_MODEL, default ade20k) runs a second OneFormer
+for fireplaces only - COCO has no fireplace class - and adds the lit fires found inside them.
 """
 from __future__ import annotations
 
@@ -37,7 +39,19 @@ def get_segmenter(settings: Settings):
     return _SEGMENTERS[key]
 
 
-def run_segment(request: dict, storage, workdir: str, segmenter=None, settings: Settings | None = None) -> dict:
+def get_fireplace_segmenter(settings: Settings):
+    """The fireplace pass's model (None when FIREPLACE_MODEL is off, or it is the primary model)."""
+    from tour_worker.vision.segment import Segmenter
+    if not settings.fireplace_model or settings.fireplace_model == settings.segment_model:
+        return None
+    key = ("fireplace", settings.fireplace_model, settings.fireplace_path())
+    if key not in _SEGMENTERS:
+        _SEGMENTERS[key] = Segmenter(settings.fireplace_path(), settings.fireplace_model)
+    return _SEGMENTERS[key]
+
+
+def run_segment(request: dict, storage, workdir: str, segmenter=None, settings: Settings | None = None,
+                fireplace_segmenter=None) -> dict:
     t0 = time.time()
     settings = settings or get_settings()
     images = request.get("images") or []
@@ -47,6 +61,8 @@ def run_segment(request: dict, storage, workdir: str, segmenter=None, settings: 
     if not prefix.endswith("/"):
         prefix += "/"
     seg = segmenter or get_segmenter(settings)
+    fp_seg = fireplace_segmenter if fireplace_segmenter is not None else (
+        None if segmenter is not None else get_fireplace_segmenter(settings))
     results, scenes, warnings = {}, {}, []
     for item in images:
         pid, uri = str(item.get("photo_id")), item.get("uri")
@@ -60,6 +76,11 @@ def run_segment(request: dict, storage, workdir: str, segmenter=None, settings: 
                 regions, scenes[pid] = seg.segment(img)
             else:
                 regions, scenes[pid] = seg(img), None
+            if fp_seg is not None:                       # lit fires, from the fireplace model
+                try:
+                    regions = [r for r in regions if r.get("class_name") != "fire"] + fp_seg.fires(img)
+                except Exception as e:  # the fireplace pass never fails the photo
+                    warnings.append(f"fireplace_pass_failed:{pid}:{type(e).__name__}")
         except Exception as e:  # one photo never fails the job
             results[pid] = None
             scenes[pid] = None
@@ -79,4 +100,6 @@ def run_segment(request: dict, storage, workdir: str, segmenter=None, settings: 
             out.append(r)
         results[pid] = out
     return {"status": "completed", "results": results, "scenes": scenes, "warnings": warnings,
-            "model": model_id(settings.segment_model), "seconds": round(time.time() - t0, 2)}
+            "model": model_id(settings.segment_model),
+            "fireplace_model": model_id(settings.fireplace_model) if fp_seg is not None else None,
+            "seconds": round(time.time() - t0, 2)}
