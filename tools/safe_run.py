@@ -22,7 +22,9 @@ import subprocess
 import sys
 import time
 
-LOG = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "out", "safe_run.log")
+# outside the repo (the worker folder holds code only): SAFE_RUN_LOG, else ~/.cache/tour-worker/
+LOG = os.environ.get("SAFE_RUN_LOG") or os.path.join(os.path.expanduser("~"), ".cache", "tour-worker",
+                                                     "safe_run.log")
 
 
 def pkg_temp_path() -> str | None:

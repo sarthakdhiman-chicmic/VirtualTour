@@ -92,3 +92,4 @@ explicit = true
 [tool.pytest.ini_options]
 pythonpath = ["."]
 testpaths = ["tests"]
+addopts = "-p no:cacheprovider"     # no .pytest_cache in the worker folder
