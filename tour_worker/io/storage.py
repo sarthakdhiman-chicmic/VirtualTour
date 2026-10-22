@@ -1,3 +1,4 @@
+import mimetypes
 import os
 import shutil
 import urllib.request
@@ -55,7 +56,10 @@ class S3Storage(Storage):
         if not uri.startswith("s3://"):
             raise ValueError("Not an S3 URI")
         parts = uri[5:].split("/", 1)
-        self._get_client().upload_file(path, parts[0], parts[1])
+        # S3 stores binary/octet-stream unless told otherwise; players and browsers want the real type
+        content_type = mimetypes.guess_type(parts[1])[0]
+        extra = {"ContentType": content_type} if content_type else None
+        self._get_client().upload_file(path, parts[0], parts[1], ExtraArgs=extra)
 
 class LocalMapStorage(Storage):
     """Dev stand-in for remote storage: every URI maps to <images_dir>/<basename>. A missing file

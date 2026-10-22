@@ -16,6 +16,13 @@
 - H.264 is encoded with ffmpeg / x264, which are system tools and not shipped in this package.
   Codec patents are a separate question from software licences.
 
+## Not supported: HEIC / HEIF photos (2026-10)
+The ready-made decoder, `pillow-heif`, ships binary wheels under GPLv2 because they bundle the x265
+encoder. Its own code is BSD-3, and the decoders are LGPLv3 (libheif, libde265). A decode-only
+build would avoid the GPL: pillow-heif built from source against system libheif + libde265, with no
+x265. That option was deferred, so HEIC photos are left out of tours for now. HEVC decoding also
+carries its own patent question, separate from the software licences.
+
 ## Removed (2026-10)
 The Remotion renderer (Remotion licence: paid "Automators" tier for automated rendering) and the
 Depth Anything V2 parallax experiment are no longer part of the worker. Both remain on the branch

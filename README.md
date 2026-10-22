@@ -172,6 +172,9 @@ Result (`TourPlanResult`):
 - A photo that cannot be fetched (`photo_fetch_failed:<photo_id>:<error>`) or decoded
   (`photo_unreadable:<photo_id>`) is left out with a warning; with none left the job fails with
   `image_fetch_failed`. The plan's own warnings are in `plan.warnings`.
+- Photos are decoded with OpenCV: JPEG, PNG, WebP, TIFF and BMP. **HEIC / HEIF is not supported**
+  and arrives as `photo_unreadable` (and `segment_failed:<photo_id>:ValueError` in `tour_segment`);
+  see LICENSES.md for why.
 - It needs no GPU: run it on the render image. Scoring takes about 0.1 s a photo.
 
 ## Layout

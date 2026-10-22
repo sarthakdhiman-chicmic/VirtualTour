@@ -78,3 +78,27 @@ def test_build_storage_follows_the_settings():
     assert local.local_for_remote and local.local.images_dir == "/tmp/x"
     assert build_storage(Settings(storage="local"), "tour_segment").local is None   # segment: always remote
     assert build_storage(Settings(), "tour_render").local is None
+
+
+class FakeS3Client:
+    def __init__(self):
+        self.uploads = []
+
+    def upload_file(self, path, bucket, key, ExtraArgs=None):
+        self.uploads.append((bucket, key, ExtraArgs))
+
+
+@pytest.mark.parametrize("key, content_type", [
+    ("tours/j/master.mp4", "video/mp4"),
+    ("masks/s01/r1.png", "image/png"),
+    ("tours/j/plan.json", "application/json"),
+    ("tours/j/blob", None),
+])
+def test_s3_put_sets_the_content_type_from_the_key(monkeypatch, key, content_type):
+    from tour_worker.io.storage import S3Storage
+    client = FakeS3Client()
+    s3 = S3Storage()
+    monkeypatch.setattr(s3, "_get_client", lambda: client)
+    s3.put("/tmp/x", f"s3://bucket/{key}")
+    extra = client.uploads[0][2]
+    assert (extra or {}).get("ContentType") == content_type
