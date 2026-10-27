@@ -50,8 +50,25 @@ def get_fireplace_segmenter(settings: Settings):
     return _SEGMENTERS[key]
 
 
+# Bump when the regions or scenes this job returns change for the same models (class maps,
+# merges such as the one sky region, mask clean-up): the backend caches results per photo
+# under segment_version and reuses them only while it matches.
+SEGMENT_VERSION = "1"
+
+
+def segment_version(settings: Settings) -> str:
+    """What a photo's segmentation depends on besides the photo: this job's logic, the models
+    (pinned revisions) and the fire settings."""
+    fp = settings.fireplace_model if settings.fireplace_model and settings.fireplace_model != settings.segment_model else None
+    return (f"seg{SEGMENT_VERSION}|{model_id(settings.segment_model)}|"
+            f"{model_id(fp) if fp else 'nofp'}|firesearch{int(bool(settings.coco_fire_search))}")
+
+
 def run_segment(request: dict, storage, workdir: str, segmenter=None, settings: Settings | None = None,
                 fireplace_segmenter=None) -> dict:
+    """An image whose `known_version` is this worker's segment_version is not segmented again:
+    it is listed in `cached` (the caller already holds its result). The models load only if an
+    image needs them."""
     t0 = time.time()
     settings = settings or get_settings()
     images = request.get("images") or []
@@ -60,11 +77,16 @@ def run_segment(request: dict, storage, workdir: str, segmenter=None, settings: 
         return failure("invalid_request", "images and output_prefix are required")
     if not prefix.endswith("/"):
         prefix += "/"
-    seg = segmenter or get_segmenter(settings)
-    fp_seg = fireplace_segmenter if fireplace_segmenter is not None else (
-        None if segmenter is not None else get_fireplace_segmenter(settings))
+    version = segment_version(settings)
+    cached = [str(i.get("photo_id")) for i in images if i.get("known_version") == version]
+    todo = [i for i in images if i.get("known_version") != version]
+    seg = fp_seg = None
+    if todo:
+        seg = segmenter or get_segmenter(settings)
+        fp_seg = fireplace_segmenter if fireplace_segmenter is not None else (
+            None if segmenter is not None else get_fireplace_segmenter(settings))
     results, scenes, warnings = {}, {}, []
-    for item in images:
+    for item in todo:
         pid, uri = str(item.get("photo_id")), item.get("uri")
         local = os.path.join(workdir, f"in_{len(results):03d}")
         try:
@@ -100,6 +122,7 @@ def run_segment(request: dict, storage, workdir: str, segmenter=None, settings: 
             out.append(r)
         results[pid] = out
     return {"status": "completed", "results": results, "scenes": scenes, "warnings": warnings,
+            "cached": cached, "segment_version": version,
             "model": model_id(settings.segment_model),
             "fireplace_model": model_id(settings.fireplace_model) if fp_seg is not None else None,
             "seconds": round(time.time() - t0, 2)}

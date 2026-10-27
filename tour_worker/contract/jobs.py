@@ -29,6 +29,7 @@ class SegmentImage(BaseModel):
     model_config = ConfigDict(extra="ignore")
     photo_id: Any
     uri: str
+    known_version: Optional[str] = None    # the caller's cached result is of this segment_version
 
 
 class TourSegmentRequest(_Request):
@@ -150,6 +151,8 @@ class TourSegmentResult(BaseModel):
     results: dict[str, Optional[list[SegmentRegion]]]   # photo_id -> regions (None: photo failed)
     scenes: dict[str, Optional[dict[str, Any]]]         # photo_id -> scene summary (None: failed)
     warnings: list[str]
+    cached: list[str] = []                              # photo_ids whose known_version is current
+    segment_version: Optional[str] = None               # what the results depend on (jobs.segment)
     model: str                                          # "<hf id>@<revision[:10]>"
     fireplace_model: Optional[str] = None               # the fireplace pass's model (None: off)
     seconds: float
