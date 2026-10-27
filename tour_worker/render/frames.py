@@ -175,6 +175,16 @@ class ShotWarp:
             self.frames = [((cx, cy, z * punch_scale(cam.punches, f / self.fps)), r)
                            for f, ((cx, cy, z), r) in enumerate(self.frames)]
         self.regions, region_warnings = load_regions(shot, images, sw, sh, self.src)
+        # the sky (sky_drift): a layer under everything - each frame's photo is the moving sky
+        # composited in first; a sky that cannot be prepared stays still (a warning, never a failure)
+        self.sky = None
+        for spec in [r for r in shot.motion_regions or [] if r.effect == "sky_drift"][:1]:
+            try:
+                from tour_worker.motion.sky import load_sky
+                self.sky = load_sky(shot, spec, images, self.src, n / self.fps)
+            except Exception as e:  # noqa: BLE001
+                reason = str(e) if isinstance(e, FileNotFoundError) else f"error_{type(e).__name__}"
+                region_warnings.append(f"motion_region_dropped:{shot.shot_id}:{spec.id}:{reason}")
         self.motion_px = {}
         keep = []
         for r in self.regions:
@@ -225,7 +235,8 @@ class ShotWarp:
         """The camera warp of the whole frame, then the window with moving regions redrawn
         through the displaced maps (warpPerspective and remap agree within 1 level)."""
         m = self.homography(f)
-        frame = cv2.warpPerspective(self.src, m, (self.ow, self.oh), flags=cv2.WARP_INVERSE_MAP | cv2.INTER_LINEAR,
+        src = self.sky.frame(f / self.fps) if self.sky is not None else self.src
+        frame = cv2.warpPerspective(src, m, (self.ow, self.oh), flags=cv2.WARP_INVERSE_MAP | cv2.INTER_LINEAR,
                                     borderMode=cv2.BORDER_REPLICATE)
         win = self.window(m) if self.regions else None
         if win is None:
@@ -234,7 +245,7 @@ class ShotWarp:
         map_x, map_y = homography_maps(m, (self.grid[0][r0:r1, c0:c1], self.grid[1][r0:r1, c0:c1]))
         gain = apply_regions(map_x, map_y, self.regions, f / self.fps, step=step, origin=(r0, c0),
                              frame_shape=(self.oh, self.ow))
-        patch = cv2.remap(self.src, map_x, map_y, cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
+        patch = cv2.remap(src, map_x, map_y, cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
         if gain is not None:            # calm_water light follows the wave slope
             patch = np.clip(patch.astype(np.float32) * gain[..., None], 0, 255).astype(np.uint8)
         frame[r0:r1, c0:c1] = patch

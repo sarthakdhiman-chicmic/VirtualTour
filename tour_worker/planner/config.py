@@ -97,6 +97,8 @@ class PlannerConfig(BaseModel):
         # ADE20K OneFormer (2026-10-16): "plant" covers potted plants AND outdoor shrubs (still:
         # perceptual_still_outdoors); "fire" = a lit fire found inside a fireplace
         "plant": "foliage_sway", "fire": "fire_flicker",
+        # the sky (2026-10-27): clouds drift (2% of the photo width per second) and billow
+        "sky": "sky_drift",
     }
     # effects never planned in outdoor shots (shrubs and hedges stay still - user decision)
     perceptual_still_outdoors: tuple[str, ...] = ("foliage_sway",)
@@ -112,8 +114,9 @@ class PlannerConfig(BaseModel):
     # still gets the effect (review 2026-10-19: "didn't get applied to all the objects")
     # ... and flames are small (an insert's or a linear fire's flame zone is 0.05-0.6% of the
     # photo; the worker detects them only when lit, so size is no evidence against them)
-    perceptual_min_area_by_effect: dict[str, float] = {"calm_water": 0.002, "fire_flicker": 0.0002}
-    perceptual_min_visible_by_effect: dict[str, float] = {"calm_water": 0.25}
+    perceptual_min_area_by_effect: dict[str, float] = {"calm_water": 0.002, "fire_flicker": 0.0002,
+                                                       "sky_drift": 0.03}
+    perceptual_min_visible_by_effect: dict[str, float] = {"calm_water": 0.25, "sky_drift": 0.2}
     # every water body and tree in a photo (review 2026-10-19: lake pieces were left out)
     perceptual_max_regions: int = 6
     # peak displacement = clamp(frac * bbox width, min, max) source px; sway frequency in Hz.
@@ -131,9 +134,11 @@ class PlannerConfig(BaseModel):
         # (0.04 with a light-led flicker was tried the same day: "a downgrade" - back to 0.12;
         # the worker adds the variety and holds the structure near the fire still)
         "fire_flicker": (0.12, 1.0, 20.0),
+        # the sky's billow (its drift is the worker's 2% / s): ~4 px at a 1536 px photo
+        "sky_drift": (0.0028, 2.0, 10.0),
     }
     perceptual_amplitude_of_height: tuple[str, ...] = ("fire_flicker",)
-    perceptual_amplitude_of_photo: tuple[str, ...] = ("calm_water", "canopy_flutter")
+    perceptual_amplitude_of_photo: tuple[str, ...] = ("calm_water", "canopy_flutter", "sky_drift")
     # Curtains and plants: strength set ON SCREEN (output px at the camera's widest view of the
     # shot), so a curtain moves visibly whatever the photo size or zoom. Review 2026-10-16: on
     # Downing (1920 px photos) the bbox rule gave 0.4-1.5 px on screen - "barely noticeable";
@@ -174,11 +179,11 @@ class PlannerConfig(BaseModel):
     perceptual_freq_hz: dict[str, float] = {
         # plants at the curtains' rate: opposite phases only stay opposite at the same frequency
         "fabric_sway": 0.25, "foliage_sway": 0.25, "water_ripple": 0.2,
-        "calm_water": 0.2, "canopy_flutter": 1.1, "fire_flicker": 1.0,
+        "calm_water": 0.2, "canopy_flutter": 1.1, "fire_flicker": 1.0, "sky_drift": 0.12,
     }
     perceptual_anchor: dict[str, str] = {
         "fabric_sway": "top", "foliage_sway": "bottom", "water_ripple": "none",
-        "calm_water": "none", "canopy_flutter": "none", "fire_flicker": "bottom",
+        "calm_water": "none", "canopy_flutter": "none", "fire_flicker": "bottom", "sky_drift": "none",
     }
 
     # Beat sync (plan 1.5, planner/music_sync.py; rules from find_transitions.py `sync`)

@@ -31,7 +31,8 @@ MODELS = {
         "sha256": "36d01ceb971e9b3824bf35de022cd3148aad0c928f6365302db492a4cff6bf2b",
         "dir": "oneformer_coco_swin_large",
         "class_map": {"curtain": "curtain", "window-blind": "blinds", "potted plant": "potted_plant",
-                      "tree-merged": "tree", "sea": "water", "river": "water", "water-other": "water"},
+                      "tree-merged": "tree", "sea": "water", "river": "water", "water-other": "water",
+                      "sky-other-merged": "sky"},
     },
     "ade20k": {
         "id": "shi-labs/oneformer_ade20k_swin_large",
@@ -40,7 +41,8 @@ MODELS = {
         "dir": "oneformer_ade20k_swin_large",
         "class_map": {"curtain": "curtain", "blind, screen": "blinds", "plant": "potted_plant",
                       "tree": "tree", "palm, palm tree": "tree", "water": "water", "sea": "water",
-                      "river": "water", "lake": "water", "pool": "water", "fireplace": "fireplace"},
+                      "river": "water", "lake": "water", "pool": "water", "fireplace": "fireplace",
+                      "sky": "sky"},
     },
 }
 # COCO is primary (review 2026-10-19: its water masks are the surface only, submerged steps
@@ -167,6 +169,7 @@ def segments_to_regions(seg: np.ndarray, segments_info: list[dict], id2label: di
     sw, sh = space
     min_px = MIN_PART_AREA * sw * sh
     parts = []
+    sky = None                       # the sky is ONE region (all its pieces: a balcony's openings)
     for s in segments_info:
         label = id2label.get(s["label_id"], id2label.get(str(s["label_id"]), ""))
         cls = (class_map or MODELS[DEFAULT_MODEL]["class_map"]).get(label)
@@ -175,6 +178,9 @@ def segments_to_regions(seg: np.ndarray, segments_info: list[dict], id2label: di
             continue
         m = (seg == s["id"]).astype(np.uint8)
         m = cv2.morphologyEx(m, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
+        if cls == "sky":
+            sky = (m, score) if sky is None else (np.maximum(sky[0], m), max(sky[1], score))
+            continue
         n, lab, stats, _ = cv2.connectedComponentsWithStats(m, connectivity=8)
         for i in range(1, n):
             x, y, bw, bh, area = stats[i]
@@ -182,12 +188,17 @@ def segments_to_regions(seg: np.ndarray, segments_info: list[dict], id2label: di
                 continue
             parts.append((int(area), cls, score, [int(x), int(y), int(x + bw), int(y + bh)],
                           ((lab == i) * 255).astype(np.uint8)))
+    if sky is not None and int(sky[0].sum()) >= SKY_MIN_AREA * sw * sh:
+        ys, xs = np.nonzero(sky[0])
+        parts.append((int(sky[0].sum()), "sky", sky[1],
+                      [int(xs.min()), int(ys.min()), int(xs.max()) + 1, int(ys.max()) + 1], sky[0] * 255))
     parts.sort(key=lambda p: (-p[0], p[1], p[3]))
     return [{"object_id": f"seg_{i:03d}", "class_name": cls, "confidence": round(score, 4), "bbox": bbox,
              "mask": mask, "space": [sw, sh]} for i, (_, cls, score, bbox, mask) in enumerate(parts)]
 
 
 SCENE_MIN_AREA = 0.002     # classes covering less than 0.2% of the photo are left out
+SKY_MIN_AREA = 0.01        # a sky under 1% of the photo is no region (nothing to see drift)
 
 
 def scene_summary(seg: np.ndarray, segments_info: list[dict], id2label: dict,

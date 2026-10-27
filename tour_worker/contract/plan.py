@@ -85,7 +85,8 @@ class Transition(BaseModel):
     duration_s: float
     model_config = ConfigDict(extra='ignore')
 
-MOTION_EFFECTS = ("fabric_sway", "foliage_sway", "water_ripple", "calm_water", "canopy_flutter", "fire_flicker")
+MOTION_EFFECTS = ("fabric_sway", "foliage_sway", "water_ripple", "calm_water", "canopy_flutter", "fire_flicker",
+                  "sky_drift")
 MAX_MOTION_AMPLITUDE_PX = 48.0   # validation bound; the backend sets strength on screen (up to 48 source px on large photos)
 
 class MotionRegion(BaseModel):

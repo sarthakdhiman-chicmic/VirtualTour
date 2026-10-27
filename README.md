@@ -75,7 +75,12 @@ Request (full example: `examples/tour_render.json`):
   - 1.1: adds fades.
   - 1.2: adds easing.
   - 1.3: adds `keyframe_path` and `compound` cameras, the `rotate` projection and roll.
-  - 1.4: adds `motion_regions`, with the effects `fabric_sway`, `foliage_sway`, `canopy_flutter`, `calm_water`, `water_ripple` and `fire_flicker`.
+  - 1.4: adds `motion_regions`, with the effects `fabric_sway`, `foliage_sway`, `canopy_flutter`, `calm_water`, `water_ripple`, `fire_flicker` and `sky_drift`.
+    - `sky_drift` (2026-10-27): the clouds drift with the shot's wind (2% of the photo width per second at the top) and slowly billow (`amplitude_px` / `freq_hz`).
+    - The sky is a layer under everything. It is refined to the pixel, so roofs and leaves stay put, and the sky hidden behind them is filled with nearby cloud texture.
+    - OneFormer's sky mask takes in thin things whole: twigs, loose leaves, wires, a weathervane, part of a gutter. Anything darker than the clear blue sky nearby that hangs off the foreground is kept out, so it stays still instead of drifting with the clouds.
+    - At their soft edges only the sky's share of each pixel changes, so no outline of the old sky shows when a cloud passes behind them.
+    - A sky whose mask cannot be read stays still, with a warning.
   - 1.5: adds the `music` block, `time_warp` and `punches`.
 
   `provenance.plan_hash` must be the sha256 of the plan's canonical JSON with the hash itself

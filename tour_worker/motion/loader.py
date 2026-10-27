@@ -18,6 +18,8 @@ from tour_worker.motion.region import Region
 from tour_worker.motion.water import water_guard
 from tour_worker.motion.wind import shot_wind
 
+LAYER_EFFECTS = ("sky_drift",)
+
 
 def load_regions(shot, images_dir: str, src_w: int, src_h: int,
                  src: np.ndarray | None = None) -> tuple[list[Region], list[str]]:
@@ -27,6 +29,8 @@ def load_regions(shot, images_dir: str, src_w: int, src_h: int,
     out, warnings = [], []
     wind = shot_wind(shot, src_w)                   # one breeze for every region of the shot
     for spec in shot.motion_regions or []:
+        if spec.effect in LAYER_EFFECTS:           # the sky: a layer under everything (render/frames.py)
+            continue
         path = os.path.join(images_dir, mask_relpath(shot.shot_id, spec.id))
         x1, y1, x2, y2 = spec.bbox
         if spec.effect == "fire_flicker" and os.path.exists(path):
