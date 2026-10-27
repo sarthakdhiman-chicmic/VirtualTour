@@ -378,6 +378,7 @@ def build_shot_plan(
         music = synced.music
         if synced.warning:
             warnings.append(synced.warning)
+        warnings.extend(synced.extra_warnings or [])
 
     chosen_plan_version = "1.2" if cfg.use_motion_presets else "1.1"
 

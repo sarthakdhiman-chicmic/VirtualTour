@@ -1,6 +1,15 @@
 from enum import Enum
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_serializer
+
+
+def _omit_none(d: dict, keys: tuple[str, ...]) -> dict:
+    """Fields added after plan 1.5 are left out of the JSON when unset, so a plan without them (and
+    its plan_hash) is exactly what it was before they existed."""
+    for k in keys:
+        if d.get(k) is None:
+            d.pop(k, None)
+    return d
 
 
 class CameraEasing(str, Enum):
@@ -145,13 +154,35 @@ class MusicTrack(BaseModel):
     cut_lead_frames: int = 0         # cuts sit this many frames before their beat
     hooks_required: bool = False     # every hook moment was given a cut (else only preferred)
     hooks: list["MusicHook"] | None = None   # the track's hooks inside the tour and what got them
+    sync_version: int | None = None  # 2: hero sync (planner/music_sync_v2.py); None: v3
+    # sync v2: the track pieces the tour plays, back to back, joined with a crossfade_s crossfade
+    # centred on each join (music edits: bars trimmed out); edits says which and why
+    segments: list["MusicSegment"] | None = None
+    crossfade_s: float | None = None
+    edits: list[dict] | None = None
+
+    @model_serializer(mode="wrap")
+    def _omit_unset_additions(self, handler):
+        return _omit_none(handler(self), ("sync_version", "segments", "crossfade_s", "edits"))
+
+
+class MusicSegment(BaseModel):
+    from_s: float                    # track time
+    to_s: float
 
 
 class MusicHook(BaseModel):
     t: float                         # s, tour time of the hook (before the cut lead)
-    kind: str                        # "cut" | "accent" (zoom punch, no cut) | "covered" (its
+    kind: str                        # "cut" | "accent" (zoom punch, no cut) | "uncut" (no cut, punches
+    #                                  off) | "covered" (its
     #                                  moment's cut / accent is within merge_s) | "missed"
     reason: str | None = None        # accent / missed: "merged" | "too_close_to_start" | "no_fit"
+    tier: int | None = None          # sync v2: the hero's tier (1 = drop, 2 = entry / whoosh / hit)
+    hero: str | None = None          # sync v2: what the hero is (drop, dropout, whoosh, ...)
+
+    @model_serializer(mode="wrap")
+    def _omit_unset_additions(self, handler):
+        return _omit_none(handler(self), ("tier", "hero"))
 
 
 class PlanProvenance(BaseModel):

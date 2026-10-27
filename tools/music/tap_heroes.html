@@ -1,0 +1,272 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tap hero moments</title>
+<!--
+  Mark a track's hero moments by ear (beat sync v2 calibration). Open this file in a browser from
+  disk; nothing is uploaded. Load a track, play it, press Space on every big moment, then save
+  <track>.heroes.json next to the track. tools/music/score_heroes.py compares the detector with it.
+-->
+<style>
+  :root {
+    --bg: #f7f7f5; --panel: #ffffff; --ink: #1c1c1a; --muted: #6b6b66; --line: #dcdcd6;
+    --wave: #9aa3ad; --played: #4a5a6a; --head: #d0402b; --t1: #d0402b; --t2: #2b6fd0; --sel: #f2b705;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #151514; --panel: #1f1f1d; --ink: #ecece8; --muted: #9a9a94; --line: #34342f;
+      --wave: #5d6772; --played: #a9b6c3; --head: #ff6a50; --t1: #ff6a50; --t2: #5e9bff; --sel: #ffd23f;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.45 system-ui, -apple-system, Segoe UI, sans-serif; }
+  main { max-width: 1100px; margin: 0 auto; padding: 20px 16px 40px; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  p.lead { margin: 0 0 16px; color: var(--muted); }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px; margin-bottom: 14px; }
+  .row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+  button, label.file { font: inherit; border: 1px solid var(--line); background: var(--panel); color: var(--ink);
+    border-radius: 8px; padding: 7px 12px; cursor: pointer; }
+  button:disabled { opacity: .45; cursor: default; }
+  button.primary { background: var(--ink); color: var(--panel); border-color: var(--ink); }
+  input[type=file] { display: none; }
+  .meta { color: var(--muted); font-variant-numeric: tabular-nums; }
+  canvas { width: 100%; height: 160px; display: block; border-radius: 8px; background: var(--bg); cursor: crosshair; touch-action: none; }
+  #zoomc { height: 110px; margin-top: 8px; }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; margin-right: 14px; color: var(--muted); }
+  .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+  table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+  th, td { text-align: left; padding: 5px 8px; border-bottom: 1px solid var(--line); }
+  tr.sel td { background: color-mix(in srgb, var(--sel) 25%, transparent); }
+  #list { max-height: 300px; overflow: auto; }
+  kbd { font: 12px ui-monospace, monospace; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; padding: 0 5px; }
+  .keys { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 4px 16px; color: var(--muted); font-size: 14px; }
+  .flash { animation: flash .25s ease-out; }
+  @keyframes flash { from { box-shadow: 0 0 0 4px var(--sel); } to { box-shadow: 0 0 0 0 transparent; } }
+</style>
+</head>
+<body>
+<main>
+  <h1>Tap hero moments</h1>
+  <p class="lead">Press <kbd>Space</kbd> on every moment a great edit would cut on. Tier 1 is the biggest: a drop, a new section. Tier 2 is notable: a whoosh, a fill, a big hit.</p>
+
+  <div class="panel row">
+    <label class="file">Load track…<input id="audioFile" type="file" accept="audio/*"></label>
+    <label class="file">Load marks…<input id="marksFile" type="file" accept="application/json,.json"></label>
+    <button id="play" class="primary" disabled>Play</button>
+    <label class="meta">Speed
+      <select id="rate"><option>0.5</option><option>0.75</option><option selected>1</option></select></label>
+    <label class="meta">New taps are tier
+      <select id="tier"><option value="1">1</option><option value="2" selected>2</option></select></label>
+    <button id="save" disabled>Save marks</button>
+    <span id="status" class="meta"></span>
+  </div>
+
+  <div class="panel">
+    <div class="row meta" style="justify-content: space-between; margin-bottom: 8px;">
+      <span id="name">No track loaded</span><span id="clock">0:00.000 / 0:00.000</span>
+    </div>
+    <canvas id="wave"></canvas>
+    <canvas id="zoomc"></canvas>
+    <div class="legend" style="margin-top: 8px;">
+      <span><i class="dot" style="background: var(--t1)"></i>tier 1</span>
+      <span><i class="dot" style="background: var(--t2)"></i>tier 2</span>
+      <span><i class="dot" style="background: var(--sel)"></i>selected</span>
+      <span>Top: whole track (click to seek). Bottom: 6 s around the playhead (click a mark to select it).</span>
+    </div>
+  </div>
+
+  <div class="panel keys">
+    <div><kbd>Space</kbd> mark here (while playing)</div>
+    <div><kbd>P</kbd> / <kbd>Enter</kbd> play / pause</div>
+    <div><kbd>1</kbd> <kbd>2</kbd> set the selected mark's tier</div>
+    <div><kbd>←</kbd> <kbd>→</kbd> nudge selected 10 ms (<kbd>Shift</kbd>: 50 ms)</div>
+    <div><kbd>[</kbd> <kbd>]</kbd> select previous / next mark</div>
+    <div><kbd>Delete</kbd> / <kbd>Backspace</kbd> remove selected</div>
+    <div><kbd>J</kbd> / <kbd>L</kbd> jump back / ahead 3 s</div>
+    <div><kbd>K</kbd> replay from 2 s before the selected mark</div>
+  </div>
+
+  <div class="panel">
+    <div class="row" style="justify-content: space-between;">
+      <strong id="count">0 marks</strong>
+      <span class="meta">Your taps land a little late (reaction time); the score allows ±1 beat and reports the lag.</span>
+    </div>
+    <div id="list"><table><thead><tr><th>#</th><th>time</th><th>tier</th></tr></thead><tbody id="rows"></tbody></table></div>
+  </div>
+</main>
+<script>
+(() => {
+  "use strict";
+  const $ = (id) => document.getElementById(id);
+  const wave = $("wave"), zoomc = $("zoomc");
+  let ctx = null, buffer = null, source = null, startedAt = 0, offset = 0, playing = false;
+  let peaks = null, trackName = "", marks = [], sel = -1, dirty = false;
+
+  const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+  const fmt = (t) => { const m = Math.floor(t / 60), s = t - 60 * m; return `${m}:${s.toFixed(3).padStart(6, "0")}`; };
+  const rate = () => parseFloat($("rate").value);
+  const now = () => playing ? Math.min(buffer.duration, offset + (ctx.currentTime - startedAt) * rate()) : offset;
+  const status = (msg) => { $("status").textContent = msg; };
+
+  function sizeCanvas(c) {
+    const r = c.getBoundingClientRect(), d = window.devicePixelRatio || 1;
+    c.width = Math.max(1, Math.round(r.width * d)); c.height = Math.max(1, Math.round(r.height * d));
+  }
+
+  function computePeaks() {
+    const ch = buffer.getChannelData(0), n = 4000, step = Math.max(1, Math.floor(ch.length / n));
+    peaks = new Float32Array(n);
+    for (let i = 0; i < n; i++) {
+      let m = 0; const a = i * step, b = Math.min(ch.length, a + step);
+      for (let j = a; j < b; j++) { const v = Math.abs(ch[j]); if (v > m) m = v; }
+      peaks[i] = m;
+    }
+  }
+
+  function drawWave(c, t0, t1, withMarks) {
+    const g = c.getContext("2d"), W = c.width, H = c.height, d = window.devicePixelRatio || 1;
+    g.clearRect(0, 0, W, H);
+    if (!buffer) return;
+    const dur = buffer.duration, pos = now();
+    for (let x = 0; x < W; x++) {
+      const t = t0 + (x / W) * (t1 - t0);
+      if (t < 0 || t > dur) continue;
+      const p = peaks[Math.min(peaks.length - 1, Math.floor((t / dur) * peaks.length))];
+      g.fillStyle = t <= pos ? css("--played") : css("--wave");
+      const h = p * (H * 0.9);
+      g.fillRect(x, (H - h) / 2, 1, Math.max(1, h));
+    }
+    if (withMarks) {
+      marks.forEach((m, i) => {
+        if (m.t < t0 || m.t > t1) return;
+        const x = ((m.t - t0) / (t1 - t0)) * W;
+        g.fillStyle = i === sel ? css("--sel") : (m.tier === 1 ? css("--t1") : css("--t2"));
+        g.fillRect(x - d, 0, 2 * d, H);
+        g.beginPath(); g.arc(x, 7 * d, (m.tier === 1 ? 6 : 4) * d, 0, 2 * Math.PI); g.fill();
+      });
+    }
+    const px = ((pos - t0) / (t1 - t0)) * W;
+    g.fillStyle = css("--head"); g.fillRect(px - d / 2, 0, d, H);
+  }
+
+  function draw() {
+    if (buffer) {
+      drawWave(wave, 0, buffer.duration, true);
+      const p = now(); drawWave(zoomc, p - 3, p + 3, true);
+      $("clock").textContent = `${fmt(now())} / ${fmt(buffer.duration)}`;
+    }
+    requestAnimationFrame(draw);
+  }
+
+  function renderList() {
+    marks.sort((a, b) => a.t - b.t);
+    $("rows").innerHTML = marks.map((m, i) =>
+      `<tr data-i="${i}" class="${i === sel ? "sel" : ""}"><td>${i + 1}</td><td>${fmt(m.t)}</td><td>${m.tier}</td></tr>`).join("");
+    $("count").textContent = `${marks.length} mark${marks.length === 1 ? "" : "s"} (tier 1: ${marks.filter(m => m.tier === 1).length})`;
+    $("save").disabled = !buffer;
+  }
+
+  function select(i) { sel = i; renderList(); const r = $("rows").querySelector(`tr[data-i="${i}"]`); if (r) r.scrollIntoView({ block: "nearest" }); }
+
+  function stop() { if (source) { source.onended = null; try { source.stop(); } catch (e) {} source = null; } }
+  function play(from) {
+    if (!buffer) return;
+    stop();
+    offset = Math.max(0, Math.min(buffer.duration, from));
+    source = ctx.createBufferSource(); source.buffer = buffer; source.playbackRate.value = rate();
+    source.connect(ctx.destination); source.start(0, offset); startedAt = ctx.currentTime; playing = true;
+    source.onended = () => { if (playing) { offset = buffer.duration; playing = false; $("play").textContent = "Play"; } };
+    $("play").textContent = "Pause";
+  }
+  function pause() { if (!playing) return; offset = now(); stop(); playing = false; $("play").textContent = "Play"; }
+  function toggle() { playing ? pause() : play(offset >= buffer.duration ? 0 : offset); }
+  function seek(t) { playing ? play(t) : (offset = Math.max(0, Math.min(buffer.duration, t))); }
+
+  function addMark() {
+    if (!buffer) return;
+    const m = { t: Math.round(now() * 1000) / 1000, tier: parseInt($("tier").value, 10) };
+    marks.push(m); dirty = true; renderList(); select(marks.indexOf(m));
+    zoomc.classList.remove("flash"); void zoomc.offsetWidth; zoomc.classList.add("flash");
+  }
+
+  $("audioFile").addEventListener("change", async (e) => {
+    const f = e.target.files[0]; if (!f) return;
+    if (dirty && !confirm("Discard unsaved marks?")) return;
+    ctx = ctx || new AudioContext();
+    status("decoding…");
+    try { buffer = await ctx.decodeAudioData(await f.arrayBuffer()); }
+    catch (err) { status("could not decode this file"); return; }
+    trackName = f.name.replace(/\.[^.]+$/, ""); marks = []; sel = -1; offset = 0; dirty = false;
+    computePeaks(); $("name").textContent = `${f.name} · ${buffer.duration.toFixed(1)} s`;
+    $("play").disabled = false; status("ready"); renderList();
+  });
+
+  $("marksFile").addEventListener("change", async (e) => {
+    const f = e.target.files[0]; if (!f) return;
+    try {
+      const data = JSON.parse(await f.text());
+      marks = (data.marks || data).map(m => ({ t: +m.t, tier: m.tier === 1 ? 1 : 2 })).filter(m => isFinite(m.t));
+      if (data.track && !trackName) trackName = data.track;
+      sel = -1; dirty = false; renderList(); status(`loaded ${marks.length} marks`);
+    } catch (err) { status("not a marks file"); }
+  });
+
+  $("save").addEventListener("click", () => {
+    marks.sort((a, b) => a.t - b.t);
+    const out = { track: trackName, duration_s: buffer ? +buffer.duration.toFixed(3) : null,
+                  tapped_at: new Date().toISOString(), tool: "tap_heroes v1", marks };
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([JSON.stringify(out, null, 1)], { type: "application/json" }));
+    a.download = `${trackName || "track"}.heroes.json`; a.click(); URL.revokeObjectURL(a.href);
+    dirty = false; status("saved " + a.download);
+  });
+
+  $("play").addEventListener("click", toggle);
+  $("rate").addEventListener("change", () => { if (playing) play(now()); });
+  $("rows").addEventListener("click", (e) => {
+    const tr = e.target.closest("tr[data-i]"); if (!tr) return;
+    const i = +tr.dataset.i; select(i); seek(marks[i].t);
+  });
+
+  function canvasTime(c, ev, t0, t1) { const r = c.getBoundingClientRect(); return t0 + ((ev.clientX - r.left) / r.width) * (t1 - t0); }
+  wave.addEventListener("click", (ev) => { if (buffer) seek(canvasTime(wave, ev, 0, buffer.duration)); });
+  zoomc.addEventListener("click", (ev) => {
+    if (!buffer) return;
+    const p = now(), t = canvasTime(zoomc, ev, p - 3, p + 3);
+    let best = -1, bd = 0.08;
+    marks.forEach((m, i) => { const d = Math.abs(m.t - t); if (d < bd) { bd = d; best = i; } });
+    best >= 0 ? select(best) : seek(t);
+  });
+
+  document.addEventListener("keydown", (e) => {
+    if (e.target.tagName === "SELECT" || e.target.tagName === "INPUT" || !buffer) return;
+    const k = e.key;
+    if (k === " ") { e.preventDefault(); if (playing) addMark(); else toggle(); return; }
+    if (k === "p" || k === "P" || k === "Enter") { e.preventDefault(); toggle(); return; }
+    if (k === "j" || k === "J") { seek(now() - 3); return; }
+    if (k === "l" || k === "L") { seek(now() + 3); return; }
+    if (k === "[") { if (marks.length) select(Math.max(0, sel - 1)); return; }
+    if (k === "]") { if (marks.length) select(Math.min(marks.length - 1, sel + 1)); return; }
+    if (sel < 0 || sel >= marks.length) return;
+    if (k === "1" || k === "2") { marks[sel].tier = +k; dirty = true; renderList(); return; }
+    if (k === "ArrowLeft" || k === "ArrowRight") {
+      e.preventDefault();
+      const step = (e.shiftKey ? 0.05 : 0.01) * (k === "ArrowLeft" ? -1 : 1), m = marks[sel];
+      m.t = Math.max(0, Math.round((m.t + step) * 1000) / 1000); dirty = true; renderList(); select(marks.indexOf(m));
+      if (!playing) offset = m.t;
+      return;
+    }
+    if (k === "Delete" || k === "Backspace") { e.preventDefault(); marks.splice(sel, 1); sel = Math.min(sel, marks.length - 1); dirty = true; renderList(); return; }
+    if (k === "k" || k === "K") { play(marks[sel].t - 2); }
+  });
+
+  window.addEventListener("beforeunload", (e) => { if (dirty) { e.preventDefault(); e.returnValue = ""; } });
+  const resize = () => { sizeCanvas(wave); sizeCanvas(zoomc); };
+  window.addEventListener("resize", resize); resize(); renderList(); requestAnimationFrame(draw);
+})();
+</script>
+</body>
+</html>

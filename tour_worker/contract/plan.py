@@ -124,12 +124,25 @@ class Provenance(BaseModel):
     plan_hash: str
     model_config = ConfigDict(extra='ignore')
 
+class MusicSegment(BaseModel):
+    """A piece of the track (s, track time); the tour plays the segments back to back."""
+    from_s: float
+    to_s: float
+    model_config = ConfigDict(extra='ignore')
+
 class Music(BaseModel):
     """Plan 1.5: the tour's music (tour_worker/planner/music_sync.py). The track is queued `loops`
     times, each copy cut at loop_s (the bar where its beat stops), trimmed to end_s, faded out."""
     track_id: str
     uri: str
     sha256: Optional[str] = None
+    start_s: float = 0.0                   # where in the track the tour's music starts (sync v2)
+    # sync v2 music edits: the track pieces played back to back (bar-aligned, joined with a
+    # crossfade_s equal-power crossfade centred on each join); when set, start_s / loops /
+    # loop_s only describe it - the renderer plays the segments
+    segments: Optional[List[MusicSegment]] = None
+    crossfade_s: float = 0.03
+    edits: Optional[List[dict]] = None     # which bars came out and why (information only)
     end_s: float
     loops: int = 1
     loop_s: Optional[float] = None
@@ -280,6 +293,18 @@ def check_bounds(plan: Plan):
             if left < -eps or right > 1+eps or top < -eps or bottom > 1+eps:
                 raise ValueError(f"Camera window out of bounds in shot {shot.shot_id}")
 
+def check_music_segments(plan: Plan):
+    m = plan.music
+    if m is None or not m.segments:
+        return
+    total = 0.0
+    for k, s in enumerate(m.segments):
+        if not (0 <= s.from_s < s.to_s) or (k > 0 and s.from_s < m.crossfade_s / 2):
+            raise ValueError("invalid_plan: music segment out of range")
+        total += s.to_s - s.from_s
+    if not 0 <= m.crossfade_s <= 0.2 or total < m.end_s - 0.05:
+        raise ValueError("invalid_plan: music segments shorter than the tour, or crossfade out of range")
+
 def check_easing(plan: Plan):
     valid_easings = {"linear", "ease_in", "ease_out", "ease_in_out"}
     for shot in plan.shots:
@@ -341,6 +366,7 @@ def parse_plan(data: dict) -> Plan:
     check_punches(plan)
     check_path_bounds(plan)
     check_motion_regions(plan)
+    check_music_segments(plan)
     return plan
 
 

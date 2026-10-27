@@ -30,11 +30,12 @@ from dataclasses import dataclass
 import numpy as np
 
 from .config import PlannerConfig
-from .schemas import MusicHook, MusicTrack, Punch
+from .schemas import MusicHook, MusicSegment, MusicTrack, Punch
 
 # v2 (worker modules/music/analysis.py) = v1 + whoosh candidates + rhythm_end; v3 = v2 + per
 # candidate "hit" (drum hit strength, 1.0 = a typical beat of the track)
-SUPPORTED_ANALYSIS_VERSIONS = ("1", "2", "3")
+# v4 = v3 + the music's structure (heroes, phrases, sections) for sync v2 (music_sync_v2.py)
+SUPPORTED_ANALYSIS_VERSIONS = ("1", "2", "3", "4")
 
 
 @dataclass
@@ -45,7 +46,9 @@ class SyncResult:
     hooks_hit: int = 0              # hooks (drops, whooshes, entries, stops) with a cut on them
     hooks_reachable: int = 0        # hooks inside the tour
     hook_cuts: list[int] | None = None          # boundaries k (end of shot k) that land on a hook
-    accents: list[tuple[int, float]] | None = None  # (shot k, s into the shot): hooks with no cut
+    # (shot k, s into the shot[, punch amount]): hooks with no cut
+    accents: list[tuple] | None = None
+    extra_warnings: list[str] | None = None     # e.g. music_sync_v2_fallback:<reason>
 
 
 def snap_durations(
@@ -255,7 +258,53 @@ def sync_to_music(
     targets: list[float], track: dict, cfg: PlannerConfig, roles: list[str] | None = None
 ) -> SyncResult:
     """track: {track_id, s3_uri, sha256, analysis} from the music library. roles: per shot
-    ("hero" / "detail"), for the length bounds.
+    ("hero" / "detail"), for the length bounds. Sync v2 (hero moments, music_sync_v2.py) when the
+    analysis has v4 heroes; v3 (below) otherwise, and whenever v2 finds no solution or fails."""
+    an = track["analysis"]
+    if cfg.music_sync_version >= 2 and an.get("heroes") is not None and an.get("has_beat"):
+        try:
+            res = _sync_v2(targets, track, cfg, roles)
+            if res is not None:
+                return res
+            why = "no_solution"
+        except Exception as e:  # noqa: BLE001 - v3 still syncs the tour
+            why = f"error_{type(e).__name__}"
+        res = _sync_v3(targets, track, cfg, roles)
+        res.extra_warnings = (res.extra_warnings or []) + [f"music_sync_v2_fallback:{why}"]
+        return res
+    return _sync_v3(targets, track, cfg, roles)
+
+
+def _sync_v2(targets, track: dict, cfg: PlannerConfig, roles) -> SyncResult | None:
+    from .music_sync_v2 import plan_v2, punches_for
+
+    an = track["analysis"]
+    plan = plan_v2(targets, an, cfg, roles)
+    if plan is None:
+        return None
+    lead = cfg.music_cut_lead_frames
+    durations = frame_align([plan.times[j] for j in plan.path], cfg.fps, lead)
+    rows, hook_cuts, accents = punches_for(plan, durations, cfg, float(an.get("beat_period_s") or 0.5), lead)
+    missed = sum(1 for r in rows if r.kind == "missed" and r.tier == 1)
+    music = MusicTrack(
+        track_id=str(track["track_id"]), uri=track["s3_uri"], sha256=track["sha256"],
+        analysis_version=str(an.get("analysis_version")), tempo_bpm=float(an.get("tempo_bpm") or 0.0),
+        start_s=round(plan.start_s, 4), end_s=round(sum(durations), 2), track_duration_s=float(an["duration"]),
+        loops=len(plan.segments), loop_s=plan.loop, fade_out_s=cfg.music_fade_out_s, synced=True,
+        cuts_on_bar=sum(bool(plan.bars[j]) for j in plan.path), cut_lead_frames=lead,
+        hooks_required=plan.required_ok, hooks=rows or None, sync_version=2,
+        segments=[MusicSegment(from_s=round(a, 4), to_s=round(b, 4)) for a, b in plan.segments],
+        crossfade_s=cfg.music_v2_crossfade_s, edits=plan.edits or None,
+    )
+    return SyncResult(durations, music, f"music_heroes_missed:{missed}" if missed else None,
+                      hooks_hit=sum(r.kind == "cut" for r in rows), hooks_reachable=len(rows),
+                      hook_cuts=hook_cuts, accents=accents)
+
+
+def _sync_v3(
+    targets: list[float], track: dict, cfg: PlannerConfig, roles: list[str] | None = None
+) -> SyncResult:
+    """Sync v3: cuts on the best-valued beats, hooks (whooshes, change >= 0.6) first.
 
     Hooks first (user 2026-10-19, after "synced to some random beat"): every hook moment (hooks
     closer than music_hook_merge_s are one moment) MUST get a cut, within the role bounds, then
@@ -341,7 +390,9 @@ def sync_to_music(
         last_acc = max((float(starts[a]) + b for a, b in accents), default=-1e9)
         near_cut = float(np.abs(cuts - t).min()) if len(cuts) else 1e9
         spaced = min(near_cut, t - last_acc) >= cfg.music_accent_min_gap_s
-        if (spaced and at >= cfg.music_accent_edge_s
+        if not cfg.music_punches and why != "merged":   # punches off: the hook plays uncut
+            report.append(MusicHook(t=round(t, 3), kind="uncut", reason=why))
+        elif (spaced and at >= cfg.music_accent_edge_s
                 and durations[k] - at >= cfg.music_accent_edge_s):
             accents.append((k, at))
             report.append(MusicHook(t=round(t, 3), kind="accent", reason=why))
@@ -379,15 +430,17 @@ def apply_sync(shots, synced: SyncResult, cfg: PlannerConfig) -> None:
         if warp is not None:
             shot.camera.time_warp = warp
         shot.duration_s = d
+    if not cfg.music_punches:
+        return
     punches: dict[int, list[Punch]] = {}
     for k in hook_cuts:
         if k + 1 < len(shots):
             punches.setdefault(k + 1, []).append(Punch(
                 at_s=0.0, amount=cfg.music_punch_cut, attack_s=0.0,
                 decay_s=cfg.music_punch_decay_s))
-    for k, at in synced.accents or []:
+    for k, at, *amount in synced.accents or []:         # v2 sizes each punch by its hero
         punches.setdefault(k, []).append(Punch(
-            at_s=at, amount=cfg.music_punch_accent, attack_s=cfg.music_punch_attack_s,
-            decay_s=cfg.music_punch_decay_s))
+            at_s=at, amount=amount[0] if amount else cfg.music_punch_accent,
+            attack_s=cfg.music_punch_attack_s, decay_s=cfg.music_punch_decay_s))
     for k, ps in punches.items():
         shots[k].camera.punches = sorted(ps, key=lambda p: p.at_s)

@@ -250,20 +250,34 @@ def test_ramp_warp_speeds_into_the_cut():
 
 
 def test_apply_sync_ramps_hook_cuts_and_punches_the_hit(report):  # noqa: F811
+    cfg = PlannerConfig(music_punches=True)       # punches are off by default (user 2026-10-23)
+    hooks = [7.35, 15.85, 18.25, 26.75]
+    plan = build_shot_plan(report, "t", _assets(), cfg=cfg)
+    tr = with_hooks(track(duration=90.0), hooks)
+    r = sync_to_music([s.duration_s for s in plan.shots], tr, cfg, [s.role for s in plan.shots])
+    apply_sync(plan.shots, r, cfg)
+    for k in r.hook_cuts:
+        assert plan.shots[k].camera.time_warp == ramp_warp(cfg)
+        if k + 1 < len(plan.shots):
+            p = plan.shots[k + 1].camera.punches[0]
+            assert p.at_s == 0.0 and p.amount == cfg.music_punch_cut
+    for k, at in r.accents:
+        assert any(abs(p.at_s - at) < 1e-9 and p.amount == cfg.music_punch_accent
+                   for p in plan.shots[k].camera.punches)
+    assert [s.duration_s for s in plan.shots] == r.durations
+
+
+def test_no_zoom_punches_by_default_but_the_hook_ramp_stays(report):  # noqa: F811
+    """User 2026-10-23: "we dont need that rapid zoom in and zoom out" -> no punches at all."""
     hooks = [7.35, 15.85, 18.25, 26.75]
     plan = build_shot_plan(report, "t", _assets(), cfg=CFG)
     tr = with_hooks(track(duration=90.0), hooks)
     r = sync_to_music([s.duration_s for s in plan.shots], tr, CFG, [s.role for s in plan.shots])
     apply_sync(plan.shots, r, CFG)
-    for k in r.hook_cuts:
-        assert plan.shots[k].camera.time_warp == ramp_warp(CFG)
-        if k + 1 < len(plan.shots):
-            p = plan.shots[k + 1].camera.punches[0]
-            assert p.at_s == 0.0 and p.amount == CFG.music_punch_cut
-    for k, at in r.accents:
-        assert any(abs(p.at_s - at) < 1e-9 and p.amount == CFG.music_punch_accent
-                   for p in plan.shots[k].camera.punches)
-    assert [s.duration_s for s in plan.shots] == r.durations
+    assert not CFG.music_punches and not r.accents
+    assert all(not s.camera.punches for s in plan.shots)
+    assert all(plan.shots[k].camera.time_warp == ramp_warp(CFG) for k in r.hook_cuts)
+    assert all(h.kind != "accent" for h in r.music.hooks or [])
 
 
 def test_cuts_follow_the_hardest_drum_hits_not_the_guessed_bar_line():

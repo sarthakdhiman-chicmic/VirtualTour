@@ -1,0 +1,218 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Review tour cuts</title>
+<!--
+  Mark how each cut of a rendered tour feels against the music (beat sync calibration). Open this
+  file in a browser from disk; nothing is uploaded. Load the tour MP4 and its plan JSON, play it, and
+  press L / E / W right after a cut that feels late / early / on the wrong moment (it marks the cut
+  you just saw). Save -> <video>.cuts.json, which tools/music/score_cuts.py reads.
+-->
+<style>
+  :root {
+    --bg: #f7f7f5; --panel: #ffffff; --ink: #1c1c1a; --muted: #6b6b66; --line: #dcdcd6;
+    --cut: #1c1c1a; --punch: #e08a14; --late: #d0402b; --early: #2b6fd0; --wrong: #8a3fd0; --good: #2e9a55; --head: #d0402b;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #151514; --panel: #1f1f1d; --ink: #ecece8; --muted: #9a9a94; --line: #34342f;
+      --cut: #ecece8; --punch: #ffb347; --late: #ff6a50; --early: #5e9bff; --wrong: #c18bff; --good: #5fd08a; --head: #ff6a50;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.45 system-ui, -apple-system, Segoe UI, sans-serif; }
+  main { max-width: 1100px; margin: 0 auto; padding: 20px 16px 40px; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  p.lead { margin: 0 0 16px; color: var(--muted); }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px; margin-bottom: 14px; }
+  .row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+  button, label.file { font: inherit; border: 1px solid var(--line); background: var(--panel); color: var(--ink);
+    border-radius: 8px; padding: 7px 12px; cursor: pointer; }
+  button:disabled { opacity: .45; cursor: default; }
+  input[type=file] { display: none; }
+  .meta { color: var(--muted); font-variant-numeric: tabular-nums; }
+  video { width: 100%; max-height: 60vh; background: #000; border-radius: 8px; display: block; }
+  canvas { width: 100%; height: 70px; display: block; margin-top: 8px; border-radius: 6px; background: var(--bg); cursor: pointer; }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; margin-right: 14px; color: var(--muted); }
+  .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+  table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+  th, td { text-align: left; padding: 5px 8px; border-bottom: 1px solid var(--line); }
+  tr.now td { background: color-mix(in srgb, var(--punch) 20%, transparent); }
+  #list { max-height: 320px; overflow: auto; }
+  kbd { font: 12px ui-monospace, monospace; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; padding: 0 5px; }
+  .keys { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 4px 16px; color: var(--muted); font-size: 14px; }
+  .tag { font-weight: 600; }
+  .flash { animation: flash .3s ease-out; }
+  @keyframes flash { from { box-shadow: 0 0 0 4px var(--punch); } to { box-shadow: 0 0 0 0 transparent; } }
+</style>
+</head>
+<body>
+<main>
+  <h1>Review tour cuts</h1>
+  <p class="lead">Play the tour. Right after a cut that feels off against the music, press <kbd>L</kbd> late, <kbd>E</kbd> early or <kbd>W</kbd> wrong moment. It marks the cut you just saw. Leave the good ones alone.</p>
+
+  <div class="panel row">
+    <label class="file">Load video…<input id="videoFile" type="file" accept="video/*"></label>
+    <label class="file">Load plan…<input id="planFile" type="file" accept="application/json,.json"></label>
+    <label class="file">Load marks…<input id="marksFile" type="file" accept="application/json,.json"></label>
+    <label class="meta">Speed
+      <select id="rate"><option>0.5</option><option>0.75</option><option selected>1</option></select></label>
+    <button id="save" disabled>Save marks</button>
+    <span id="status" class="meta"></span>
+  </div>
+
+  <div class="panel">
+    <video id="video" controls preload="auto"></video>
+    <canvas id="tl"></canvas>
+    <div class="legend" style="margin-top: 8px;">
+      <span><i class="dot" style="background: var(--cut)"></i>cut</span>
+      <span><i class="dot" style="background: var(--punch)"></i>punch</span>
+      <span><i class="dot" style="background: var(--late)"></i>late</span>
+      <span><i class="dot" style="background: var(--early)"></i>early</span>
+      <span><i class="dot" style="background: var(--wrong)"></i>wrong moment</span>
+      <span><i class="dot" style="background: var(--good)"></i>good</span>
+    </div>
+  </div>
+
+  <div class="panel keys">
+    <div><kbd>L</kbd> the cut just seen is late</div>
+    <div><kbd>E</kbd> … early</div>
+    <div><kbd>W</kbd> … on the wrong moment</div>
+    <div><kbd>G</kbd> … good (optional)</div>
+    <div><kbd>T</kbd> "a cut belongs HERE" (free tap)</div>
+    <div><kbd>Space</kbd> play / pause</div>
+    <div><kbd>,</kbd> <kbd>.</kbd> one frame back / forward</div>
+    <div><kbd>R</kbd> replay from 2 s before the selected cut</div>
+    <div><kbd>Backspace</kbd> clear the selected cut's mark</div>
+  </div>
+
+  <div class="panel">
+    <div class="row" style="justify-content: space-between;">
+      <strong id="count">No plan loaded</strong>
+      <span class="meta">A key marks the most recent cut within 2 s before the playhead (you react after you see it).</span>
+    </div>
+    <div id="list"><table><thead><tr><th>#</th><th>cut at</th><th>shot after</th><th>music there</th><th>mark</th></tr></thead><tbody id="rows"></tbody></table></div>
+  </div>
+</main>
+<script>
+(() => {
+  "use strict";
+  const $ = (id) => document.getElementById(id);
+  const video = $("video"), tl = $("tl");
+  let plan = null, cuts = [], punches = [], taps = [], sel = -1, videoName = "", dirty = false;
+  const LABELS = { l: "late", e: "early", w: "wrong", g: "good" };
+  const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+  const status = (m) => { $("status").textContent = m; };
+  const fmt = (t) => `${Math.floor(t / 60)}:${(t % 60).toFixed(2).padStart(5, "0")}`;
+  const FPS = () => (plan && plan.output && plan.output.fps) || 30;
+
+  function loadPlan(p) {
+    plan = p.plan || p;
+    let cum = 0; cuts = []; punches = [];
+    const hooks = (plan.music && plan.music.hooks) || [];
+    plan.shots.forEach((s, k) => {
+      (s.camera.punches || []).forEach(pu => punches.push(cum + pu.at_s));
+      cum += s.duration_s;
+      if (k < plan.shots.length - 1) {
+        const near = hooks.filter(h => Math.abs(h.t - cum) < 0.12 && h.kind === "cut")[0];
+        cuts.push({ i: cuts.length, t: +cum.toFixed(3), next: plan.shots[k + 1].room_type || plan.shots[k + 1].room_key,
+                    music: near ? `${near.hero || "hook"}${near.tier ? " (tier " + near.tier + ")" : ""}` : "beat", label: null });
+      }
+    });
+    sel = -1; renderList(); status(`plan: ${plan.shots.length} shots, ${cuts.length} cuts` +
+      (plan.music ? `, music from ${(+plan.music.start_s || 0).toFixed(2)} s` : ""));
+  }
+
+  function renderList() {
+    const now = video.currentTime || 0;
+    const cur = cuts.reduce((b, c) => (c.t <= now + 1e-3 ? c.i : b), -1);
+    $("rows").innerHTML = cuts.map(c =>
+      `<tr data-i="${c.i}" class="${c.i === cur ? "now" : ""}"><td>${c.i + 1}</td><td>${fmt(c.t)}</td><td>${c.next}</td>` +
+      `<td>${c.music}</td><td class="tag" style="color:${c.label ? css("--" + c.label) : "inherit"}">${c.label || ""}</td></tr>`).join("");
+    const n = (k) => cuts.filter(c => c.label === k).length;
+    $("count").textContent = cuts.length ? `${cuts.length} cuts · late ${n("late")} · early ${n("early")} · wrong ${n("wrong")} · good ${n("good")} · taps ${taps.length}` : "No plan loaded";
+    $("save").disabled = !cuts.length;
+  }
+
+  function drawTl() {
+    const d = window.devicePixelRatio || 1, r = tl.getBoundingClientRect();
+    tl.width = Math.round(r.width * d); tl.height = Math.round(r.height * d);
+    const g = tl.getContext("2d"), W = tl.width, H = tl.height;
+    g.clearRect(0, 0, W, H);
+    const dur = video.duration || (plan ? plan.total_duration_s : 0);
+    if (dur) {
+      const x = (t) => (t / dur) * W;
+      punches.forEach(t => { g.fillStyle = css("--punch"); g.fillRect(x(t) - d, H * 0.15, 2 * d, H * 0.25); });
+      cuts.forEach(c => {
+        g.fillStyle = c.label ? css("--" + c.label) : css("--cut");
+        g.fillRect(x(c.t) - (c.label ? 2 : 1) * d, H * 0.45, (c.label ? 4 : 2) * d, H * 0.5);
+      });
+      taps.forEach(t => { g.fillStyle = css("--good"); g.beginPath(); g.arc(x(t), H * 0.3, 4 * d, 0, 7); g.fill(); });
+      g.fillStyle = css("--head"); g.fillRect(x(video.currentTime || 0) - d / 2, 0, d, H);
+    }
+    requestAnimationFrame(drawTl);
+  }
+
+  function markRecent(label) {
+    const now = video.currentTime;
+    const c = cuts.filter(c => c.t <= now + 0.05 && now - c.t <= 2.0).pop();
+    if (!c) { status("no cut in the last 2 s"); return; }
+    c.label = label; sel = c.i; dirty = true; renderList();
+    tl.classList.remove("flash"); void tl.offsetWidth; tl.classList.add("flash");
+    status(`cut ${c.i + 1} at ${fmt(c.t)}: ${label}`);
+  }
+
+  $("videoFile").addEventListener("change", (e) => {
+    const f = e.target.files[0]; if (!f) return;
+    video.src = URL.createObjectURL(f); videoName = f.name.replace(/\.[^.]+$/, "");
+    status(`video: ${f.name}`);
+  });
+  $("planFile").addEventListener("change", async (e) => {
+    const f = e.target.files[0]; if (!f) return;
+    try { loadPlan(JSON.parse(await f.text())); } catch (err) { status("not a plan file"); }
+  });
+  $("marksFile").addEventListener("change", async (e) => {
+    const f = e.target.files[0]; if (!f || !cuts.length) { status("load the plan first"); return; }
+    try {
+      const m = JSON.parse(await f.text());
+      (m.cuts || []).forEach(x => { const c = cuts.find(c => Math.abs(c.t - x.t) < 0.02); if (c) c.label = x.label; });
+      taps = (m.taps || []).slice(); renderList(); status("marks loaded");
+    } catch (err) { status("not a marks file"); }
+  });
+  $("save").addEventListener("click", () => {
+    const out = { video: videoName, plan_hash: plan && plan.provenance ? plan.provenance.plan_hash : null,
+                  music_start_s: plan && plan.music ? plan.music.start_s : null, reviewed_at: new Date().toISOString(),
+                  tool: "review_cuts v1", cuts: cuts.map(c => ({ i: c.i, t: c.t, music: c.music, label: c.label })), taps };
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([JSON.stringify(out, null, 1)], { type: "application/json" }));
+    a.download = `${videoName || "tour"}.cuts.json`; a.click(); URL.revokeObjectURL(a.href);
+    dirty = false; status("saved " + a.download);
+  });
+  $("rate").addEventListener("change", () => { video.playbackRate = parseFloat($("rate").value); });
+  $("rows").addEventListener("click", (e) => {
+    const tr = e.target.closest("tr[data-i]"); if (!tr) return;
+    sel = +tr.dataset.i; video.currentTime = Math.max(0, cuts[sel].t - 2); renderList();
+  });
+  tl.addEventListener("click", (e) => {
+    const r = tl.getBoundingClientRect(); if (video.duration) video.currentTime = (e.clientX - r.left) / r.width * video.duration;
+  });
+  video.addEventListener("timeupdate", renderList);
+
+  document.addEventListener("keydown", (e) => {
+    if (e.target.tagName === "SELECT" || e.target.tagName === "INPUT" || !cuts.length) return;
+    const k = e.key.toLowerCase();
+    if (k in LABELS) { e.preventDefault(); markRecent(LABELS[k]); return; }
+    if (k === "t") { taps.push(+video.currentTime.toFixed(3)); dirty = true; renderList(); status(`tap at ${fmt(video.currentTime)}`); return; }
+    if (k === " ") { e.preventDefault(); video.paused ? video.play() : video.pause(); return; }
+    if (k === "," || k === ".") { e.preventDefault(); video.pause(); video.currentTime += (k === "," ? -1 : 1) / FPS(); return; }
+    if (k === "r" && sel >= 0) { video.currentTime = Math.max(0, cuts[sel].t - 2); video.play(); return; }
+    if (k === "backspace" && sel >= 0) { e.preventDefault(); cuts[sel].label = null; dirty = true; renderList(); }
+  });
+  window.addEventListener("beforeunload", (e) => { if (dirty) { e.preventDefault(); e.returnValue = ""; } });
+  renderList(); requestAnimationFrame(drawTl);
+})();
+</script>
+</body>
+</html>

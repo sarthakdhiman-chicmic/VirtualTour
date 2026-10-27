@@ -120,18 +120,54 @@ def _audio_args(plan, music_path: str | None, first_input: int) -> tuple[list[st
     if m is None or not music_path or not os.path.exists(music_path):
         return (["-f", "lavfi", "-t", str(end), "-i", "anullsrc=channel_layout=stereo:sample_rate=48000"],
                 ["-map", f"{first_input}:a:0", "-c:a", "aac", "-b:a", "128k", "-ac", "2"])
+    fade = min(m.fade_out_s, end)
+    tail = (f"[q]atrim=0:{end},asetpts=PTS-STARTPTS,"
+            f"afade=t=out:st={max(0.0, end - fade)}:d={fade}:curve=qsin,aresample=48000[music]")
+    out_args = ["-map", "[music]", "-c:a", "aac", "-b:a", AUDIO_BITRATE, "-ac", "2"]
+    if getattr(m, "segments", None):
+        return _segment_inputs(m, music_path, first_input, tail, out_args)
     n = max(1, int(m.loops))
     loop = m.loop_s or m.track_duration_s or end
+    start = max(0.0, float(getattr(m, "start_s", 0.0) or 0.0))      # sync v2 may start mid-track
     ins = []
     for _ in range(n):
         ins += ["-i", music_path]
-    parts = [f"[{first_input + k}:a]" + (f"atrim=0:{loop}," if k < n - 1 else "") + f"asetpts=PTS-STARTPTS[a{k}]"
-             for k in range(n)]
-    fade = min(m.fade_out_s, end)
-    graph = (";".join(parts) + ";" + "".join(f"[a{k}]" for k in range(n)) + f"concat=n={n}:v=0:a=1[q];"
-             + f"[q]atrim=0:{end},asetpts=PTS-STARTPTS,"
-             + f"afade=t=out:st={max(0.0, end - fade)}:d={fade}:curve=qsin,aresample=48000[music]")
-    return ins, ["-filter_complex", graph, "-map", "[music]", "-c:a", "aac", "-b:a", AUDIO_BITRATE, "-ac", "2"]
+
+    def trim(k: int) -> str:
+        a = start if k == 0 else 0.0                                   # only the first copy starts late
+        if k < n - 1:
+            return f"atrim={a}:{loop},"
+        return f"atrim=start={a}," if a > 0 else ""
+
+    parts = [f"[{first_input + k}:a]" + trim(k) + f"asetpts=PTS-STARTPTS[a{k}]" for k in range(n)]
+    graph = (";".join(parts) + ";" + "".join(f"[a{k}]" for k in range(n)) + f"concat=n={n}:v=0:a=1[q];" + tail)
+    return ins, ["-filter_complex", graph, *out_args]
+
+
+def _segment_inputs(m, music_path: str, first_input: int, tail: str, out_args: list) -> tuple[list[str], list[str]]:
+    """Sync v2 music edits: the segments back to back, each join an equal-power crossfade of
+    crossfade_s CENTRED on it - each piece runs half the crossfade past its join (the next one
+    starts half of it early), so every join's sound sits exactly where the planner put it."""
+    segs, x = m.segments, float(m.crossfade_s or 0.0)
+    h, n = x / 2, len(segs)
+    ins, parts = [], []
+    for k, s in enumerate(segs):
+        ins += ["-i", music_path]
+        a = s.from_s - (h if k > 0 else 0.0)
+        b = s.to_s + (h if k < n - 1 else 0.0)
+        parts.append(f"[{first_input + k}:a]atrim={a:.6f}:{b:.6f},asetpts=PTS-STARTPTS[a{k}]")
+    if n == 1:
+        chain = "[a0]anull[q]"
+    else:
+        steps, prev = [], "a0"
+        for k in range(1, n):
+            nxt = "q" if k == n - 1 else f"x{k}"
+            steps.append(f"[{prev}][a{k}]acrossfade=d={x:.6f}:c1=qsin:c2=qsin[{nxt}]" if x > 0
+                         else f"[{prev}][a{k}]concat=n=2:v=0:a=1[{nxt}]")
+            prev = nxt
+        chain = ";".join(steps)
+    graph = ";".join(parts) + ";" + chain + ";" + tail
+    return ins, ["-filter_complex", graph, *out_args]
 
 
 def render_direct(plan, workdir: str, warnings: list | None = None, music_path: str | None = None,

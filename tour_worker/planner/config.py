@@ -221,12 +221,53 @@ class PlannerConfig(BaseModel):
     # cuts one frame before the beat (a cut exactly on the onset reads as late)
     music_cut_lead_frames: int = 1
     # zoom punches: a shot opening on a hook, and accents (hooks with no cut) mid-shot
+    # zoom punches (a quick zoom in / out on a hero moment): OFF (user 2026-10-23: "we dont need
+    # that rapid zoom in and zoom out for a bass or smth" -> none at all). The music is followed by
+    # where the cuts land; the hook ramp into a hero cut stays (camera timing, not a zoom)
+    music_punches: bool = False
     music_punch_cut: float = 0.025
     music_punch_accent: float = 0.02
     music_punch_attack_s: float = 0.067
     music_punch_decay_s: float = 0.35
     music_accent_edge_s: float = 0.4     # no accent this close to a shot's ends
     music_accent_min_gap_s: float = 2.0  # ... nor this close to a cut or another accent
+    # beat sync v2 (2026-10-23, planner/music_sync_v2.py; needs analysis v4 heroes, else v3)
+    music_sync_version: int = 2
+    music_v2_tier1: tuple[float, float] = (10.0, 4.0)   # cut value: base + x strength
+    music_v2_tier2: tuple[float, float] = (3.0, 2.0)
+    music_v2_taken_bonus: float = 2.0    # a tier-2 hero picked for a cut (not left for a punch)
+    music_v2_phrase: float = 0.4         # filler: a phrase start ...
+    music_v2_bar: float = 0.15           # ... a bar start
+    # cut quality: + strike x clip(strike - 1, 0, 1) (how hard the sound hits at the cut: below
+    # 1.0, cuts fell a beat after a strong hit onto the phrase line) - pre x clip(pre - strike, 0,
+    # 1.5) (a harder sound up to a beat before: "delayed after the ting")
+    music_v2_strike: float = 1.0
+    # a cut on a beat that does not stand out from the music around it (clarity below CLEAR in
+    # music_sync_v2): up to this much less value, and a start whose first cuts sit in a soft intro
+    # loses to one where they are clear (review 2026-10-23: "the first 3 frames are really off")
+    # (regression set: 0 -> 54 unclear cuts, 4 -> 23, 8 -> 16, 12 -> 12; from 8 on, Turkey Trot x
+    # solarflex opens on the breakdown with every cut clear; the tours fit 18 drops instead of 22,
+    # every one of them still cut)
+    music_v2_unclear: float = 8.0
+    # per LATE_RATIO step of pre / strike above 1 (up to 3x). Regression set 2026-10-23 (16 tours x
+    # tracks): 1.0 -> 18 late cuts, 2.0 -> 10-12 for 2 points of hero coverage (0.979 -> 0.958)
+    music_v2_pre: float = 2.0
+    music_v2_hero_gap_s: float = 2.5     # heroes closer than this to a cut hero get a punch
+    # opening (review 2026-10-23: the tour opened 1.65 s before a breakdown, on a loud tail)
+    music_v2_open_on_change: float = 8.0     # the first frame on a change of the music
+    music_v2_open_natural: float = 5.0       # the track's own beginning
+    music_v2_open_before_change: float = 6.0 # a change this soon after the first frame ...
+    music_v2_open_before_s: float = 3.0      # ... within this many seconds: penalised
+    # music edits (user 2026-10-23: "trim the music ... according to our music profile")
+    music_v2_max_edits: int = 2
+    music_v2_splice_max: float = 0.015       # bar-print distance of a join (neighbouring bars: ~0.003-0.011)
+    music_v2_edit_cost: float = 2.0          # per edit, + 100 x its splice cost
+    music_v2_crossfade_s: float = 0.03
+    music_v2_start_share: float = 0.45   # the music may start at a phrase in this first share
+    music_v2_start_cost: float = 0.02    # per s of skipped music (earliest start on near ties)
+    music_v2_early_drop_bonus: float = 4.0   # the first drop opens shot 2-4
+    music_v2_punch_tier1: float = 0.03
+    music_v2_punch_tier2: tuple[float, float] = (0.015, 0.01)   # base + x strength
 
     # sway phases: curtains at the shot's base phase, plants half a cycle later; each further
     # object of the same kind a little later still, so none move in lockstep

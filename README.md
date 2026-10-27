@@ -151,6 +151,29 @@ Request (example: `examples/tour_plan.json`; contract `TourPlanRequest` in
   them there are no motion regions, and camera moves come from the photos' saliency alone. A photo
   whose segments are `null` gets a `perceptual_unavailable:<shot>` plan warning.
 - `music_track` (optional): a music-library track; shots are cut on its beats (plan 1.5).
+  - **Analysis v4 (sync v2):** with a v4 analysis (`heroes`, `phrases`), cuts go on the music's hero
+    moments.
+    - tier 1: drops;
+    - tier 2: entries, dropouts, whooshes, big hits.
+
+    How it works:
+    - The strongest of a close run gets the cut; the others get a zoom punch sized by their tier.
+    - The music may start at a phrase or a change in the first 45% of the track
+      (`music.start_s`). Opening on a change is preferred; opening just before one is avoided.
+    - **Music edits:** the music may be trimmed to fit the tour, up to 2 edits.
+      - Whole bars come out so a drop lands on a cut, or whole phrases of repetition are skipped
+        so a later drop arrives inside the tour.
+      - A join is used only where both sides sound alike (analysis `bar_prints`), as seamless as
+        two neighbouring bars.
+      - The plan's `music.segments` lists the track pieces played back to back. `tour_render`
+        joins them with a `crossfade_s` crossfade centred on each join, so timing stays exact.
+      - `music.edits` says which bars came out and why.
+    - **Cut quality:** a cut prefers a hard sound, and avoids landing up to a beat after a harder
+      beat it could have taken.
+    - The plan's `music.hooks` lists every hero with `cut` / `accent` / `covered` / `missed` and
+      its tier.
+  - **Fallback:** a v3 analysis, or a v2 sync with no solution, syncs as before
+    (`music_sync_v2_fallback:<reason>`).
 - `options` (optional, no other keys): `max_total_s` is the tour's ceiling; `budget_blocked`
   makes a slideshow. Everything else is the planner's default (`tour_worker/planner/config.py`).
 
@@ -209,9 +232,16 @@ tour_worker/
                           loader.py, one module per effect: fabric, foliage, canopy, water, fire
   vision/segment.py       OneFormer: pinned checkpoints, Segmenter, scene summary
   vision/fire_detect.py   lit fires inside fireplace masks
-  music/                  beat analysis for beat sync (the `music` extra; offline, not a job)
+  music/                  beat analysis for beat sync (the `music` extra; offline, not a job);
+                          structure.py: sections, phrases and hero moments (analysis v4)
 tools/render.py           local CLI: plan + images folder -> MP4
-tools/quality/            perceptual_quality.py (motion quality gate), sync_quality.py (beat sync score)
+tools/quality/            perceptual_quality.py (motion quality gate), sync_quality.py (beat sync score,
+                          incl. hero metrics), sync_timeline.py (picture of cuts / punches vs the music)
+tools/music/              analyze_library.py (re-analyse a library folder as v4), tap_heroes.html
+                          (mark hero moments by ear), score_heroes.py (detector vs your taps),
+                          review_cuts.html (mark late / early cuts in a render),
+                          sync_regression.py (every library track x regression_tours.json, scored;
+                          --compare sync_baseline.json fails when any case gets worse)
 tools/samples/            fireplace / motion sample reels for review
 tools/safe_run.py         run a heavy command pinned to some CPUs, frozen when the CPU gets hot
 training/fireplace_adapter/   research: a fireplace head on COCO OneFormer's features (not enabled)
