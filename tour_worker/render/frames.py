@@ -18,7 +18,10 @@ import math
 
 from tour_worker.render.camera_path import (KeyframePath, base_window, roll_fit_scale, rotate_homography, DEFAULT_HFOV_DEG,
                                  time_warp_at)
+from tour_worker.errors import WorkerError
+from tour_worker.io.images import photo_filename
 from tour_worker.motion.loader import load_regions
+from tour_worker.render.timeline import compute_timeline
 from tour_worker.motion.region import ROI_PROBE, apply_regions, field_align, probe_box
 
 def crop_roll_homography(cx, cy, zoom, roll_deg, src_w, src_h, out_w, out_h):
@@ -147,20 +150,21 @@ class ShotWarp:
         path = (compound_path(shot, self.ow, self.oh) if cam.type == "compound"
                 else KeyframePath([k.model_dump() for k in cam.keyframes]) if cam.type == "keyframe_path"
                 else None)                                   # ken_burns: start -> end (below)
-        self.src = cv2.imread(os.path.join(images, shot.image_uri.split("/")[-1]), cv2.IMREAD_COLOR)
+        self.src = cv2.imread(os.path.join(images, photo_filename(plan, shot.image_uri)), cv2.IMREAD_COLOR)
         if self.src is None:
-            raise RuntimeError(f"prewarp: cannot read the image for shot {shot.shot_id}")
+            raise WorkerError("prewarp", f"cannot read the image for shot {shot.shot_id}")
         sh, sw = self.src.shape[:2]
         pw, ph = shot.source.width, shot.source.height
         if (sw, sh) != (pw, ph):
             # the browser path drew every image at the plan's size; same here, if it is the same
             # photo (same aspect) - a different aspect means a different image: refuse
             if abs(sw / sh - pw / ph) > 0.01 * (pw / ph):
-                raise RuntimeError(f"prewarp: shot {shot.shot_id} image is {sw}x{sh}, plan says {pw}x{ph}")
+                raise WorkerError("prewarp", f"shot {shot.shot_id} image is {sw}x{sh}, plan says {pw}x{ph}")
             interp = cv2.INTER_AREA if sw > pw else cv2.INTER_CUBIC
             self.src = cv2.resize(self.src, (pw, ph), interpolation=interp)
             if warnings is not None:
                 warnings.append(f"image_resized:{shot.shot_id}:{sw}x{sh}->{pw}x{ph}")
+            sw, sh = pw, ph                          # the camera and masks work on the resized photo
         self.sw, self.sh = sw, sh
         self.rotate = cam.projection == "rotate"
         self.hfov = cam.hfov_deg if cam.hfov_deg is not None else DEFAULT_HFOV_DEG
@@ -172,7 +176,11 @@ class ShotWarp:
             rolls = ([path.roll_deg_at(t) for t in ts] if cam.type == "keyframe_path" else [0.0] * n)
             self.frames = list(zip((path.at(t) for t in ts), rolls))
         if getattr(cam, "punches", None):                                   # beat-sync punches
-            self.frames = [((cx, cy, z * punch_scale(cam.punches, f / self.fps)), r)
+            # at_s counts from the shot's cut (its nominal start); frame 0 is `head` frames before
+            # it when the shot fades in (render/timeline.py)
+            head = next((t["head"] for s, t in zip(plan.shots, compute_timeline(plan))
+                         if s.shot_id == shot.shot_id), 0)
+            self.frames = [((cx, cy, z * punch_scale(cam.punches, (f - head) / self.fps)), r)
                            for f, ((cx, cy, z), r) in enumerate(self.frames)]
         self.regions, region_warnings = load_regions(shot, images, sw, sh, self.src)
         self.motion_px = {}

@@ -203,3 +203,14 @@ def test_narrow_tall_spaces_get_the_vertical_glide():
     wide = plan_cameras([shots[0], wide_room, shots[2]], frames_for(shots), 1920, 1080)
     assert wide.notes[1]["variant"] != "vertical_glide"
     check_contract(shots, res)
+
+
+@pytest.mark.parametrize("name, weight", [
+    ("seat", 0.4), ("orange", 0.4), ("flowerbed", 0.6), ("fire hydrant", 0.2), ("armchair", 0.6),
+    ("chair", 0.5), ("stairs", 1.0), ("stairway, staircase", 1.0), ("countertop", 0.9), ("sea", 0.8),
+    ("door-stuff", 1.0), ("pool table, billiard table, snooker table", 1.0), ("playingfield", 0.0),
+    ("wall-brick", 0.0), ("bed", 1.0), ("bottle", 0.4),
+])
+def test_class_names_match_keywords_by_word_not_by_substring(name, weight):
+    from tour_worker.planner.scene_context import class_weight
+    assert class_weight(name) == weight

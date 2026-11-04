@@ -11,6 +11,7 @@ RUN apt-get update \
  && apt-get install -y --no-install-recommends ffmpeg \
  && rm -rf /var/lib/apt/lists/*
 
+# uv's cache is a BuildKit cache mount on each `uv sync`: reused across builds, never in a layer
 ENV UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy \
     UV_PYTHON_DOWNLOADS=never \
@@ -20,10 +21,10 @@ ENV UV_COMPILE_BYTECODE=1 \
 WORKDIR /app
 # dependencies first (cached while only the code changes)
 COPY pyproject.toml uv.lock README.md ./
-RUN uv sync --frozen --no-dev --extra http --no-install-project
+RUN --mount=type=cache,target=/root/.cache/uv uv sync --frozen --no-dev --extra http --no-install-project
 COPY LICENSES.md handler.py ./
 COPY tour_worker ./tour_worker
-RUN uv sync --frozen --no-dev --extra http
+RUN --mount=type=cache,target=/root/.cache/uv uv sync --frozen --no-dev --extra http
 
 RUN useradd --create-home --uid 10001 worker \
  && mkdir -p /models /var/lib/tour-worker/jobs \

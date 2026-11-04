@@ -20,3 +20,11 @@ docker/compose.yaml
 **/*.mov
 **/*.wav
 **/*.mp3
+# secrets and local artefacts never enter the build context
+.env
+.env.*
+*.env
+.claude
+*.log
+*.zip
+*.bundle

@@ -87,9 +87,12 @@ def run_segment(request: dict, storage, workdir: str, segmenter=None, settings: 
             warnings.append(f"segment_failed:{pid}:{type(e).__name__}")
             continue
         out = []
-        for r in regions:
-            path = os.path.join(workdir, f"{pid}_{r['object_id']}.png")
-            cv2.imwrite(path, r.pop("mask"))
+        for i, r in enumerate(regions):
+            # named by index: photo_id is the caller's and must not pick the local path
+            path = os.path.join(workdir, f"mask_{len(results):03d}_{i:03d}.png")
+            if not cv2.imwrite(path, r.pop("mask")):
+                warnings.append(f"mask_write_failed:{pid}:{r['object_id']}")
+                continue
             dest = f"{prefix}{pid}/{r['object_id']}.png"
             try:
                 storage.put(path, dest)

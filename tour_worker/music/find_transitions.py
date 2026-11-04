@@ -45,7 +45,7 @@ import warnings
 import librosa
 import numpy as np
 import soundfile as sf
-from scipy.ndimage import gaussian_filter1d, maximum_filter1d, median_filter
+from scipy.ndimage import gaussian_filter1d, maximum_filter1d
 from scipy.signal import find_peaks
 
 warnings.filterwarnings("ignore", message="Trying to estimate tuning")  # silent passages
@@ -108,9 +108,14 @@ def fmt(t):
 
 
 # ---------------------------------------------------------------- analysis
+MIN_TRACK_S = 4.0          # the analysis windows run to 2 s; a music bed is never this short
+
+
 def analyze(path):
     y, sr = librosa.load(path, sr=SR, mono=True)
     duration = len(y) / sr
+    if duration < MIN_TRACK_S:
+        raise ValueError(f"track is {duration:.2f} s; at least {MIN_TRACK_S} s is needed to analyse it")
 
     # --- per-band loudness (dB relative to the loudest moment of the song)
     mel = librosa.feature.melspectrogram(y=y, sr=sr, n_fft=2048, hop_length=HOP,
@@ -1013,7 +1018,8 @@ def frame_align(boundaries_s, fps):
         frames[k] = max(frames[k], frames[k - 1] + 1)
     cum_cs = np.round(frames * 100.0 / fps).astype(int)
     back = np.round(cum_cs / 100.0 * fps).astype(int)
-    assert np.array_equal(back, frames), "frame alignment round trip failed"
+    if not np.array_equal(back, frames):
+        raise ValueError(f"frame alignment round trip failed at {fps} fps")
     durations = np.diff(np.concatenate([[0], cum_cs])) / 100.0
     return [round(float(d), 2) for d in durations], frames.tolist()
 

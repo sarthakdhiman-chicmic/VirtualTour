@@ -1,5 +1,7 @@
 """Combine the four criteria into one score per photo. Criteria that cannot be measured are
-dropped, remaining weights are renormalised, and the photo is flagged (never silent)."""
+dropped, remaining weights are renormalised, and the photo is flagged (never silent). A photo
+missing more than max_missing_criteria of them cannot be judged: it is capped below the
+acceptable score (flag "unmeasurable"), so a blank frame never outranks a real photo."""
 import cv2
 import numpy as np
 
@@ -40,6 +42,9 @@ def score_photo(photo: PhotoInput, cfg: ScoringConfig) -> PhotoScore:
     total = sum(used[k] * available[k] for k in available)
 
     flags: list[str] = []
+    if len(missing) > cfg.max_missing_criteria:
+        total = min(total, cfg.unmeasurable_cap)
+        flags.append("unmeasurable")
     if total < cfg.min_acceptable_score:
         flags.append("low_score")
     flags += [f"missing_{k}" for k in missing]

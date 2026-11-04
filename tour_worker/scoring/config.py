@@ -116,10 +116,15 @@ class RankingConfig(BaseModel):
 
 
 class ScoringConfig(BaseModel):
-    version: str = "0.3.0"
+    version: str = "0.3.1"
     weights: Weights = Field(default_factory=Weights)
     analysis_long_side: int = 1024
     min_acceptable_score: float = 0.40
+    # more criteria than this missing: the photo cannot be judged (blank, tiny, flat) - its
+    # total is capped at unmeasurable_cap, under min_acceptable_score (0.3.1: a flat grey frame
+    # scored 0.64 on lighting and depth of field alone, above real photos)
+    max_missing_criteria: int = 1
+    unmeasurable_cap: float = 0.2
     framing: FramingConfig = Field(default_factory=FramingConfig)
     lighting: LightingConfig = Field(default_factory=LightingConfig)
     depth_of_field: DepthOfFieldConfig = Field(default_factory=DepthOfFieldConfig)

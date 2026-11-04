@@ -86,3 +86,31 @@ def test_fireplace_pass_setting():
     from tour_worker.config import Settings
     assert Settings.from_env({}).fireplace_model == "ade20k"
     assert Settings.from_env({"FIREPLACE_MODEL": ""}).fireplace_path() is None
+
+
+def test_a_photo_id_never_picks_a_local_path(tmp_path):
+    """photo_id is the caller's: a mask is written inside the workdir whatever it holds."""
+    from tour_worker.jobs.segment import run_segment
+
+    class FakeStorage:
+        def get(self, uri, dest):
+            cv2.imwrite(dest + ".png", _photo())
+            os.replace(dest + ".png", dest)
+
+        def put(self, path, uri):
+            assert os.path.dirname(path) == str(work)
+
+    def fake_segmenter(img):
+        m = np.zeros(img.shape[:2], np.uint8)
+        m[50:300, 200:400] = 255
+        return [{"object_id": "seg_000", "class_name": "curtain", "confidence": 0.99,
+                 "bbox": [200, 50, 400, 300], "mask": m, "space": [img.shape[1], img.shape[0]]}]
+
+    work, outside = tmp_path / "work", tmp_path / "outside"
+    work.mkdir()
+    outside.mkdir()
+    res = run_segment({"images": [{"photo_id": str(outside / "x"), "uri": "s3://b/a.jpg"},
+                                  {"photo_id": "../../escape", "uri": "s3://b/b.jpg"}],
+                       "output_prefix": "s3://b/seg/"}, FakeStorage(), str(work), segmenter=fake_segmenter)
+    assert res["status"] == "completed" and not res["warnings"]
+    assert list(outside.iterdir()) == [] and not (tmp_path.parent / "escape_seg_000.png").exists()

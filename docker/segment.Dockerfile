@@ -20,6 +20,7 @@ RUN apt-get update \
  && apt-get install -y --no-install-recommends python3.12 ca-certificates \
  && rm -rf /var/lib/apt/lists/*
 
+# uv's cache is a BuildKit cache mount on each `uv sync`: reused across builds, never in a layer
 ENV UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy \
     UV_PYTHON=python3.12 \
@@ -29,10 +30,10 @@ ENV UV_COMPILE_BYTECODE=1 \
 
 WORKDIR /app
 COPY pyproject.toml uv.lock README.md ./
-RUN uv sync --frozen --no-dev --extra "${TORCH_EXTRA}" --extra http --no-install-project
+RUN --mount=type=cache,target=/root/.cache/uv uv sync --frozen --no-dev --extra "${TORCH_EXTRA}" --extra http --no-install-project
 COPY LICENSES.md handler.py ./
 COPY tour_worker ./tour_worker
-RUN uv sync --frozen --no-dev --extra "${TORCH_EXTRA}" --extra http
+RUN --mount=type=cache,target=/root/.cache/uv uv sync --frozen --no-dev --extra "${TORCH_EXTRA}" --extra http
 
 # Pinned OneFormer weights (sha256-checked by ensure_model): COCO (the primary model) and ADE20K
 # (the fireplace pass, FIREPLACE_MODEL - on by default since 2026-10-22).

@@ -20,7 +20,7 @@ import tempfile
 from dataclasses import replace
 
 from tour_worker.config import get_settings
-from tour_worker.io.storage import CompositeStorage, HttpStorage, LocalMapStorage, S3Storage
+from tour_worker.io.storage import CompositeStorage, FileStorage, HttpStorage, LocalMapStorage, S3Storage
 from tour_worker.jobs.render import run_tour
 
 
@@ -58,7 +58,8 @@ def main(argv=None) -> int:
     out_dir = os.path.dirname(out)
     os.makedirs(out_dir, exist_ok=True)
     storage = CompositeStorage(s3=S3Storage(), http=HttpStorage(),
-                               local=LocalMapStorage(a.images_dir, placeholder=False), local_for_remote=True)
+                               local=LocalMapStorage(a.images_dir, placeholder=False), local_for_remote=True,
+                               files=FileStorage())
     music = (plan.get("music") or {}).get("uri")
     if a.music_file and music:
         storage = _Overrides(storage, {music: a.music_file})

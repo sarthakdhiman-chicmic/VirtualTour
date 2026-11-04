@@ -235,3 +235,12 @@ def test_fire_regions_from_the_segment_job_plan_as_fire_flicker():
                                   PlannerConfig(), room_type="living_room")
     assert [(r.label, r.effect, r.mask_uri) for r in regions] == [
         ("fire", "fire_flicker", fire["mask_url"])]
+
+
+@pytest.mark.parametrize("room", ["Front Exterior", "front_exterior", "Pool Area", "Backyard"])
+def test_plants_outdoors_stay_still_whatever_the_room_label_s_case(room):
+    """room_type is the user's label; the outdoor rooms are slugs (scoring.rooms.canon)."""
+    regs = plan_motion_regions("L1", "s01", cam(), [CURTAIN, PLANT], W, H, 1920, 1080, CFG, room_type=room)
+    assert [r.effect for r in regs] == ["fabric_sway"]
+    indoors = plan_motion_regions("L1", "s01", cam(), [CURTAIN, PLANT], W, H, 1920, 1080, CFG, room_type="Living Room")
+    assert sorted(r.effect for r in indoors) == ["fabric_sway", "foliage_sway"]

@@ -26,7 +26,7 @@ import numpy as np
 
 from tour_worker.errors import WorkerError
 from tour_worker.render.encode import (BUFSIZE, CHUNK_GOPS, CRF, GOP_S, LEVEL, MAXRATE, PRESET, VBV_INIT_CHUNK,
-                                       _run)
+                                       _concat_quote, _run)
 from tour_worker.render.frames import ShotWarp, render_workers
 from tour_worker.render.timeline import compute_timeline
 
@@ -75,7 +75,7 @@ def draw_frame(g: int) -> np.ndarray:
             continue
         a = fade_opacity(f, t["fade_frames"])
         img = _shot(i).frame(f)
-        if a >= 1.0 or canvas is None and a >= 1.0:
+        if a >= 1.0:
             canvas = img
         else:
             base = canvas if canvas is not None else np.zeros_like(img)
@@ -100,16 +100,25 @@ def _encode_chunk(task) -> str:
            "-x264-params", f"nal-hrd=vbr:threads=1:vbv-init={VBV_INIT_CHUNK}",
            "-colorspace", "bt470bg", "-color_primaries", "bt470bg", "-color_trc", "smpte170m",
            "-color_range", "tv", "-r", str(fps), "-an", part]
-    proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stderr=subprocess.PIPE)
-    try:
-        for g in range(a, b):
-            proc.stdin.write(draw_frame(g).tobytes())
-        proc.stdin.close()
-    except BrokenPipeError:
-        pass
-    err = proc.stderr.read().decode(errors="replace")
-    if proc.wait() != 0:
-        raise WorkerError("encode_failed", err[-2000:])
+    # stderr to a file, not a pipe: a pipe nobody reads until the end fills up (~64 KB) and then
+    # ffmpeg and this writer wait on each other for ever
+    with tempfile.TemporaryFile() as log:
+        proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stderr=log)
+        try:
+            try:
+                for g in range(a, b):
+                    proc.stdin.write(draw_frame(g).tobytes())
+                proc.stdin.close()
+            except BrokenPipeError:                        # ffmpeg quit: its exit code says why
+                pass
+            code = proc.wait()
+        finally:
+            if proc.poll() is None:                        # drawing raised: no half-written part left running
+                proc.kill()
+                proc.wait()
+        if code != 0:
+            log.seek(0)
+            raise WorkerError("encode_failed", log.read().decode(errors="replace")[-2000:])
     return part
 
 
@@ -155,10 +164,14 @@ def render_direct(plan, workdir: str, warnings: list | None = None, music_path: 
         else:
             with ProcessPoolExecutor(max_workers=min(workers, len(tasks)), mp_context=mp.get_context("spawn"),
                                      initializer=_init, initargs=(plan, images)) as pool:
-                parts = list(pool.map(_encode_chunk, tasks))
+                try:
+                    parts = list(pool.map(_encode_chunk, tasks))
+                except BaseException:
+                    pool.shutdown(wait=True, cancel_futures=True)   # a failed chunk: skip the queued ones
+                    raise
         listing = os.path.join(td, "parts.txt")
         with open(listing, "w") as f:
-            f.writelines(f"file '{p}'\n" for p in parts)
+            f.writelines(f"file '{_concat_quote(p)}'\n" for p in parts)
         a_in, a_out = _audio_args(plan, music_path, 1)
         _run(["ffmpeg", "-y", "-loglevel", "error", "-f", "concat", "-safe", "0", "-i", listing, *a_in,
               "-map", "0:v:0", "-c:v", "copy", *a_out, "-t", str(round(plan.total_duration_s, 3)),

@@ -30,6 +30,7 @@ MODELS = {
         "revision": "3a263017ca5c75adbea145f25f81b118243d4394",
         "sha256": "36d01ceb971e9b3824bf35de022cd3148aad0c928f6365302db492a4cff6bf2b",
         "dir": "oneformer_coco_swin_large",
+        "class_info": ("coco_panoptic.json", "2aab920e13f27c2846ad0a66568e8533fe049f4f0523d174ea8e944fa9ad84ae"),
         "class_map": {"curtain": "curtain", "window-blind": "blinds", "potted plant": "potted_plant",
                       "tree-merged": "tree", "sea": "water", "river": "water", "water-other": "water"},
     },
@@ -38,6 +39,7 @@ MODELS = {
         "revision": "4a5bac8e64f82681a12db2e151a4c2f4ce6092b2",
         "sha256": "c0b2fe11dfecee6f2f1f315f466946e96f4e94813f3f6d660ff3747b83c28cc9",
         "dir": "oneformer_ade20k_swin_large",
+        "class_info": ("ade20k_panoptic.json", "9d47d3bf5cedeefee0a41888b069bde254bf614f738ae43e4b423d1b2f321427"),
         "class_map": {"curtain": "curtain", "blind, screen": "blinds", "plant": "potted_plant",
                       "tree": "tree", "palm, palm tree": "tree", "water": "water", "sea": "water",
                       "river": "water", "lake": "water", "pool": "water", "fireplace": "fireplace"},
@@ -49,6 +51,10 @@ MODELS = {
 # on the known set (missed Downing's gas fires behind glass; took kitchen pendants and a sconce
 # for fire) - off (COCO_FIRE_SEARCH) until the fireplace adapter (training/) exists.
 DEFAULT_MODEL = "coco"
+# The processor reads its class names from a file in this dataset repo (preprocessor_config.json's
+# class_info_file); ensure_model keeps a pinned copy next to the weights, so a load never goes online.
+CLASS_INFO_REPO = "shi-labs/oneformer_demo"
+CLASS_INFO_REVISION = "4d683bd5bf84e9c8b5537dce306230bde409fe89"
 
 
 def model_id(model: str = DEFAULT_MODEL) -> str:
@@ -62,20 +68,32 @@ MIN_PART_AREA = 0.003      # parts smaller than 0.3% of the photo are dropped
 MIN_SCORE = 0.5
 
 
+def _sha256(path: str) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 22), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
 def ensure_model(model_dir: str, model: str = DEFAULT_MODEL) -> str:
-    """Download the pinned model if missing and check the weights' hash."""
+    """Download the pinned model and its class-info file if missing, and check both hashes."""
     spec = MODELS[model]
     weights = os.path.join(model_dir, "pytorch_model.bin")
     if not os.path.exists(weights):
         from huggingface_hub import snapshot_download
         snapshot_download(spec["id"], revision=spec["revision"], local_dir=model_dir,
                           allow_patterns=["*.json", "*.txt", "pytorch_model.bin", "README.md"])
-    h = hashlib.sha256()
-    with open(weights, "rb") as f:
-        for chunk in iter(lambda: f.read(1 << 22), b""):
-            h.update(chunk)
-    if h.hexdigest() != spec["sha256"]:
+    info_name, info_sha = spec["class_info"]
+    info = os.path.join(model_dir, info_name)
+    if not os.path.exists(info):
+        from huggingface_hub import hf_hub_download
+        hf_hub_download(CLASS_INFO_REPO, info_name, repo_type="dataset", revision=CLASS_INFO_REVISION,
+                        local_dir=model_dir)
+    if _sha256(weights) != spec["sha256"]:
         raise RuntimeError("oneformer weights checksum mismatch")
+    if _sha256(info) != info_sha:
+        raise RuntimeError(f"oneformer class info checksum mismatch: {info_name}")
     return model_dir
 
 
@@ -92,7 +110,7 @@ class Segmenter:
         self.model_name, self.class_map, self.fire_search = model, MODELS[model]["class_map"], fire_search
         d = ensure_model(model_dir, model)
         self.torch = torch
-        self.processor = OneFormerProcessor.from_pretrained(d)
+        self.processor = OneFormerProcessor.from_pretrained(d, repo_path=d)   # class info: ensure_model
         self.model = OneFormerForUniversalSegmentation.from_pretrained(d).eval()
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         self.model.to(self.device)

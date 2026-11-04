@@ -5,7 +5,11 @@ Every setting, its environment variable and default (also in README.md):
   WORKER_STORAGE       ""         "local": dev mode - every image / mask / output URI, s3:// and
                                   https:// included, is served from IMAGES_DIR by basename
                                   (tour_render and tour_plan; tour_segment always uses S3 / HTTPS).
-                                  Anything else: by URI scheme (s3://, https://, file:// or a path)
+                                  Anything else: by URI scheme (s3://, https://; file:// or a
+                                  path only with WORKER_FILE_URIS)
+  WORKER_FILE_URIS     "0"        "1": file:// URIs and paths read and write the worker's own
+                                  filesystem (dev and tests; always on with WORKER_STORAGE=local).
+                                  Off: they are refused, so a caller cannot reach local files
   IMAGES_DIR           "/tmp"     the folder WORKER_STORAGE=local reads from and writes to
   PREWARP_WORKERS      (auto)     processes drawing + encoding frames; auto = min(8, CPUs - 1),
                                   capped by available memory (600 MB each)
@@ -29,6 +33,8 @@ The HTTP service (python -m tour_worker.service; handler.py, the RunPod entry, i
                                   survive a restart; unset: in memory only
   JOB_TTL_S            86400      how long a finished job's status is kept (seconds)
   RUNSYNC_TIMEOUT_S    300        how long POST /runsync waits before returning the job's status
+  WEBHOOK_HOSTS        (unset)    comma-separated hosts a webhook may point at; unset: any host
+                                  (link-local / reserved addresses, e.g. 169.254.169.254, never)
   HOST                 127.0.0.1  address the service listens on (the Docker images set 0.0.0.0)
   PORT                 8000       its port
 
@@ -48,6 +54,7 @@ REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 @dataclass(frozen=True)
 class Settings:
     storage: str = "remote"                 # "remote" | "local"
+    file_uris: bool = False                 # file:// and paths allowed (always with storage="local")
     images_dir: str = "/tmp"
     render_workers: int | None = None       # None: automatic
     models_dir: str = os.path.join(REPO_ROOT, "models")
@@ -63,6 +70,7 @@ class Settings:
     jobs_dir: str | None = None
     job_ttl_s: float = 86400.0
     runsync_timeout_s: float = 300.0
+    webhook_hosts: tuple[str, ...] = ()     # empty: any host
     host: str = "127.0.0.1"
     port: int = 8000
 
@@ -72,6 +80,7 @@ class Settings:
         workers = env.get("PREWARP_WORKERS", "").strip()
         return cls(
             storage="local" if env.get("WORKER_STORAGE") == "local" else "remote",
+            file_uris=env.get("WORKER_FILE_URIS", "") == "1",
             images_dir=env.get("IMAGES_DIR", "/tmp"),
             render_workers=max(1, int(workers)) if workers else None,
             models_dir=env.get("MODELS_DIR") or os.path.join(REPO_ROOT, "models"),
@@ -86,6 +95,7 @@ class Settings:
             jobs_dir=env.get("JOBS_DIR") or None,
             job_ttl_s=max(0.0, float(env.get("JOB_TTL_S") or 86400)),
             runsync_timeout_s=max(0.0, float(env.get("RUNSYNC_TIMEOUT_S") or 300)),
+            webhook_hosts=tuple(h.strip().lower() for h in env.get("WEBHOOK_HOSTS", "").split(",") if h.strip()),
             host=env.get("HOST") or "127.0.0.1",
             port=int(env.get("PORT") or 8000),
         )

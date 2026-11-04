@@ -78,6 +78,8 @@ from tour_worker.render.camera_path import (
     roll_fit_scale,
     vec_angle,
 )
+from tour_worker.scoring.rooms import canon
+
 from .scene_context import SceneContext
 from .schemas import CameraParams, CameraPoint, Keyframe, Segment, Timing
 
@@ -626,7 +628,7 @@ def _rolled_density_ok(kfs, n, g):
 
 # ---- selection ------------------------------------------------------------------------------
 def category(shot: ShotInput, is_last: bool) -> str:
-    rt = (shot.room_type or "").lower()
+    rt = canon(shot.room_type)                     # the user's label: "Front Exterior" -> front_exterior
     if rt == "aerial":
         return "aerial"
     if is_last:
@@ -849,6 +851,16 @@ def _camera(
     )
 
 
+STILL_ZOOM = 1.02    # inside the base window (zoom 1) on every side: fits any photo and output
+
+
+def still_camera() -> CameraParams:
+    """The last resort when a shot's move and its fallback both fail: a still, centred frame."""
+    k = {"cx": 0.5, "cy": 0.5, "zoom": STILL_ZOOM}
+    return CameraParams(type="keyframe_path", move="still",
+                        keyframes=[Keyframe(t=0.0, **k), Keyframe(t=1.0, **k)])
+
+
 def plan_cameras(
     shots: list[ShotInput], frames: list[int], out_w: int, out_h: int, speed: float = 1.0
 ) -> CinematicResult:
@@ -884,7 +896,13 @@ def plan_cameras(
                 "keyframes": variant_keyframes(fb_variant, g, shot, c["d"], out_w, out_h),
             }
             note["variant"] = fb_variant
-            cam = _camera(fb, shot, n, out_w, out_h, speed, note)
+            try:
+                cam = _camera(fb, shot, n, out_w, out_h, speed, note)
+            except ValueError as e2:            # the fallback does not fit either: hold still
+                warnings.append(f"cinematic_still:{shot.shot_id}")
+                note["fallback_reason"] += f"; {fb_variant}: {e2}"
+                note["variant"] = note["mode"] = "still"
+                cam = still_camera()
         cameras.append(cam)
         notes.append(note)
     return CinematicResult(cameras=cameras, warnings=warnings, notes=notes)

@@ -23,10 +23,12 @@ import numpy as np
 
 from tour_worker.music import find_transitions as ft
 
-ANALYSIS_VERSION = "3"
+ANALYSIS_VERSION = "4"       # 4: silence is never a whoosh (same fields as 3)
 SR, HOP = ft.SR, ft.HOP
 FR = SR / HOP
 WHOOSH_VALUE = 1.0          # x strength; ordinary candidates run ~ -0.4..0.7 (median 0)
+SILENCE_DBFS = -60.0        # quieter frames are never a whoosh (hi_db is relative to the track's
+                            # own peak, so a silent track was one long full-strength "whoosh")
 
 
 def find_whooshes(y, min_len=0.12, merge_gap=0.08, flat_thr=0.03, hi_db_thr=-30.0):
@@ -37,7 +39,10 @@ def find_whooshes(y, min_len=0.12, merge_gap=0.08, flat_thr=0.03, hi_db_thr=-30.
     flat = librosa.feature.spectral_flatness(S=S)[0]
     hi = S[f > 3000].sum(0)
     hi_db = librosa.amplitude_to_db(hi, ref=np.max(hi) + 1e-12)
-    on = (flat > flat_thr) & (hi_db > hi_db_thr)
+    rms_db = librosa.amplitude_to_db(librosa.feature.rms(y=y, frame_length=2048, hop_length=HOP)[0], ref=1.0)
+    audible = np.zeros(len(flat), bool)
+    audible[:len(rms_db)] = rms_db[:len(flat)] > SILENCE_DBFS
+    on = (flat > flat_thr) & (hi_db > hi_db_thr) & audible
     gap = max(1, int(merge_gap * FR))
     runs, i, n = [], 0, len(on)
     while i < n:

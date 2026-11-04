@@ -5,7 +5,7 @@ import os
 import pytest
 
 from tour_worker.config import Settings
-from tour_worker.io.storage import CompositeStorage, LocalMapStorage, build_storage
+from tour_worker.io.storage import CompositeStorage, FileStorage, LocalMapStorage, build_storage
 
 
 class Rec:
@@ -63,7 +63,7 @@ def test_unsupported_schemes_are_rejected():
 def test_file_storage_and_local_map(tmp_path):
     src = tmp_path / "a.bin"
     src.write_bytes(b"abc")
-    cs = CompositeStorage(Rec("s3"), Rec("http"))
+    cs = CompositeStorage(Rec("s3"), Rec("http"), files=FileStorage())
     cs.put(str(src), str(tmp_path / "out" / "b.bin"))
     assert (tmp_path / "out" / "b.bin").read_bytes() == b"abc"
     strict = LocalMapStorage(str(tmp_path), placeholder=False)
@@ -78,6 +78,27 @@ def test_build_storage_follows_the_settings():
     assert local.local_for_remote and local.local.images_dir == "/tmp/x"
     assert build_storage(Settings(storage="local"), "tour_segment").local is None   # segment: always remote
     assert build_storage(Settings(), "tour_render").local is None
+
+
+@pytest.mark.parametrize("uri", ["file:///etc/passwd", "/etc/passwd", "etc/passwd", "../x.jpg"])
+def test_production_storage_refuses_the_worker_s_own_files(uri):
+    """Without WORKER_FILE_URIS a request cannot read or write local files (images, masks,
+    music or output_prefix)."""
+    cs = build_storage(Settings(), "tour_render")
+    with pytest.raises(ValueError, match="WORKER_FILE_URIS"):
+        cs.get(uri, "/x")
+    with pytest.raises(ValueError, match="WORKER_FILE_URIS"):
+        cs.put("/x", uri)
+    assert isinstance(build_storage(Settings(file_uris=True), "tour_render").files, FileStorage)
+    assert isinstance(build_storage(Settings(storage="local"), "tour_render").files, FileStorage)
+
+
+def test_a_refused_output_prefix_fails_before_the_job_runs():
+    from tour_worker.jobs.router import run_job
+    res = run_job({"job_type": "tour_segment", "images": [{"photo_id": "a", "uri": "s3://b/a.jpg"}],
+                   "output_prefix": "/var/tmp/anywhere/"}, settings=Settings())
+    assert res["status"] == "failed" and res["error"]["code"] == "invalid_request"
+    assert "output_prefix" in res["error"]["message"]
 
 
 class FakeS3Client:

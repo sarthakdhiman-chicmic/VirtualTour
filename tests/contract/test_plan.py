@@ -153,3 +153,41 @@ class TestPlanIO(unittest.TestCase):
         
         with self.assertRaisesRegex(ValueError, "Camera window out of bounds"):
             parse_plan(self.base_plan)
+
+
+@pytest.mark.parametrize("change", [
+    lambda d: d.update(provenance=None),
+    lambda d: d["output"].update(height=0),
+    lambda d: d["output"].update(fps=0),
+    lambda d: d["shots"][0]["source"].update(width=0),
+    lambda d: d["shots"][0]["camera"]["start"].update(zoom=0),
+    lambda d: d["shots"][0].update(duration_s=-1),
+    lambda d: d["shots"][0]["transition_in"].update(duration_s=-0.5),
+])
+def test_a_malformed_plan_is_invalid_plan_never_a_crash(change):
+    """Every bad plan is a 400 / invalid_plan, not a TypeError or ZeroDivisionError (a 500)."""
+    from tour_worker.contract.plan import compute_plan_hash
+    from tour_worker.jobs.router import validate_request
+    d = build_valid_plan_dict()
+    change(d)
+    if isinstance(d.get("provenance"), dict):
+        d["provenance"]["plan_hash"] = compute_plan_hash(d)
+    with pytest.raises(ValueError):
+        parse_plan(d)
+    bad = validate_request({"job_type": "tour_render", "plan": d, "output_prefix": "s3://b/o/"})
+    assert bad["error"]["code"] in ("invalid_plan", "invalid_request")
+
+
+@pytest.mark.parametrize("delta, ok", [(0.0, True), (0.02, True), (0.2, False), (-0.5, False)])
+def test_total_duration_must_be_the_shots_lengths(delta, ok):
+    """A plan whose total disagrees with its shots fails as invalid_plan up front, not with
+    verification_failed after the whole render."""
+    from tour_worker.contract.plan import compute_plan_hash
+    d = build_valid_plan_dict()
+    d["total_duration_s"] = round(d["total_duration_s"] + delta, 3)
+    d["provenance"]["plan_hash"] = compute_plan_hash(d)
+    if ok:
+        parse_plan(d)
+    else:
+        with pytest.raises(ValueError, match="total_duration_s"):
+            parse_plan(d)

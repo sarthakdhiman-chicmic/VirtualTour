@@ -34,7 +34,7 @@ from .schemas import MusicHook, MusicTrack, Punch
 
 # v2 (worker modules/music/analysis.py) = v1 + whoosh candidates + rhythm_end; v3 = v2 + per
 # candidate "hit" (drum hit strength, 1.0 = a typical beat of the track)
-SUPPORTED_ANALYSIS_VERSIONS = ("1", "2", "3")
+SUPPORTED_ANALYSIS_VERSIONS = ("1", "2", "3", "4")
 
 
 @dataclass
@@ -125,7 +125,8 @@ def frame_align(boundaries_s, fps, lead_frames=0):
         frames[k] = max(frames[k], frames[k - 1] + 1)
     cum_cs = np.round(frames * 100.0 / fps).astype(int)
     back = np.round(cum_cs / 100.0 * fps).astype(int)
-    assert np.array_equal(back, frames), "frame alignment round trip failed"
+    if not np.array_equal(back, frames):          # centiseconds cannot hold every frame above 100 fps
+        raise ValueError(f"frame alignment round trip failed at {fps} fps")
     durations = np.diff(np.concatenate([[0], cum_cs])) / 100.0
     return [round(float(d), 2) for d in durations]
 
@@ -285,7 +286,9 @@ def sync_to_music(
         values = (vals + bar_w * bars + cfg.music_hook_bonus * hooks
                   + cfg.music_hit_weight * strong
                   - cfg.music_offbeat_penalty * np.array([k == "offbeat" for k in kinds]))
-        usable = times <= usable_end + 1e-6
+        # every boundary is a candidate time, the tour's end too: none past max_total_s (the
+        # hard ceiling; half a frame for frame_align's rounding)
+        usable = (times <= usable_end + 1e-6) & (times <= cfg.max_total_s - 0.5 / fps + 1e-9)
         idx = np.where(usable)[0]
         t_u, v_u, b_u = times[usable], values[usable], bars[usable]
         # clusters in usable-index space; hooks before skip-in (the tour's first frame) excluded

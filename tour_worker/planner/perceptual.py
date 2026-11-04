@@ -16,6 +16,7 @@ import hashlib
 import math
 
 from tour_worker.render.camera_path import base_window
+from tour_worker.scoring.rooms import canon
 from .config import PlannerConfig
 from .schemas import CameraParams, MotionRegion
 
@@ -81,7 +82,7 @@ def plan_motion_regions(
         bbox, mask = d.get("bbox"), d.get("mask_url")
         if not effect or not mask or not bbox or len(bbox) != 4:
             continue
-        outdoors = (room_type or "") in cfg.perceptual_outdoor_rooms
+        outdoors = canon(room_type) in cfg.perceptual_outdoor_rooms     # slugs; room_type is the user's label
         if outdoors and effect in cfg.perceptual_still_outdoors:
             continue                                  # shrubs and hedges outdoors stay still
         if float(d.get("confidence") or 0) < cfg.perceptual_min_confidence:

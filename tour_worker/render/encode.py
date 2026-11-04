@@ -34,6 +34,11 @@ AUDIO_BITRATE = "128k"
 VBV_INIT = 0.9           # x264's default initial buffer fullness
 
 
+
+def _concat_quote(path: str) -> str:
+    """A path inside the single quotes of an ffmpeg concat list (' is written '\\'')."""
+    return path.replace("'", "'\\''")
+
 def _bits(rate: str) -> float:
     return float(rate[:-1]) * 1e6 if rate[-1] in "Mm" else float(rate)
 
@@ -59,9 +64,9 @@ def _run(cmd):
     try:
         subprocess.run(cmd, check=True, capture_output=True, text=True, timeout=1800)
     except subprocess.CalledProcessError as e:
-        raise WorkerError("encode_failed", e.stderr[-2000:])
-    except subprocess.TimeoutExpired:
-        raise WorkerError("encode_failed", "timeout")
+        raise WorkerError("encode_failed", e.stderr[-2000:]) from e
+    except subprocess.TimeoutExpired as e:
+        raise WorkerError("encode_failed", "timeout") from e
 
 
 def _frame_count(path: str) -> int:
@@ -106,7 +111,7 @@ def deliver(master_path: str, out_path: str, fps: int) -> str:
             parts = list(ex.map(encode, enumerate(ranges)))
         listing = os.path.join(td, "parts.txt")
         with open(listing, "w") as f:
-            f.writelines(f"file '{p}'\n" for p in parts)
+            f.writelines(f"file '{_concat_quote(p)}'\n" for p in parts)
         _run(["ffmpeg", "-y", "-loglevel", "error", "-f", "concat", "-safe", "0", "-i", listing,
               "-i", master_path, "-map", "0:v:0", "-map", "1:a:0?",
               "-c:v", "copy", "-c:a", "aac", "-b:a", AUDIO_BITRATE, "-ac", "2",

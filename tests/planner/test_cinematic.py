@@ -115,7 +115,7 @@ def check_contract(shots, res, ow=1920, oh=1080, speed=1.0):
             assert fr[-1][2] > fr[0][2], f"{s.shot_id}: aerials close in on the house"
         elif cam.move.startswith("push"):
             assert fr[-1][2] > fr[0][2], f"{s.shot_id}: a push-in ends closer than it starts"
-        elif cam.move in ("reveal_gimbal_track", "reveal_pedestal"):         # constant zoom
+        elif cam.move in ("reveal_gimbal_track", "reveal_pedestal", "still"):   # constant zoom
             assert fr[-1][2] <= fr[0][2] + 1e-9, f"{s.shot_id} must not end closer"
         else:
             assert fr[-1][2] < fr[0][2], f"{s.shot_id} must end wider than it starts"
@@ -224,3 +224,30 @@ def test_lateral_glides_replace_the_spiral():
         assert all(x > 0 for x in dx) or all(x < 0 for x in dx)  # one direction, no reversal
         assert abs(k[-1].cx - k[0].cx) > 0.05  # a visible glide, not a wobble
     check_contract(shots, res, speed=1.0)
+
+
+def test_a_shot_whose_fallback_also_fails_holds_still(monkeypatch):
+    """Never fail a tour on one shot: when the move and its fallback both fail, the shot gets a
+    still, centred frame that keeps the contract."""
+    from tour_worker.planner import cinematic
+    shots = tour(n=3)
+    real = cinematic._camera
+
+    def fails_on_s01(c, shot, *a, **k):
+        if shot.shot_id == "s01":
+            raise ValueError("path cannot be made to fit")
+        return real(c, shot, *a, **k)
+    monkeypatch.setattr(cinematic, "_camera", fails_on_s01)
+    res = plan_cameras(shots, frames_for(shots), 1920, 1080)
+    i = next(i for i, s in enumerate(shots) if s.shot_id == "s01")
+    assert "cinematic_still:s01" in res.warnings and res.notes[i]["variant"] == "still"
+    assert res.cameras[i].move == "still" and len(res.warnings) == 2      # + its cinematic_fallback
+    check_contract(shots, res)
+
+
+@pytest.mark.parametrize("room, cat", [("Front Exterior", "exterior"), ("front_exterior", "exterior"),
+                                       ("Facade", "exterior"), ("Aerial", "aerial"),
+                                       ("Powder Room", "bath"), ("Master Bathroom", "bath")])
+def test_categories_read_the_user_s_room_label(room, cat):
+    from tour_worker.planner.cinematic import category
+    assert category(shot(1, room, stage="living"), False) == cat

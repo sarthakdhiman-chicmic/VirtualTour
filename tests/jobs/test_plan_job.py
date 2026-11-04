@@ -175,6 +175,7 @@ def test_bad_requests_are_invalid_request_before_any_fetch(change):
 def test_the_runpod_handler_runs_tour_plan(tmp_path, monkeypatch):
     """Both front doors share the router: handler.py here, the HTTP service in tests/service."""
     from handler import handler
+    monkeypatch.setenv("WORKER_FILE_URIS", "1")            # the photos are file:// URIs
     photos = []
     for i, (uri, rt) in enumerate(zip(PHOTOS, ROOMS)):
         p = tmp_path / os.path.basename(uri)

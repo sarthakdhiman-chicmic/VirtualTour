@@ -27,6 +27,8 @@ dev = [
 ]
 
 [project.optional-dependencies]
+# the dev group above again, for pip (`pip install -e ".[dev]"`; pip does not read dependency
+# groups): keep the two lists the same
 dev = [
     "pytest>=7.0.0",
     "fastapi>=0.110",
@@ -55,6 +57,7 @@ segment = [
     "huggingface_hub>=0.25",
     "scipy>=1.10",           # OneFormer's model class imports it at construction
 ]
+# the same packages as segment, from the CUDA index ([tool.uv.sources]): keep the two lists the same
 segment-gpu = [
     "torch>=2.6",
     "torchvision>=0.21",     # transformers' OneFormer post-processing uses it

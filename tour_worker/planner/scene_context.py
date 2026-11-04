@@ -30,11 +30,14 @@ mid-weight thing unless it looks like a surface.
 from __future__ import annotations
 
 import math
+import re
 from dataclasses import dataclass
 
-# keyword -> interest weight (the first keyword contained in the class name wins)
+# keyword -> interest weight: the first keyword a word of the class name matches wins (a word
+# matches a keyword it equals, its plural, or a compound it starts: "stairs", "staircase",
+# "countertop"; not "seat" for "sea" or "flowerbed" for "bed")
 FEATURE_WEIGHTS: tuple[tuple[str, float], ...] = (
-    ("fireplace", 1.0), ("fire", 1.0), ("chandelier", 1.0), ("pendant", 1.0), ("light", 0.9),
+    ("hydrant", 0.2), ("fireplace", 1.0), ("fire", 1.0), ("chandelier", 1.0), ("pendant", 1.0), ("light", 0.9),
     ("lamp", 0.7), ("door", 1.0), ("stair", 1.0), ("window", 0.8), ("blind", 0.5),
     ("swimming", 1.0), ("pool", 1.0), ("water", 0.9), ("river", 0.8), ("sea", 0.8),
     ("lake", 0.8), ("house", 1.0), ("building", 0.9), ("roof", 0.6), ("bed", 1.0),
@@ -42,7 +45,7 @@ FEATURE_WEIGHTS: tuple[tuple[str, float], ...] = (
     ("island", 0.9), ("kitchen", 0.9), ("oven", 0.7), ("stove", 0.7), ("range", 0.7),
     ("sink", 0.6), ("bathtub", 0.9), ("tub", 0.9), ("shower", 0.7), ("toilet", 0.3),
     ("mirror", 0.6), ("tv", 0.4), ("television", 0.4), ("cabinet", 0.5), ("shelf", 0.4),
-    ("chair", 0.5), ("bench", 0.5), ("armchair", 0.6), ("curtain", 0.6), ("plant", 0.6),
+    ("armchair", 0.6), ("chair", 0.5), ("bench", 0.5), ("curtain", 0.6), ("plant", 0.6),
     ("flower", 0.6), ("vase", 0.5), ("tree", 0.4), ("umbrella", 0.5), ("fence", 0.15),
     ("railing", 0.2), ("book", 0.3), ("painting", 0.6), ("picture", 0.6), ("pillow", 0.3),
     ("cushion", 0.3), ("rug", 0.0), ("carpet", 0.0), ("person", 0.0),
@@ -60,12 +63,17 @@ AREA_CAP = 0.15           # a huge feature is not 100x as interesting as a small
 BIG_FEATURE_BOX = 0.01
 
 
+def _word_matches(word: str, key: str) -> bool:
+    return word in (key, key + "s", key + "es") or (word.startswith(key) and len(word) - len(key) >= 3)
+
+
 def class_weight(name: str) -> float:
     n = name.lower()
+    words = re.findall(r"[a-z]+", n)
     for key, w in FEATURE_WEIGHTS:
-        if key in n:
+        if any(_word_matches(word, key) for word in words):
             return w
-    if any(k in n for k in SURFACE_KEYS):
+    if any(k in n for k in SURFACE_KEYS):                # surfaces: anywhere ("playingfield")
         return 0.0
     return UNKNOWN_THING_WEIGHT
 

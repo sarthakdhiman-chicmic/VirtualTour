@@ -52,3 +52,19 @@ def test_ade20k_class_map_covers_our_classes_and_fireplaces():
     labels = {18: "curtain", 17: "plant", 49: "fireplace"}
     regs = segments_to_regions(seg, info, labels, (300, 200), class_map=MODELS["ade20k"]["class_map"])
     assert sorted(r["class_name"] for r in regs) == ["curtain", "fireplace", "potted_plant"]
+
+
+def test_ensure_model_checks_the_class_info_file_without_going_online(tmp_path, monkeypatch):
+    """The processor's class-info file is kept next to the weights and hash-checked like them, so
+    a model folder baked into the image loads with HF_HUB_OFFLINE=1."""
+    import hashlib
+    from tour_worker.vision import segment
+    (tmp_path / "pytorch_model.bin").write_bytes(b"weights")
+    (tmp_path / "coco_panoptic.json").write_text("{}")
+    sha = lambda b: hashlib.sha256(b).hexdigest()  # noqa: E731
+    spec = dict(segment.MODELS["coco"], sha256=sha(b"weights"), class_info=("coco_panoptic.json", sha(b"{}")))
+    monkeypatch.setitem(segment.MODELS, "coco", spec)
+    assert segment.ensure_model(str(tmp_path), "coco") == str(tmp_path)    # nothing to download
+    (tmp_path / "coco_panoptic.json").write_text('{"0": "tampered"}')
+    with pytest.raises(RuntimeError, match="class info checksum"):
+        segment.ensure_model(str(tmp_path), "coco")

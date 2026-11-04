@@ -65,6 +65,12 @@ def run_job(job: dict, settings: Settings | None = None, storage=None) -> dict:
         return bad
     job_type = job["job_type"]
     storage = storage or build_storage(settings, job_type)
+    prefix = job.get("output_prefix")
+    if prefix and hasattr(storage, "check"):            # fail now, not after the render
+        try:
+            storage.check(prefix, put=True)
+        except ValueError as e:
+            return failure("invalid_request", f"output_prefix: {e}")
     try:
         with tempfile.TemporaryDirectory() as workdir:
             if job_type == "tour_segment":

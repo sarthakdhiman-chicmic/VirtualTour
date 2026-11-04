@@ -191,5 +191,24 @@ class TestRender(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "Expected 320x180"):
                 verify(dummy_vid, plan)
 
+    def test_verify_fails_a_short_video_under_full_length_audio(self):
+        """The container takes the audio's 2 s: the video's own 1 s must still fail the check."""
+        plan_dict = {
+            "plan_version": "1.0", "listing_id": "bench", "mode": "cinematic", "preset": "bench",
+            "output": {"width": 320, "height": 180, "fps": 30, "codec": "h264"},
+            "total_duration_s": 2.0,
+            "shots": [], "warnings": [],
+            "provenance": {"scoring_config_version": "1", "planner_config_version": "1", "plan_hash": ""}
+        }
+        plan = Plan(**plan_dict)
+        with tempfile.TemporaryDirectory() as d:
+            vid = os.path.join(d, "short.mp4")
+            subprocess.run(["ffmpeg", "-f", "lavfi", "-i", "color=c=gray:s=320x180:r=30:d=1",
+                            "-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=48000:d=2",
+                            "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-t", "2", vid],
+                           capture_output=True, check=True)
+            with self.assertRaisesRegex(RuntimeError, "Expected 60 frames, got 30"):
+                verify(vid, plan)
+
 if __name__ == '__main__':
     unittest.main()

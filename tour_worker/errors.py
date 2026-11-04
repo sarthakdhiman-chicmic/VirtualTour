@@ -6,6 +6,14 @@ and messages are unchanged. The job runners turn any exception into failure(...)
 from __future__ import annotations
 
 
+# Every code a job can fail with (README.md, "Jobs and their JSON"); anything else is "unknown"
+CODES = frozenset({
+    "invalid_job_type", "invalid_request", "invalid_plan", "unsupported_camera_type",
+    "unsupported_easing", "image_fetch_failed", "planning_failed", "prewarp", "encode_failed",
+    "verification_failed", "unknown",
+})
+
+
 class WorkerError(RuntimeError):
     def __init__(self, code: str, message: str = ""):
         self.code, self.message = code, message
@@ -18,10 +26,12 @@ def failure(code: str, message: str) -> dict:
 
 def from_exception(e: BaseException) -> dict:
     """The failure result for an exception: WorkerError keeps its code; another RuntimeError
-    "code: text" gives code "code"; anything else is "unknown". The message is the full text."""
+    "code: text" gives code "code" when that is one of CODES; anything else is "unknown" (a
+    library's own text never becomes a code). The message is the full text."""
     msg = str(e)
     if isinstance(e, WorkerError):
         return failure(e.code, msg)
-    if isinstance(e, RuntimeError):
-        return failure(msg.split(":")[0] if ":" in msg else msg, msg)
+    prefix = msg.split(":")[0].strip()
+    if isinstance(e, RuntimeError) and prefix in CODES:
+        return failure(prefix, msg)
     return failure("unknown", msg)

@@ -9,7 +9,7 @@ services:
       context: ..
       dockerfile: docker/render.Dockerfile
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"     # this machine only: the key is dev-key and your AWS credentials are in it
     environment:
       WORKER_API_KEY: ${WORKER_API_KEY:-dev-key}
       JOB_CONCURRENCY: "1"
@@ -29,7 +29,7 @@ services:
       args:
         TORCH_EXTRA: segment          # CPU PyTorch; the GPU image is the default build
     ports:
-      - "8001:8000"
+      - "127.0.0.1:8001:8000"
     environment:
       WORKER_API_KEY: ${WORKER_API_KEY:-dev-key}
       AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}

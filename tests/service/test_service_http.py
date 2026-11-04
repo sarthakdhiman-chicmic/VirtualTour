@@ -242,8 +242,9 @@ def test_a_real_tiny_render_through_the_service(make_client, monkeypatch, tmp_pa
 
 # ---- a real plan ---------------------------------------------------------------------------------
 
-def test_a_real_tour_plan_through_the_service(make_client, tmp_path):
+def test_a_real_tour_plan_through_the_service(make_client, tmp_path, monkeypatch):
     """tour_plan behind POST /runsync: photos from file:// URIs, the plan back as JSON."""
+    monkeypatch.setenv("WORKER_FILE_URIS", "1")
     import cv2
     import numpy as np
     from tour_worker.contract.jobs import TourPlanResult
@@ -261,3 +262,19 @@ def test_a_real_tour_plan_through_the_service(make_client, tmp_path):
     assert body["status"] == "COMPLETED", body
     TourPlanResult.model_validate(body["output"])
     assert body["output"]["plan"]["shots"]
+
+
+def test_many_waiting_runsync_calls_do_not_starve_health(make_client):
+    """/runsync waits on the event loop, not on a server thread: /health still answers while
+    more runsync calls wait than the threadpool has threads (40)."""
+    import concurrent.futures
+    gate = threading.Event()
+    c = make_client(runner=lambda inp: (gate.wait(10), {"status": "completed"})[1], concurrency=1)
+    with concurrent.futures.ThreadPoolExecutor(60) as ex:
+        waits = [ex.submit(c.post, "/runsync", headers=AUTH, json={"input": SEGMENT}) for _ in range(50)]
+        time.sleep(0.5)
+        try:
+            assert ex.submit(c.get, "/health").result(timeout=5).status_code == 200
+        finally:
+            gate.set()                                   # starved or not, let the jobs finish
+        assert all(f.result(timeout=30).status_code == 200 for f in waits)

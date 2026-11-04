@@ -15,16 +15,20 @@ process left IN_QUEUE or IN_PROGRESS is FAILED with code `worker_restarted`: its
 and the caller resubmits. Finished jobs are forgotten JOB_TTL_S after they finished."""
 from __future__ import annotations
 
+import ipaddress
 import json
 import logging
 import os
+import socket
 import threading
 import time
+import urllib.error
 import urllib.request
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Any, Callable
+from urllib.parse import urlsplit
 
 from tour_worker.errors import failure, from_exception
 from tour_worker.service.redact import redact_text, redact_url
@@ -125,11 +129,18 @@ class JobStore:
             return
         tmp = self._path(job.id) + ".tmp"
         try:
+            text = json.dumps(job.record())
             with open(tmp, "w") as f:
-                json.dump(job.record(), f)
+                f.write(text)
+                f.flush()
+                os.fsync(f.fileno())                 # a power cut leaves the old record or the new
             os.replace(tmp, self._path(job.id))
-        except OSError as e:                     # a full disk must not fail the job
+        except (OSError, TypeError, ValueError) as e:  # a full disk must not fail the job
             log.error("job %s: could not save its record: %s", job.id, e)
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
 
     def _unpersist(self, job_id: str) -> None:
         if self.jobs_dir:
@@ -263,6 +274,10 @@ class JobStore:
             result = self.runner(job_input)
         except BaseException as e:      # the router returns failures; this is a bug or an abort
             result = from_exception(e)
+        try:
+            json.dumps(result, allow_nan=False)   # /status (strict JSON), the record and the webhook send it
+        except (TypeError, ValueError) as e:
+            result = failure("unknown", f"the job's result is not JSON: {e}")
         status, output, error = split_result(result)
         with self._cond:
             job.status, job.output, job.error = status, output, error
@@ -283,19 +298,65 @@ class JobStore:
         threading.Thread(target=post_webhook, args=(url, body), name="tour-job-webhook", daemon=True).start()
 
 
+def webhook_refusal(url: str, allowed_hosts: tuple[str, ...] = ()) -> str | None:
+    """Why a webhook URL is refused at submit, or None. allowed_hosts: WEBHOOK_HOSTS (empty: any)."""
+    parts = urlsplit(url)
+    if parts.scheme.lower() not in ("http", "https") or not parts.hostname:
+        return "webhook must be an http(s) URL"
+    if allowed_hosts and parts.hostname.lower() not in allowed_hosts:
+        return f"webhook host {parts.hostname} is not one of WEBHOOK_HOSTS"
+    return None
+
+
+def _forbidden_address(host: str) -> bool:
+    """True if host resolves to an address a webhook must never reach: link-local (the cloud
+    metadata service, 169.254.169.254), multicast, reserved or unspecified."""
+    try:
+        infos = socket.getaddrinfo(host, None)
+    except OSError:
+        return False                                # unresolvable: the POST fails and says so
+    for info in infos:
+        ip = ipaddress.ip_address(str(info[4][0]).split("%")[0])
+        if ip.is_link_local or ip.is_multicast or ip.is_reserved or ip.is_unspecified:
+            return True
+    return False
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """A webhook is POSTed where the caller said, never redirected (urllib would re-send it as a
+    GET to wherever the redirect points)."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        raise urllib.error.HTTPError(req.full_url, code, f"redirect refused ({code})", headers, fp)
+
+
+_webhook_opener = urllib.request.build_opener(_NoRedirect)
+
+
 def post_webhook(url: str, body: dict, attempts: int = WEBHOOK_ATTEMPTS,
                  timeout_s: float = WEBHOOK_TIMEOUT_S, backoff_s: float = 1.0) -> bool:
-    """POST body as JSON to url; True once a 2xx comes back. Never raises."""
+    """POST body as JSON to url; True once a 2xx comes back. Never raises. A 4xx (but 408 / 429)
+    or a redirect is final; a 5xx or a connection error is tried again."""
+    host = urlsplit(url).hostname or ""
+    if _forbidden_address(host):
+        log.warning("job %s: webhook %s refused: its host is a link-local / reserved address",
+                    body.get("id"), redact_url(url))
+        return False
     data = json.dumps(body).encode()
     for attempt in range(1, attempts + 1):
         try:
             req = urllib.request.Request(url, data=data, method="POST",
                                          headers={"Content-Type": "application/json",
                                                   "User-Agent": "tour-worker"})
-            with urllib.request.urlopen(req, timeout=timeout_s) as resp:
+            with _webhook_opener.open(req, timeout=timeout_s) as resp:
                 if 200 <= resp.status < 300:
                     return True
                 err = f"HTTP {resp.status}"
+        except urllib.error.HTTPError as e:
+            err = f"HTTP {e.code}"
+            if e.code < 500 and e.code not in (408, 429):
+                log.warning("job %s: webhook %s failed: %s (not retried)", body.get("id"), redact_url(url), err)
+                return False
         except Exception as e:                      # noqa: BLE001 - best effort by design
             err = redact_text(str(e))
         log.warning("job %s: webhook %s attempt %d/%d failed: %s", body.get("id"), redact_url(url),

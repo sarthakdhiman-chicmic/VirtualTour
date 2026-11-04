@@ -1,7 +1,10 @@
 """READ-ONLY: pick photo-like objects from the S3 index, dedupe by ETag, download distinct photos.
 
 Run with the BACKEND venv (S3 client + settings), after s3_list.py:
-  <backend>/.venv/bin/python training/fireplace_adapter/s3_fetch.py
+  ARTICULAIT_BACKEND=<backend> FIREPLACE_HOLDOUT_DIRS=<dir>[:<dir>...] \
+      <backend>/.venv/bin/python training/fireplace_adapter/s3_fetch.py
+FIREPLACE_HOLDOUT_DIRS: extra folders of the evaluation listings' photos (os.pathsep-separated),
+held out by md5 like out/perceptual_*/images.
 
 - photo-like: real photos people uploaded (listings/<id>/original.jpg, uploads/.../original/...,
   user uploads, photos/, ...). Skipped: masks, depth, detections, every generated output
@@ -19,15 +22,14 @@ import os
 import re
 import sys
 
-BACKEND = "/home/sarthak/Desktop/Articulait/articulait_backend"
+BACKEND = os.environ.get("ARTICULAIT_BACKEND") or sys.exit("set ARTICULAIT_BACKEND to the backend checkout")
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 OUT = os.path.join(ROOT, "out", "fireplace_adapter")
 PHOTOS = os.path.join(OUT, "photos")
 KNOWN_DIRS = [os.path.join(ROOT, "out", d, "images") for d in
               ("perceptual_turkey", "perceptual_downing", "perceptual_turkey_mix", "backend_downing")]
-KNOWN_DIRS += ["/home/sarthak/Downloads/603 S Downing Street, Denver, CO 80209 _ MLS #6934339 _ Zillow",
-               "/home/sarthak/Downloads/1030 Turkey Trot, Greensboro, GA 30642 _ MLS #71882 _ Zillow",
-               os.path.join(ROOT, "out", "mixed_turkey_src")]
+KNOWN_DIRS += [os.path.join(ROOT, "out", "mixed_turkey_src")]
+KNOWN_DIRS += [d for d in os.environ.get("FIREPLACE_HOLDOUT_DIRS", "").split(os.pathsep) if d]
 
 IMG_EXT = (".jpg", ".jpeg", ".png", ".webp")
 SKIP = re.compile(r"/masks/|/depth|detected|detections|empty|object_removal|instruction_edit|sku_replace|"

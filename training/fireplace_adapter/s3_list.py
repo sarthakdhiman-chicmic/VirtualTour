@@ -1,14 +1,14 @@
 """READ-ONLY: list the assets bucket (list_objects_v2 only) into out/fireplace_adapter/s3_index.jsonl.
 
-Run with the BACKEND venv (it has the S3 client + settings):
-  <backend>/.venv/bin/python training/fireplace_adapter/s3_list.py
+Run with the BACKEND venv (it has the S3 client + settings), ARTICULAIT_BACKEND = its checkout:
+  ARTICULAIT_BACKEND=<backend> <backend>/.venv/bin/python training/fireplace_adapter/s3_list.py
 Writes key, size, etag, last_modified per object. No URLs, no credentials are printed or stored.
 """
 import json
 import os
 import sys
 
-BACKEND = "/home/sarthak/Desktop/Articulait/articulait_backend"
+BACKEND = os.environ.get("ARTICULAIT_BACKEND") or sys.exit("set ARTICULAIT_BACKEND to the backend checkout")
 sys.path.insert(0, BACKEND)
 os.chdir(BACKEND)                       # settings read the backend .env
 from app.core.config import settings  # noqa: E402

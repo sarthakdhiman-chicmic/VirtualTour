@@ -182,3 +182,37 @@ def test_punch_zooms_in_on_the_hit_and_settles():
 def test_a_bad_punch_is_rejected():
     with pytest.raises(ValueError, match="punch"):
         _punched_plan([{"at_s": 0.0, "amount": 0.2, "decay_s": 0.35}])
+
+
+def test_a_workdir_with_a_quote_in_its_name_renders(tmp_path):
+    """The chunks are joined through an ffmpeg concat list: a ' in the path must be escaped."""
+    plan = _plan()
+    wd = tmp_path / "o'brien's tour"
+    wd.mkdir()
+    _workdir(str(wd))
+    verify(render_direct(plan, str(wd), workers=1), plan)
+
+
+def test_a_chunk_that_fails_to_draw_leaves_no_encoder_running(tmp_path, monkeypatch):
+    """draw_frame raising mid-chunk: ffmpeg is killed and reaped, and the error comes through."""
+    from tour_worker.render import direct
+    plan = _plan()
+    _workdir(str(tmp_path))
+    calls, procs = [], []
+    real_popen = subprocess.Popen
+
+    def popen(*a, **k):
+        procs.append(real_popen(*a, **k))
+        return procs[-1]
+
+    def draw(g):
+        calls.append(g)
+        if g == 5:
+            raise RuntimeError("drawing failed")
+        return np.zeros((360, 640, 3), np.uint8)
+    monkeypatch.setattr(direct.subprocess, "Popen", popen)
+    monkeypatch.setattr(direct, "draw_frame", draw)
+    direct._init(plan, str(tmp_path / "images"))
+    with pytest.raises(RuntimeError, match="drawing failed"):
+        direct._encode_chunk((0, 0, 30, str(tmp_path)))
+    assert calls[-1] == 5 and len(procs) == 1 and procs[0].returncode is not None    # killed and reaped

@@ -277,3 +277,21 @@ def test_cuts_follow_the_hardest_drum_hits_not_the_guessed_bar_line():
     cuts = boundaries(r.durations)[:-1]
     on = [np.abs(strong - c).min() <= TOL for c in cuts]
     assert r.music.synced and all(on)
+
+
+@pytest.mark.parametrize("bpm, offset", [(119, 0.0), (103, 0.25), (88, 0.4)])
+def test_a_synced_tour_never_runs_past_max_total_s(bpm, offset):
+    """max_total_s is the hard ceiling: before, the last cut could snap to a bar after it
+    (5 x 3.6 s under a 20 s cap synced to 20.17 s at 119 bpm)."""
+    cfg = PlannerConfig(max_total_s=20.0)
+    r = sync_to_music([3.6] * 5, track(bpm=bpm, offset=offset), cfg)
+    assert r.music.synced and sum(r.durations) <= 20.0 + 1e-9
+
+
+def test_allocated_lengths_stay_under_max_total_s_after_the_final_shot_minimum(report):  # noqa: F811
+    """The ceiling is checked on the lengths the shots get (clamped, last >= final_shot_min_s)."""
+    from tour_worker.planner.allocate import allocate_content
+    for cap in (8.0, 13.0, 25.0, 35.7):            # 35.7: the old allocation made 35.9 s
+        cfg = PlannerConfig(max_total_s=cap)
+        shots, _ = allocate_content(report, cfg, {})
+        assert sum(s.final_duration for s in shots) <= cap + 1e-9

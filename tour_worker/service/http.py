@@ -16,9 +16,11 @@ checks) is refused at submit with HTTP 400 and the worker's failure shape
 Every other HTTP error uses that shape too (401 unauthorized, 404 job_not_found)."""
 from __future__ import annotations
 
+import asyncio
 import hmac
 import logging
 import socket
+import time
 from contextlib import asynccontextmanager
 from typing import Any, Optional
 
@@ -26,14 +28,17 @@ from fastapi import Depends, FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict
+from starlette.concurrency import run_in_threadpool
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from tour_worker.config import Settings, get_settings
 from tour_worker.contract.jobs import JOB_TYPES
 from tour_worker.errors import failure
-from tour_worker.service.jobs import CANCELLED, COMPLETED, FAILED, IN_PROGRESS, IN_QUEUE, JobStore
+from tour_worker.service.jobs import (CANCELLED, COMPLETED, FAILED, IN_PROGRESS, IN_QUEUE, TERMINAL,
+                                      JobStore, webhook_refusal)
 
 log = logging.getLogger("tour_worker.service")
+RUNSYNC_POLL_S = 0.25             # how often a waiting POST /runsync looks at its job
 
 
 def package_version() -> str:
@@ -113,8 +118,10 @@ def create_app(settings: Settings | None = None, store: JobStore | None = None) 
         from tour_worker.jobs.router import validate_request
         if not isinstance(body.input, dict):
             raise ServiceError(400, "invalid_request", "input must be a JSON object")
-        if body.webhook is not None and not body.webhook.startswith(("https://", "http://")):
-            raise ServiceError(400, "invalid_request", "webhook must be an http(s) URL")
+        if body.webhook is not None:
+            refused = webhook_refusal(body.webhook, settings.webhook_hosts)
+            if refused:
+                raise ServiceError(400, "invalid_request", refused)
         bad = validate_request(body.input)
         if bad is not None:
             raise ServiceError(400, bad["error"]["code"], bad["error"]["message"])
@@ -131,9 +138,16 @@ def create_app(settings: Settings | None = None, store: JobStore | None = None) 
         return {"id": job.id, "status": IN_QUEUE}      # what it was when queued (it may be running now)
 
     @app.post("/runsync", dependencies=[Depends(require_key)])
-    def runsync(body: RunRequest):
-        job = _submit(body)
-        return store.wait(job.id, settings.runsync_timeout_s)
+    async def runsync(body: RunRequest):
+        # waits on the event loop, not a server thread: many waiting callers must not starve
+        # /status and /health (their sync handlers share the threadpool)
+        job = await run_in_threadpool(_submit, body)
+        deadline = time.monotonic() + settings.runsync_timeout_s
+        while True:
+            body = await run_in_threadpool(store.status, job.id)   # its lock is held over record writes
+            if body is None or body["status"] in TERMINAL or time.monotonic() >= deadline:
+                return _status_or_404(job.id, body)
+            await asyncio.sleep(min(RUNSYNC_POLL_S, max(0.0, deadline - time.monotonic())))
 
     @app.get("/status/{job_id}", dependencies=[Depends(require_key)])
     def status(job_id: str):

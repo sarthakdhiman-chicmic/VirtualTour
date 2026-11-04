@@ -172,10 +172,16 @@ def test_unfinished_jobs_are_never_expired(stores):
 class _Hook(BaseHTTPRequestHandler):
     received: list = []
     fail_first = 0
+    answer = None              # a fixed (status, headers) instead of 200
 
     def do_POST(self):
         body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
-        if _Hook.fail_first > 0:
+        if _Hook.answer:
+            _Hook.received.append(body)
+            self.send_response(_Hook.answer[0])
+            for k, v in _Hook.answer[1].items():
+                self.send_header(k, v)
+        elif _Hook.fail_first > 0:
             _Hook.fail_first -= 1
             self.send_response(500)
         else:
@@ -189,7 +195,7 @@ class _Hook(BaseHTTPRequestHandler):
 
 @pytest.fixture
 def hook_server():
-    _Hook.received, _Hook.fail_first = [], 0
+    _Hook.received, _Hook.fail_first, _Hook.answer = [], 0, None
     srv = HTTPServer(("127.0.0.1", 0), _Hook)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     yield f"http://127.0.0.1:{srv.server_address[1]}/hook?token=abc"
@@ -212,3 +218,46 @@ def test_the_webhook_is_retried_and_never_fails_the_job(hook_server, stores):
     store = stores(runner=lambda inp: RENDER_OK)
     job = store.submit({}, webhook="http://127.0.0.1:9/nothing")
     assert store.wait(job.id, 5)["status"] == COMPLETED
+
+
+def test_a_4xx_is_not_retried_and_a_redirect_is_not_followed(hook_server):
+    _Hook.answer = (404, {})
+    assert post_webhook(hook_server, {"id": "x"}, backoff_s=0.01) is False
+    assert len(_Hook.received) == 1                              # one try: a 4xx is final
+    _Hook.received, _Hook.answer = [], (302, {"Location": "http://169.254.169.254/latest/meta-data/"})
+    assert post_webhook(hook_server, {"id": "y"}, backoff_s=0.01) is False
+    assert len(_Hook.received) == 1
+
+
+@pytest.mark.parametrize("url", ["http://169.254.169.254/latest/meta-data/", "http://[fe80::1]/x",
+                                 "http://0.0.0.0:9/x"])
+def test_a_webhook_never_reaches_link_local_or_reserved_addresses(url, monkeypatch):
+    import urllib.request
+    monkeypatch.setattr(urllib.request.OpenerDirector, "open", lambda *a, **k: pytest.fail("posted"))
+    assert post_webhook(url, {"id": "x"}, backoff_s=0.01) is False
+
+
+def test_webhook_hosts_limits_where_a_webhook_may_point():
+    from tour_worker.service.jobs import webhook_refusal
+    assert webhook_refusal("HTTPS://Backend.example.com/hook") is None          # scheme: any case
+    assert webhook_refusal("ftp://x/") and webhook_refusal("https:///no-host")
+    hosts = ("backend.example.com",)
+    assert webhook_refusal("https://backend.example.com/h", hosts) is None
+    assert "WEBHOOK_HOSTS" in webhook_refusal("https://evil.example.net/h", hosts)
+
+
+def test_a_result_that_is_not_json_fails_the_job_instead_of_hanging_it(stores, tmp_path):
+    """Before: json.dump raised inside the lock - waiters slept out their timeout, no webhook, and
+    the record stayed IN_PROGRESS."""
+    import numpy as np
+    store = stores(runner=lambda inp: {"status": "completed", "duration_s": np.float32(1.5), "s": {1}},
+                   jobs_dir=str(tmp_path))
+    nan = stores(runner=lambda inp: {"status": "completed", "duration_s": float("nan")})
+    assert nan.wait(nan.submit({}).id, 5)["error"]["code"] == "unknown"     # /status sends strict JSON
+    t0 = time.monotonic()
+    body = store.wait(store.submit({}).id, 5)
+    assert time.monotonic() - t0 < 2
+    assert body["status"] == FAILED and body["error"]["code"] == "unknown"
+    assert "not JSON" in body["error"]["message"]
+    assert json.load(open(next(tmp_path.glob("*.json"))))["status"] == FAILED
+    assert not list(tmp_path.glob("*.tmp"))

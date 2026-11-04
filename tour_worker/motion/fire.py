@@ -9,6 +9,7 @@ loader) is the flames alone. Every effect function takes the Region as `r`."""
 from __future__ import annotations
 
 import math
+import os
 
 import cv2
 import numpy as np
@@ -178,10 +179,18 @@ def fire_glow(flame: np.ndarray) -> np.ndarray:
 def fire_zone_file(path: str, src_w: int, src_h: int):
     """Flame tongues -> their filled zone (tour_worker/vision/fire_detect.flame_zone), written next to
     the mask; returns (zone path, its bbox normalised). Masks from before the zone existed work."""
-    m = cv2.resize(cv2.imread(path, cv2.IMREAD_GRAYSCALE), (src_w, src_h), interpolation=cv2.INTER_NEAREST)
+    raw = cv2.imread(path, cv2.IMREAD_GRAYSCALE)
+    if raw is None:                                # load_feather reports it (unreadable)
+        return path, (0.0, 0.0, 1.0, 1.0)
+    m = cv2.resize(raw, (src_w, src_h), interpolation=cv2.INTER_NEAREST)
     z = flame_zone(m)
     zp = path[:-4] + ".zone.png"
-    cv2.imwrite(zp, z)
+    # every render worker writes this file (the same bytes): write aside and swap it in, so a
+    # worker reading it never sees half a file (a dropped fire for that chunk, output by worker count)
+    tmp = f"{zp[:-4]}.{os.getpid()}.png"
+    if not cv2.imwrite(tmp, z):
+        return path, (0.0, 0.0, 1.0, 1.0)          # no zone file: the mask as it came
+    os.replace(tmp, zp)
     ys, xs = np.nonzero(z)
     if not len(ys):
         return path, (0.0, 0.0, 1.0, 1.0)

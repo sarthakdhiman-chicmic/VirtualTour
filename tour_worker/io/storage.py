@@ -36,7 +36,7 @@ class HttpStorage(Storage):
         except Exception as e:
             clean_uri = uri.split('?')[0]
             clean_e_str = str(e).replace(uri, clean_uri)
-            raise RuntimeError(f"HTTP fetch failed for {clean_uri}: {clean_e_str}")
+            raise RuntimeError(f"HTTP fetch failed for {clean_uri}: {clean_e_str}") from e
 
     def put(self, path: str, uri: str) -> None:
         raise NotImplementedError("HttpStorage cannot put")
@@ -116,7 +116,10 @@ class CompositeStorage(Storage):
     an absolute path - s3://, https://, bare names - is served by the local store (a
     LocalMapStorage: by basename), so a plan with production URIs renders from a folder.
     Before 2026-10 a local store took EVERY URI, file:// too (a file:// music track was looked
-    up by basename in IMAGES_DIR)."""
+    up by basename in IMAGES_DIR).
+
+    files: the store for file:// URIs and filesystem paths. None (production): they are refused,
+    so a request cannot read or write the worker's own files."""
 
     def __init__(self, s3: Storage, http: Storage, local: Storage | None = None,
                  local_for_remote: bool = False, files: Storage | None = None):
@@ -124,10 +127,12 @@ class CompositeStorage(Storage):
         self.http = http
         self.local = local
         self.local_for_remote = local_for_remote and local is not None
-        self.files = files or FileStorage()
+        self.files = files
 
     def _route(self, uri: str, put: bool = False) -> Storage:
-        if is_file_uri(uri):
+        if is_file_uri(uri) or "://" not in uri and not self.local_for_remote:
+            if self.files is None:
+                raise ValueError(f"file URIs and paths are not allowed (WORKER_FILE_URIS): {uri}")
             return self.files
         if self.local_for_remote or (uri.startswith("local://") and self.local is not None):
             return self.local
@@ -135,9 +140,11 @@ class CompositeStorage(Storage):
             return self.s3
         if uri.startswith("https://") and not put:
             return self.http
-        if "://" not in uri:                       # a relative path
-            return self.files
         raise ValueError(f"Unsupported {'put ' if put else ''}URI scheme: {uri}")
+
+    def check(self, uri: str, put: bool = False) -> None:
+        """Raise ValueError if this storage cannot serve uri (before a job starts on it)."""
+        self._route(uri, put)
 
     def get(self, uri: str, dest: str) -> None:
         self._route(uri).get(uri, dest)
@@ -148,8 +155,11 @@ class CompositeStorage(Storage):
 
 def build_storage(settings, job_type: str = "tour_render") -> CompositeStorage:
     """The storage a job runs with. tour_segment always reads photos from S3 / HTTPS and writes
-    masks to S3 (as it always did); tour_render and tour_plan honour WORKER_STORAGE=local."""
-    if job_type in ("tour_render", "tour_plan") and settings.storage == "local":
+    masks to S3 (as it always did); tour_render and tour_plan honour WORKER_STORAGE=local.
+    file:// URIs and paths only with WORKER_FILE_URIS or WORKER_STORAGE=local."""
+    local = job_type in ("tour_render", "tour_plan") and settings.storage == "local"
+    files = FileStorage() if settings.file_uris or settings.storage == "local" else None
+    if local:
         return CompositeStorage(s3=S3Storage(), http=HttpStorage(), local=LocalMapStorage(settings.images_dir),
-                                local_for_remote=True)
-    return CompositeStorage(s3=S3Storage(), http=HttpStorage())
+                                local_for_remote=True, files=files)
+    return CompositeStorage(s3=S3Storage(), http=HttpStorage(), files=files)

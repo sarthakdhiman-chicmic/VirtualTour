@@ -255,7 +255,8 @@ def field_align(regions: list[Region]) -> int:
     """A window whose bounds are multiples of this (or the frame's last row/col) contains every
     coarse grid point its regions use."""
     steps = [s for r in regions for s in field_step(r.effect) + SMOOTH_STEP.get(r.effect, ())]
-    assert all(s in (1, 2, 4) for s in steps), "field steps must be 1, 2 or 4 (window alignment)"
+    if not all(s in (1, 2, 4) for s in steps):
+        raise ValueError("field steps must be 1, 2 or 4 (window alignment)")
     return int(np.lcm.reduce([max(1, s) for s in steps] or [1]))
 
 

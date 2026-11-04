@@ -25,7 +25,7 @@ def _band_sharpness(abs_lap: np.ndarray, mask: np.ndarray, cfg: DepthOfFieldConf
 
 def _band_masks(shape: tuple[int, int], depth: np.ndarray | None) -> tuple[list[np.ndarray], str]:
     h, w = shape
-    if depth is not None:
+    if depth is not None and np.isfinite(depth).all():
         d = cv2.resize(depth.astype(np.float32), (w, h), interpolation=cv2.INTER_LINEAR)
         q1, q2 = np.quantile(d, [1 / 3, 2 / 3])
         return [d <= q1, (d > q1) & (d <= q2), d > q2], "depth_terciles"
@@ -46,6 +46,8 @@ def score_depth_of_field(gray_u8: np.ndarray, depth: np.ndarray | None,
         "bands_used": len(valid),
     }
     note = f"bands={mode}"
+    if depth is not None and mode != "depth_terciles":
+        note += " (depth map not finite: ignored)"      # NaN quantiles made every band empty
     if len(valid) >= cfg.min_bands:
         score = cfg.min_weight * min(valid) + cfg.mean_weight * (sum(valid) / len(valid))
     else:

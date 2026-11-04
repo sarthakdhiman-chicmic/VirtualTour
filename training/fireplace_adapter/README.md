@@ -14,8 +14,8 @@ counts as a positive in training.
 
 | step | script | output (`out/fireplace_adapter/`) |
 |---|---|---|
-| list the bucket (read-only) | `s3_list.py` (backend venv) | `s3_index.jsonl` |
-| download distinct real photos, by ETag | `s3_fetch.py [--wide]` (backend venv) | `photos/`, `manifest.jsonl` |
+| list the bucket (read-only) | `s3_list.py` (backend venv, `ARTICULAIT_BACKEND`) | `s3_index.jsonl` |
+| download distinct real photos, by ETag | `s3_fetch.py [--wide]` (backend venv, `ARTICULAIT_BACKEND`, `FIREPLACE_HOLDOUT_DIRS`) | `photos/`, `manifest.jsonl` |
 | teacher: ADE20K fireplace masks | `teacher.py [--known]` | `teacher/<id>.json`, `<id>_fireplace.png`, flame and zone PNGs |
 | recompute "lit" with the current fire.py | `relabel_lit.py [--known]` | `teacher/<id>_lit.json` |
 | choose photos and the held-out split | `select_photos.py` | `selected.json`, `phash.json` |

@@ -1,8 +1,17 @@
+import hashlib
 import os
-from PIL import Image, ImageOps
 
 from tour_worker.errors import WorkerError
 from tour_worker.motion.masks import mask_relpath
+
+def photo_filename(plan, image_uri: str) -> str:
+    """The file a shot's photo is kept in under <workdir>/images: its basename, or, when another
+    photo of the plan has the same basename, the basename behind a hash of the URI."""
+    base = image_uri.split("/")[-1]
+    if all(s.image_uri == image_uri or s.image_uri.split("/")[-1] != base for s in plan.shots):
+        return base
+    return f"{hashlib.sha256(image_uri.encode()).hexdigest()[:12]}_{base}"
+
 
 def fetch_and_prepare(plan, storage, workdir, image_urls=None):
     if image_urls is None:
@@ -12,36 +21,16 @@ def fetch_and_prepare(plan, storage, workdir, image_urls=None):
     os.makedirs(images_dir, exist_ok=True)
     
     for shot in plan.shots:
-        basename = shot.image_uri.split("/")[-1]
-        dest_path = os.path.join(images_dir, basename)
+        dest_path = os.path.join(images_dir, photo_filename(plan, shot.image_uri))
         
         if not os.path.exists(dest_path):
             try:
                 uri = image_urls.get(shot.image_uri, shot.image_uri)
                 storage.get(uri, dest_path)
             except Exception as e:
-                raise WorkerError("image_fetch_failed", f"failed to fetch shot {shot.shot_id} ({e})")
-                
-        # Prepare
-        try:
-            with Image.open(dest_path) as img:
-                img = ImageOps.exif_transpose(img)
-                w, h = img.size
-                
-                # Check dimensions against plan
-                if w != shot.source.width or h != shot.source.height:
-                    warnings.append(f"Image {basename} dimensions {w}x{h} do not match plan {shot.source.width}x{shot.source.height}. Clamping camera.")
-                
-                target_max = int(plan.output.width * 1.2)
-                if max(w, h) > target_max:
-                    scale = target_max / max(w, h)
-                    new_w = int(w * scale)
-                    new_h = int(h * scale)
-                    img = img.resize((new_w, new_h), Image.Resampling.LANCZOS)
-                    # Overwrite
-                    img.save(dest_path, "JPEG", quality=95)
-        except Exception as e:
-            raise RuntimeError(f"image preparation failed: {e}")
+                raise WorkerError("image_fetch_failed", f"failed to fetch shot {shot.shot_id} ({e})") from e
+        # the photo is used as fetched: ShotWarp scales it to the plan's source size (warning
+        # image_resized) and refuses one with a different aspect (prewarp)
 
         # plan 1.4 motion region masks: a mask that cannot be fetched drops its region (the
         # renderer never fails on it; tour_worker.motion.loader.load_regions skips it)

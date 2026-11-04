@@ -6,21 +6,21 @@ from typing import List, Optional, Any
 from pydantic import BaseModel, ConfigDict, Field
 
 class OutputConfig(BaseModel):
-    width: int
-    height: int
-    fps: int
+    width: int = Field(gt=0)
+    height: int = Field(gt=0)
+    fps: int = Field(gt=0, le=120)
     codec: str
     model_config = ConfigDict(extra='ignore')
 
 class Size(BaseModel):
-    width: int
-    height: int
+    width: int = Field(gt=0)
+    height: int = Field(gt=0)
     model_config = ConfigDict(extra='ignore')
 
 class CameraTransform(BaseModel):
     cx: float
     cy: float
-    zoom: float
+    zoom: float = Field(gt=0)
     # gimbal roll; the renderer fits the rolled frame inside the (cx, cy, zoom) window
     roll_deg: float = 0.0
     model_config = ConfigDict(extra='ignore')
@@ -29,7 +29,7 @@ class Keyframe(BaseModel):
     t: float
     cx: float
     cy: float
-    zoom: float
+    zoom: float = Field(gt=0)
     roll_deg: Optional[float] = None   # addendum 1.3.3, crop projection only
     model_config = ConfigDict(extra='ignore')
 
@@ -38,7 +38,7 @@ class Segment(BaseModel):
     t1: float
     cx: float
     cy: float
-    zoom: float
+    zoom: float = Field(gt=0)
     model_config = ConfigDict(extra='ignore')
 
 class Timing(BaseModel):
@@ -76,13 +76,13 @@ class Punch(BaseModel):
     attack_s to 1 at at_s (s into the shot), easing back to 0 over decay_s."""
     at_s: float
     amount: float
-    attack_s: float = 0.0
-    decay_s: float
+    attack_s: float = Field(default=0.0, ge=0)
+    decay_s: float = Field(ge=0)
     model_config = ConfigDict(extra='ignore')
 
 class Transition(BaseModel):
     type: str
-    duration_s: float
+    duration_s: float = Field(ge=0)
     model_config = ConfigDict(extra='ignore')
 
 MOTION_EFFECTS = ("fabric_sway", "foliage_sway", "water_ripple", "calm_water", "canopy_flutter", "fire_flicker")
@@ -112,7 +112,7 @@ class Shot(BaseModel):
     room_type: Optional[str] = None   # the backend allows untagged rooms
     narrative_stage: str
     role: str
-    duration_s: float
+    duration_s: float = Field(gt=0)
     camera: Camera
     transition_in: Transition
     motion_regions: Optional[List[MotionRegion]] = None   # plan 1.4
@@ -148,7 +148,7 @@ class Plan(BaseModel):
     fallback_reason: Optional[str] = None
     preset: str
     output: OutputConfig
-    total_duration_s: float
+    total_duration_s: float = Field(gt=0)
     shots: List[Shot]
     warnings: List[Any] = Field(default_factory=list)
     provenance: Provenance
@@ -163,9 +163,10 @@ def compute_plan_hash(plan_dict: dict) -> str:
     canonical_json = json.dumps(dict_copy, separators=(',', ':'), sort_keys=True, ensure_ascii=False)
     return hashlib.sha256(canonical_json.encode('utf-8')).hexdigest()
 
-def validate_plan_hash(original_dict: dict):
-    if "provenance" not in original_dict or "plan_hash" not in original_dict["provenance"]:
-        return
+def validate_plan_hash(original_dict: dict) -> None:
+    prov = original_dict.get("provenance")
+    if not isinstance(prov, dict) or "plan_hash" not in prov:
+        return                                   # Plan(...) reports a missing / malformed provenance
     expected = original_dict["provenance"]["plan_hash"]
     computed = compute_plan_hash(original_dict)
     if computed != expected:
@@ -330,17 +331,37 @@ def check_motion_regions(plan: Plan):
             if not r.mask_uri.startswith(("s3://", "http://", "https://", "local://")) and "/" not in r.mask_uri:
                 raise ValueError(f"invalid_plan: motion region {r.id} mask_uri")
 
+def check_total_duration(plan: Plan):
+    """total_duration_s is the shots' lengths added up (to a frame): the renderer draws the
+    shots and the playback checks hold the file to the total, so a mismatch would only fail
+    after the whole render."""
+    if not plan.shots:
+        return
+    total = sum(s.duration_s for s in plan.shots)
+    if abs(plan.total_duration_s - total) > 1.0 / plan.output.fps + 1e-6:
+        raise ValueError(f"invalid_plan: total_duration_s {plan.total_duration_s} is not the shots' "
+                         f"{round(total, 3)} s")
+
+
 def parse_plan(data: dict) -> Plan:
-    validate_plan_hash(data)
-    plan = Plan(**data)
-    check_camera_type(plan)
-    check_bounds(plan)
-    check_easing(plan)
-    check_transitions(plan)
-    check_time_warps(plan)
-    check_punches(plan)
-    check_path_bounds(plan)
-    check_motion_regions(plan)
+    """The plan, checked; ValueError (invalid_plan, or a code plan_failure finds) if it is not one.
+    A check that trips over a value the schema let through is a bad plan too, never a crash."""
+    if not isinstance(data, dict):
+        raise ValueError("invalid_plan: the plan must be a JSON object")
+    try:
+        validate_plan_hash(data)
+        plan = Plan(**data)
+        check_camera_type(plan)
+        check_bounds(plan)
+        check_easing(plan)
+        check_transitions(plan)
+        check_total_duration(plan)
+        check_time_warps(plan)
+        check_punches(plan)
+        check_path_bounds(plan)
+        check_motion_regions(plan)
+    except (TypeError, ArithmeticError) as e:
+        raise ValueError(f"invalid_plan: {type(e).__name__}: {e}") from e
     return plan
 
 

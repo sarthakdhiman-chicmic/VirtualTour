@@ -33,7 +33,8 @@ def hermite_profile_slope(t: float, s0: float = PROFILE_S0, s1: float = PROFILE_
 
 def assert_profile_monotonic(s0: float = PROFILE_S0, s1: float = PROFILE_S1, steps: int = 10000) -> float:
     lo = min(hermite_profile_slope(i / steps, s0, s1) for i in range(steps + 1))
-    assert lo > 0.0, f"time profile not monotonic (min slope {lo})"
+    if lo <= 0.0:
+        raise ValueError(f"time profile not monotonic (min slope {lo})")
     return lo
 
 

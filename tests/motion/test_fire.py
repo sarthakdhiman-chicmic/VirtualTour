@@ -102,3 +102,29 @@ def test_a_faint_rod_across_the_opening_is_held():
     st = fire_structure(img, flame, box)
     assert st[205:211, 260:340].mean() > 0.5                          # the rod is held
     assert not st[240:280, 250:350].all()                             # the flames are not
+
+
+def test_an_unreadable_fire_mask_drops_the_region_instead_of_failing_the_render(tmp_path):
+    from tests.perceptual_fixtures import _plan, _region, _shot, _workdir
+    from tour_worker.contract.plan import parse_plan
+    _workdir(str(tmp_path), True)
+    with open(tmp_path / "images" / mask_relpath("s01", "obj_000"), "wb") as f:
+        f.write(b"not a png")
+    warnings = []
+    sw = _shot(parse_plan(_plan([_region(effect="fire_flicker", amp=2.0)])), str(tmp_path), warnings)
+    assert sw.regions == [] and any("obj_000:unreadable" in w for w in warnings)
+
+
+def test_the_fire_zone_is_swapped_in_whole(tmp_path):
+    """Each render worker rewrites <mask>.zone.png: it is written aside and renamed, never left
+    truncated for another worker to read, and no temp file stays behind."""
+    from tour_worker.motion.fire import fire_zone_file
+    img, fp = _fireplace_scene(lit=True)
+    from tour_worker.vision.fire_detect import flame_mask
+    path = str(tmp_path / "m.png")
+    cv2.imwrite(path, ((flame_mask(img, fp) > 0) * 255).astype(np.uint8))
+    h, w = img.shape[:2]
+    zp, _ = fire_zone_file(path, w, h)
+    first = open(zp, "rb").read()
+    assert fire_zone_file(path, w, h)[0] == zp and open(zp, "rb").read() == first
+    assert sorted(os.listdir(tmp_path)) == ["m.png", "m.zone.png"]

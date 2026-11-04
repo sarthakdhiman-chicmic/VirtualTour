@@ -32,7 +32,21 @@ def test_a_crash_inside_a_job_is_a_failure_not_an_exception(monkeypatch):
     monkeypatch.setattr(seg, "get_segmenter", boom)
     res = run_job({"job_type": "tour_segment", "images": [{"photo_id": "p", "uri": "s3://b/p.jpg"}],
                    "output_prefix": "s3://b/s/"})
-    assert res == {"status": "failed", "error": {"code": "model_load_failed", "message": "model_load_failed: no weights"}}
+    # not a code of the contract (README): a crash's own text never becomes a code
+    assert res == {"status": "failed", "error": {"code": "unknown", "message": "model_load_failed: no weights"}}
+
+
+@pytest.mark.parametrize("exc, code", [
+    (RuntimeError("image preparation failed: cannot write mode RGBA as JPEG"), "unknown"),
+    (RuntimeError("CUDA out of memory. Tried to allocate 2 GiB"), "unknown"),
+    (RuntimeError("prewarp: shot s01 image is 10x10, plan says 20x30"), "prewarp"),
+    (ValueError("encode_failed: x"), "unknown"),
+])
+def test_only_documented_codes_come_out_of_an_exception(exc, code):
+    from tour_worker.errors import CODES, WorkerError, from_exception
+    assert from_exception(exc)["error"]["code"] == code
+    assert from_exception(WorkerError("encode_failed", "ffmpeg exited 1"))["error"]["code"] == "encode_failed"
+    assert code in CODES
 
 
 @pytest.mark.parametrize("job, code", [

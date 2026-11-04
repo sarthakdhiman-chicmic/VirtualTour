@@ -53,8 +53,15 @@ def allocate_content(
             importance_rank=room.importance_rank,
         ))
 
-    def total():
-        return sum(s.raw_duration for s in shots)
+    def length(raw: float, last: bool) -> float:
+        """A shot's length as the tour will have it: clamped, and the last one at least
+        final_shot_min_s (the ceiling is checked on these, not on the raw lengths)."""
+        d = max(cfg.shot_min_s, min(cfg.shot_max_s, raw))
+        return round(max(d, cfg.final_shot_min_s) if last else d, 2)
+
+    def total(seq=None):
+        seq = shots if seq is None else seq
+        return sum(length(s.raw_duration, i == len(seq) - 1) for i, s in enumerate(seq))
 
     for room in sorted(report.rooms, key=lambda r: r.importance_rank):
         added = 0
@@ -64,13 +71,14 @@ def allocate_content(
             if added >= cfg.max_detail_shots_per_room:
                 break
             d = natural_length("detail", contexts.get(p.photo_id), cfg)
-            if total() + d > cfg.max_total_s:
-                break
             last = max((i for i, s in enumerate(shots) if s.room_key == room.room_key), default=-1)
-            shots.insert(last + 1, SelectedShot(
+            shot = SelectedShot(
                 photo_id=p.photo_id, room_key=room.room_key, role="detail", raw_duration=d,
                 narrative_order=room.narrative_order, importance_rank=room.importance_rank,
-            ))
+            )
+            if total(shots[:last + 1] + [shot] + shots[last + 1:]) > cfg.max_total_s:
+                break
+            shots.insert(last + 1, shot)
             added += 1
 
     while total() > cfg.max_total_s and shots:
@@ -85,9 +93,7 @@ def allocate_content(
 
     for i, s in enumerate(shots):
         s.order_idx = i + 1
-        s.final_duration = round(max(cfg.shot_min_s, min(cfg.shot_max_s, s.raw_duration)), 2)
-    if shots and shots[-1].final_duration < cfg.final_shot_min_s:
-        shots[-1].final_duration = cfg.final_shot_min_s
+        s.final_duration = length(s.raw_duration, i == len(shots) - 1)
     return shots, warnings
 
 

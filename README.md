@@ -95,7 +95,6 @@ A warning never fails the job. These are the warnings:
 - `motion_region_dropped:<shot>:<region>:<reason>`, where the reason is one of `missing`, `unreadable`, `aspect`, `empty`, `mismatch` or `faint_<px>px`
 - `motion_mask_fetch_failed:...`
 - `music_fetch_failed`
-- the photo-size notice from image preparation
 
 ### `tour_segment`
 
@@ -160,7 +159,7 @@ Result (`TourPlanResult`):
 {"status": "completed",
  "plan": {"plan_version": "1.5", "listing_id": "L123", "shots": [...], "provenance": {"plan_hash": "..."}},
  "plan_hash": "...",
- "scoring": {"config_version": "0.3.0", "photos": 21,
+ "scoring": {"config_version": "0.3.1", "photos": 21,
              "rooms": [{"room_key": "living_room", "room_type": "living_room", "narrative_order": 3,
                         "hero_photo_id": "img_4", "photo_ids": ["img_4", "img_3"]}],
              "sequence": ["front_exterior", "entry", "living_room"], "warnings": []},
@@ -227,7 +226,8 @@ tests/                    mirrors tour_worker/
 
 | variable | default | meaning |
 |---|---|---|
-| `WORKER_STORAGE` | (unset) | `local`: dev mode for `tour_render` and `tour_plan`. Every image, mask and output URI that is not `file://` or an absolute path (s3://, https://, bare names) is served from `IMAGES_DIR` by basename. A missing image becomes a red placeholder. Unset: URIs are routed by scheme (`s3://` to S3, `https://` to HTTPS, `file://` or a path to the filesystem). `tour_segment` always uses S3 / HTTPS. |
+| `WORKER_STORAGE` | (unset) | `local`: dev mode for `tour_render` and `tour_plan`. Every image, mask and output URI that is not `file://` or an absolute path (s3://, https://, bare names) is served from `IMAGES_DIR` by basename. A missing image becomes a red placeholder. Unset: URIs are routed by scheme (`s3://` to S3, `https://` to HTTPS; `file://` or a path to the filesystem only with `WORKER_FILE_URIS=1`). `tour_segment` ignores the local folder: it reads S3 / HTTPS (and the filesystem only with `WORKER_FILE_URIS=1` or `WORKER_STORAGE=local`). |
+| `WORKER_FILE_URIS` | `0` | `1`: `file://` URIs and filesystem paths read and write the worker's own files (tests, local runs; always on with `WORKER_STORAGE=local`). Off, they are refused, and an `output_prefix` that is a path fails at once with `invalid_request`: a caller cannot read or write the worker's files. |
 | `IMAGES_DIR` | `/tmp` | the folder `WORKER_STORAGE=local` reads from and writes to |
 | `PREWARP_WORKERS` | auto | processes that draw and encode frames. Auto is min(8, CPUs available - 1), capped by available memory at about 600 MB each. Output is identical for any count. |
 | `MODELS_DIR` | `<repo>/models` | folder holding the model weights, one subfolder per model. Set it when the package is installed outside the repo. |
@@ -247,6 +247,7 @@ The HTTP service (`python -m tour_worker.service`) adds these; `handler.py` igno
 | `JOBS_DIR` | (unset) | folder for job records (one JSON per job) so statuses survive a restart. Unset: memory only. The images set `/var/lib/tour-worker/jobs`. |
 | `JOB_TTL_S` | `86400` | seconds a finished job's status is kept; then `/status` is 404 |
 | `RUNSYNC_TIMEOUT_S` | `300` | seconds `POST /runsync` waits before it returns the job's current status |
+| `WEBHOOK_HOSTS` | (unset) | comma-separated hosts a `webhook` may point at (anything else is a 400 `invalid_request`). Unset: any host. Link-local and reserved addresses (the cloud metadata service, `169.254.169.254`) are never posted to. |
 | `HOST` | `127.0.0.1` | listen address (the images set `0.0.0.0`) |
 | `PORT` | `8000` | listen port |
 
@@ -335,8 +336,10 @@ unchanged.
 | 404 | `job_not_found` | unknown id, or a finished job older than `JOB_TTL_S` |
 
 **Webhook.** When a job finishes (or is cancelled), the service POSTs its `/status` body to the
-webhook: three tries, 10 s timeout each. It is best effort: a webhook that fails never fails the
-job, so poll `/status` as well.
+webhook: up to three tries, 10 s timeout each. A 5xx, 408, 429 or a connection error is tried again;
+another 4xx is final, and a redirect is not followed. It is best effort: a webhook that fails never
+fails the job, so poll `/status` as well. In production set `WEBHOOK_HOSTS` to your backend's host: without it a webhook may point at any
+host, private addresses included (only link-local / reserved ones are refused).
 
 **Restarts.** With `JOBS_DIR` set, finished jobs survive a restart. A job that was queued or
 running is `FAILED` with `worker_restarted`. Records never hold the request (it has presigned
@@ -351,11 +354,11 @@ The Dockerfiles have not been built yet (they were written without a Docker daem
 
 ```bash
 docker build -f docker/render.Dockerfile  -t tour-worker-render .     # python 3.12-slim + ffmpeg, no torch
-docker build -f docker/segment.Dockerfile -t tour-worker-segment .    # CUDA 12.6 torch, COCO weights baked in
-docker build -f docker/segment.Dockerfile --build-arg BAKE_ADE20K=1 -t tour-worker-segment .   # + ADE20K
+docker build -f docker/segment.Dockerfile -t tour-worker-segment .    # CUDA 12.6 torch, COCO + ADE20K weights baked in
+docker build -f docker/segment.Dockerfile --build-arg BAKE_ADE20K=0 -t tour-worker-segment .   # COCO only (needs FIREPLACE_MODEL="")
 docker run -p 8000:8000 -e WORKER_API_KEY=... -e AWS_ACCESS_KEY_ID=... -e AWS_SECRET_ACCESS_KEY=... \
     -e AWS_DEFAULT_REGION=... tour-worker-render
-docker compose -f docker/compose.yaml up --build                      # local: render on :8000, key dev-key
+docker compose -f docker/compose.yaml up --build                      # local: render on 127.0.0.1:8000, key dev-key
 docker compose -f docker/compose.yaml --profile segment up --build    # + segment (CPU torch) on :8001
 ```
 
@@ -442,8 +445,13 @@ On a machine that overheats, wrap heavy commands:
 | `ade20k` | `shi-labs/oneformer_ade20k_swin_large` | `4a5bac8e64f8` | `oneformer_ade20k_swin_large` |
 
 If the weights are missing, the first job downloads them from the pinned revision into
-`ONEFORMER_DIR`. Every load checks `pytorch_model.bin` against its pinned sha256. Bake the folder
-into the worker image so no job downloads. One photo takes about 13 s on 4 CPU threads; the model
+`ONEFORMER_DIR`, together with the processor's class-info file (`coco_panoptic.json` /
+`ade20k_panoptic.json` from the `shi-labs/oneformer_demo` dataset, also pinned). Every load checks
+`pytorch_model.bin` and the class-info file against their pinned sha256s, and loads with no
+network access. Bake the folder into the worker image so no job downloads. A model folder made
+before the class-info file was kept (a mounted volume, a reused folder) is missing it: with
+`HF_HUB_OFFLINE=1` every `tour_segment` then fails, so rebuild the image or run `ensure_model` once
+online before deploying. One photo takes about 13 s on 4 CPU threads; the model
 loads once per warm worker.
 
 ## Tests

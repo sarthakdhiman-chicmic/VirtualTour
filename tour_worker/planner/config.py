@@ -1,3 +1,5 @@
+from typing import Literal
+
 from pydantic import BaseModel, ConfigDict
 
 
@@ -5,7 +7,7 @@ class PlannerConfig(BaseModel):
     # shot lengths (user 2026-10-19): "content" = each shot its natural length from what the photo
     # shows (planner/scene_context.py richness), no lower limit on the tour, max_total_s the hard
     # ceiling, nothing stretched to fill time. "fill" = the old fill-to-target allocation.
-    length_mode: str = "content"
+    length_mode: Literal["content", "fill"] = "content"
     normal_shot_s: tuple[float, float] = (2.8, 3.6)
     hero_shot_s: tuple[float, float] = (3.2, 5.0)
     target_total_s: float = 75.0        # "fill" only
@@ -85,7 +87,7 @@ class PlannerConfig(BaseModel):
     # Camera engine. "cinematic" (plan 1.3, planner/cinematic.py): reveals that always end wider,
     # chosen per shot from room type, role, coverage class and the shot's allocated length.
     # "presets" (plan 1.2): the older ken_burns preset table (presets.py), kept as a fallback.
-    motion_engine: str = "cinematic"
+    motion_engine: Literal["cinematic", "presets"] = "cinematic"
     # cinematic camera speed vs the reference pace (1.0 = the v8 tours; 0.8 = 20% slower peaks)
     cinematic_speed: float = 1.0   # user 2026-10-16: back to the v8 pace (was 0.8)
 
@@ -232,6 +234,6 @@ class PlannerConfig(BaseModel):
     # object of the same kind a little later still, so none move in lockstep
     perceptual_phase_step: float = 0.6
 
-    version: str = "3.0.0"
+    version: str = "3.1.0"     # 3.1.0: shots cut inside max_total_s, room labels canonicalised, word-matched scene classes, still-camera fallback
 
     model_config = ConfigDict(frozen=True)
