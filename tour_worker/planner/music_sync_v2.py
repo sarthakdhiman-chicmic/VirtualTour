@@ -284,14 +284,80 @@ def start_options(an: dict, cfg: PlannerConfig) -> list[float]:
 def opening_score(an: dict, start: float, cfg: PlannerConfig) -> float:
     """On a change: rewarded. The track's own beginning: fine. A few seconds before a change (the
     first shot plays the end of one part and the music turns under it): penalised."""
+    high = cfg.music_v2_open_high if any(x["level"] == "high" and x["start"] - MATCH_S <= start < x["end"]
+                                         for x in an.get("sections") or []) else 0.0
     changes = [float(h["t"]) for h in an.get("heroes") or [] if h["kind"] in STRUCTURAL]
     if any(abs(t - start) <= MATCH_S for t in changes):
-        return cfg.music_v2_open_on_change
+        return cfg.music_v2_open_on_change + high
     if start <= float(an.get("music_start") or 0.0) + 0.1:
-        return cfg.music_v2_open_natural
+        return cfg.music_v2_open_natural + high
     if any(0.25 < t - start <= cfg.music_v2_open_before_s for t in changes):
-        return -cfg.music_v2_open_before_change
-    return 0.0
+        return -cfg.music_v2_open_before_change + high
+    return high
+
+
+ENERGY_LOW_DB, ENERGY_HIGH_DB, ENERGY_SMOOTH_BEATS = -6.0, 2.0, 8
+
+
+def _energy_level(an: dict):
+    """level(t0, t1) -> "low" | "mid" | "high" for a stretch of the track: from the per-beat loudness
+    (music/structure.py beat_energy, smoothed over ENERGY_SMOOTH_BEATS) against the track's median -
+    a breakdown sits well under it (low), a drop's beats or a stretch over it are high; analyses
+    without beat energy fall back to the coarser sections."""
+    be = an.get("beat_energy") or []
+    drops = [float(h["t"]) for h in an.get("heroes") or [] if h.get("kind") == "drop"]
+    if be:
+        t = np.array([b["t"] for b in be], dtype=float)
+        loud = np.convolve(np.array([b["loud_db"] for b in be], dtype=float),
+                           np.ones(ENERGY_SMOOTH_BEATS) / ENERGY_SMOOTH_BEATS, mode="same")
+        body = (t > float(an.get("music_start") or 0.0) + 2.0) & (t < float(an.get("rhythm_end") or t[-1]) - 2.0)
+        med = float(np.median(loud[body] if body.any() else loud))
+
+        def level(t0: float, t1: float) -> str:
+            if any(t0 - 0.25 <= d < t1 for d in drops):
+                return "high"
+            m = (t >= t0) & (t < t1)
+            if not m.any():
+                return "mid"
+            rel = float(loud[m].mean()) - med
+            return "low" if rel <= ENERGY_LOW_DB else "high" if rel >= ENERGY_HIGH_DB else "mid"
+        return level
+    sections = an.get("sections") or []
+    if not sections:
+        return None
+
+    def level(t0: float, t1: float) -> str:
+        mid = (t0 + t1) / 2
+        return next((x["level"] for x in sections if x["start"] <= mid < x["end"]), "mid")
+    return level
+
+
+def energy_targets(targets, an: dict, segments, cfg: PlannerConfig, roles=None) -> list[float]:
+    """Each shot's target length x music_energy_pace for how loud the music is under it (client
+    review 2026-11-05: "hold longer through breakdowns, cut faster into the drops"; _energy_level).
+    Tour time maps to track time through the segments; the opening and closing shots never get
+    shorter (they are the long establishing / final shots). No energy data: the targets as they are."""
+    level = _energy_level(an)
+    if level is None:
+        return [float(d) for d in targets]
+    lo, hi = cfg.music_shot_abs_min_s, cfg.music_shot_abs_max_s
+
+    def track_t(t: float) -> float:
+        for a, b in segments:
+            if t <= b - a:
+                return a + t
+            t -= b - a
+        return segments[-1][1]
+
+    out, t = [], 0.0
+    for k, d in enumerate(targets):
+        f = cfg.music_energy_pace.get(level(track_t(t), track_t(t + d)), 1.0)
+        keep = k in (0, len(targets) - 1) or (roles is not None and roles[k] == "hero")
+        nd = d * max(1.0, f) if keep else d * f     # the long ends and the 2x hero rooms never shrink
+        nd = min(hi, max(lo, nd))
+        out.append(nd)
+        t += nd
+    return out
 
 
 def _plan_for(segments, edits: list[dict], loop: float, targets, an: dict, cfg: PlannerConfig,
@@ -299,6 +365,7 @@ def _plan_for(segments, edits: list[dict], loop: float, targets, an: dict, cfg: 
     """The best cuts for the music as these segments play it, and how good the result is."""
     from .music_sync import length_bounds, snap_durations
 
+    targets = energy_targets(targets, an, segments, cfg, roles)
     planned = float(sum(targets))
     times, bars, kinds, local_t, strike, pre, usable_end = seg_candidates(an, segments)
     if len(times) < len(targets):

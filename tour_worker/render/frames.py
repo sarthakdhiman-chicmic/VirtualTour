@@ -161,6 +161,7 @@ class ShotWarp:
             self.src = cv2.resize(self.src, (pw, ph), interpolation=interp)
             if warnings is not None:
                 warnings.append(f"image_resized:{shot.shot_id}:{sw}x{sh}->{pw}x{ph}")
+            sw, sh = pw, ph          # the camera and the masks work on the photo as drawn, not as stored
         self.sw, self.sh = sw, sh
         self.rotate = cam.projection == "rotate"
         self.hfov = cam.hfov_deg if cam.hfov_deg is not None else DEFAULT_HFOV_DEG
@@ -254,7 +255,31 @@ class ShotWarp:
 
 # Frames are independent (frame f depends only on f), so they are drawn in parallel processes
 # (tour_worker/render/direct.py); the output is byte-identical to drawing them one by one.
-WORKER_MEM_BYTES = 600 * 2**20          # a generous per-worker peak (4K photo, 3 masks, 1080p maps)
+# A worker's peak grows with the output size: it holds the maps and motion fields of the two shots
+# it is on, and pipes its frames to its own x264. Measured 2026-10-27 (Turkey Trot, worst shots):
+# drawing 0.41 GB a shot at 1080x1920 and 1.06 GB at 4K; x264 0.48 GB and 1.68 GB. A flat 600 MB
+# let a 4K tour start 4-5 workers on a 15 GB machine, which ran out of memory and went down.
+WORKER_MEM_BASE = 300 * 2**20           # interpreter, plan, a shot's source photo and masks
+WORKER_MEM_PER_MPX = 450 * 2**20        # per output megapixel: two shots' maps + the encoder
+MEM_SHARE = 0.6                          # of the memory this job may use, what the workers may take
+# the optional H.265 copy runs an x265 next to the x264 (measured 2026-11-02: 0.43 GB at 1080p,
+# 1.35 GB at 4K)
+HEVC_MEM_BASE = 100 * 2**20
+HEVC_MEM_PER_MPX = 150 * 2**20
+# the MLS copy runs a second x264 (an encoder's share of WORKER_MEM_PER_MPX: 0.48 GB at 1080x1920)
+MLS_MEM_BASE = 50 * 2**20
+MLS_MEM_PER_MPX = 230 * 2**20
+
+
+def worker_mem_bytes(width: int, height: int, hevc: bool = False, mls: bool = False) -> int:
+    """A render worker's peak at this output size (1080p ~1.2 GB, 4K ~4 GB; with the H.265 copy
+    ~1.6 GB and ~5.4 GB; the MLS copy adds a second x264)."""
+    mem = WORKER_MEM_BASE + WORKER_MEM_PER_MPX * width * height / 1e6
+    if hevc:
+        mem += HEVC_MEM_BASE + HEVC_MEM_PER_MPX * width * height / 1e6
+    if mls:
+        mem += MLS_MEM_BASE + MLS_MEM_PER_MPX * width * height / 1e6
+    return int(mem)
 
 
 def _available_memory() -> int | None:
@@ -267,13 +292,42 @@ def _available_memory() -> int | None:
     return None
 
 
-def render_workers(configured: int | None = None) -> int:
-    """Processes for drawing + encoding: `configured` (the PREWARP_WORKERS setting) when set, else
-    min(8, CPUs this job may use - 1), capped by available memory."""
-    if configured:
-        return max(1, int(configured))
-    n = min(8, len(os.sched_getaffinity(0)) - 1)          # CPUs this job may use
-    mem = _available_memory()
+def _cgroup_headroom() -> int | None:
+    """What this process's cgroup (and every cgroup above it) still allows: memory.max -
+    memory.current, the smallest on the way up (a systemd scope's MemoryMax, a container's
+    limit). None when there is no limit or no cgroup v2."""
+    try:
+        path = next(l.split(":", 2)[2].strip() for l in open("/proc/self/cgroup") if l.startswith("0::"))
+    except (OSError, StopIteration):
+        return None
+    room = None
+    while True:
+        d = os.path.join("/sys/fs/cgroup", path.lstrip("/"))
+        try:
+            limit = open(os.path.join(d, "memory.max")).read().strip()
+            if limit != "max":
+                left = int(limit) - int(open(os.path.join(d, "memory.current")).read())
+                room = left if room is None else min(room, left)
+        except (OSError, ValueError):
+            pass
+        if path in ("", "/"):
+            return room
+        path = os.path.dirname(path)
+
+
+def memory_budget() -> int | None:
+    """The memory this job may use now: the host's available memory, or less inside a limit."""
+    vals = [v for v in (_available_memory(), _cgroup_headroom()) if v is not None]
+    return min(vals) if vals else None
+
+
+def render_workers(configured: int | None = None, width: int = 1920, height: int = 1080,
+                   hevc: bool = False, mls: bool = False) -> int:
+    """Processes for drawing + encoding: `configured` (the PREWARP_WORKERS setting) or min(8, CPUs
+    this job may use - 1), never more than MEM_SHARE of the memory budget holds at this output
+    size - a configured count is capped too, so no setting can take the machine down."""
+    n = max(1, int(configured)) if configured else min(8, len(os.sched_getaffinity(0)) - 1)
+    mem = memory_budget()
     if mem is not None:
-        n = min(n, int(mem * 0.6 // WORKER_MEM_BYTES))   # never crowd the machine's memory
+        n = min(n, int(mem * MEM_SHARE // worker_mem_bytes(width, height, hevc, mls)))
     return max(1, n)

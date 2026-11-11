@@ -193,3 +193,68 @@ class TestRender(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+def test_the_hevc_copy_comes_from_the_same_frames_and_is_deterministic(tmp_path):
+    """output.hevc: each chunk's frames also go to x265; the copy joins like the master (5 s = two
+    chunks), passes the same playback checks as HEVC Main with the hvc1 tag, and the same plan
+    gives the same bytes."""
+    import hashlib
+    shot = {"shot_id": "s1", "order": 1, "asset_id": "a", "image_uri": "s3://b/img.jpg",
+            "source": {"width": 1920, "height": 1080}, "room_key": "x", "room_type": "y",
+            "narrative_stage": "z", "role": "hero", "duration_s": 5.0,
+            "camera": {"type": "ken_burns", "easing": "ease_in_out", "start": {"cx": 0.5, "cy": 0.5, "zoom": 1.0},
+                       "end": {"cx": 0.5, "cy": 0.5, "zoom": 1.3}},
+            "transition_in": {"type": "cut", "duration_s": 0.0}}
+    plan = Plan(**{"plan_version": "1.0", "listing_id": "bench", "mode": "cinematic", "preset": "bench",
+                   "output": {"width": 320, "height": 180, "fps": 30, "codec": "h264", "hevc": True},
+                   "total_duration_s": 5.0, "shots": [shot], "warnings": [],
+                   "provenance": {"scoring_config_version": "1", "planner_config_version": "1", "plan_hash": ""}})
+    digests = []
+    for run in ("a", "b"):
+        d = tmp_path / run
+        (d / "images").mkdir(parents=True)
+        img = Image.new("RGB", (1920, 1080), color="white")
+        ImageDraw.Draw(img).rectangle([400, 300, 1500, 800], fill="red")
+        img.save(d / "images" / "img.jpg")
+        out = render_direct(plan, str(d))
+        hevc = os.path.join(str(d), "out_hevc.mp4")
+        verify(out, plan)
+        pb = verify(hevc, plan, codec="hevc")
+        assert pb["profile"] == "Main" and pb["keyframes"] >= 3
+        digests.append(hashlib.sha256(open(hevc, "rb").read()).hexdigest())
+    assert digests[0] == digests[1]
+
+
+def test_the_mls_copy_has_no_room_label_and_the_master_does(tmp_path):
+    """output.mls_copy: the same frames go to a second x264 before the room labels are drawn. The
+    two files match outside the label and its gradient, differ where it is written, and both pass
+    the playback checks."""
+    import numpy as np
+    shot = {"shot_id": "s1", "order": 1, "asset_id": "a", "image_uri": "s3://b/img.jpg",
+            "source": {"width": 1920, "height": 1080}, "room_key": "x", "room_type": "kitchen",
+            "narrative_stage": "z", "role": "hero", "duration_s": 3.0, "caption": "Kitchen",
+            "camera": {"type": "ken_burns", "easing": "ease_in_out", "start": {"cx": 0.5, "cy": 0.5, "zoom": 1.0},
+                       "end": {"cx": 0.5, "cy": 0.5, "zoom": 1.1}},
+            "transition_in": {"type": "cut", "duration_s": 0.0}}
+    plan = Plan(**{"plan_version": "1.2", "listing_id": "bench", "mode": "cinematic", "preset": "bench",
+                   "output": {"width": 640, "height": 360, "fps": 30, "codec": "h264", "mls_copy": True,
+                              "room_labels": {"font": "sacramento", "scale": 1.0, "placement": "bottom_left"}},
+                   "total_duration_s": 3.0, "shots": [shot], "warnings": [],
+                   "provenance": {"scoring_config_version": "1", "planner_config_version": "1", "plan_hash": ""}})
+    (tmp_path / "images").mkdir()
+    Image.new("RGB", (1920, 1080), color=(128, 128, 128)).save(tmp_path / "images" / "img.jpg")
+    out = render_direct(plan, str(tmp_path))
+    mls = os.path.join(str(tmp_path), "out_mls.mp4")
+    verify(out, plan)
+    verify(mls, plan)
+
+    def frame(path, t):
+        raw = subprocess.run(["ffmpeg", "-v", "error", "-ss", str(t), "-i", path, "-frames:v", "1",
+                              "-f", "rawvideo", "-pix_fmt", "gray", "-"], capture_output=True, check=True).stdout
+        return np.frombuffer(raw, np.uint8).reshape(360, 640).astype(int)
+
+    a, b = frame(out, 1.8), frame(mls, 1.8)
+    d = np.abs(a - b)
+    assert d[300:, :200].max() > 60                         # the label is written in the master only
+    assert d[:200].max() <= 3                               # the rest of the frame is the same

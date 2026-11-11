@@ -22,7 +22,7 @@ import socket
 from contextlib import asynccontextmanager
 from typing import Any, Optional
 
-from fastapi import Depends, FastAPI, Request
+from fastapi import APIRouter, Depends, FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict
@@ -125,25 +125,27 @@ def create_app(settings: Settings | None = None, store: JobStore | None = None) 
             raise ServiceError(404, "job_not_found", f"no job {job_id} (unknown, or older than the TTL)")
         return body
 
-    @app.post("/run", dependencies=[Depends(require_key)])
+    router = APIRouter()
+
+    @router.post("/run", dependencies=[Depends(require_key)])
     def run(body: RunRequest):
         job = _submit(body)
         return {"id": job.id, "status": IN_QUEUE}      # what it was when queued (it may be running now)
 
-    @app.post("/runsync", dependencies=[Depends(require_key)])
+    @router.post("/runsync", dependencies=[Depends(require_key)])
     def runsync(body: RunRequest):
         job = _submit(body)
         return store.wait(job.id, settings.runsync_timeout_s)
 
-    @app.get("/status/{job_id}", dependencies=[Depends(require_key)])
+    @router.get("/status/{job_id}", dependencies=[Depends(require_key)])
     def status(job_id: str):
         return _status_or_404(job_id, store.status(job_id))
 
-    @app.post("/cancel/{job_id}", dependencies=[Depends(require_key)])
+    @router.post("/cancel/{job_id}", dependencies=[Depends(require_key)])
     def cancel(job_id: str):
         return _status_or_404(job_id, store.cancel(job_id))
 
-    @app.get("/health")
+    @router.get("/health")
     def health():
         c = store.counts()
         running = c[IN_PROGRESS]
@@ -158,11 +160,19 @@ def create_app(settings: Settings | None = None, store: JobStore | None = None) 
             "workerId": socket.gethostname(),
         }
 
+    @router.get("/ping")
+    def ping():
+        """A liveness check for a proxy / RunPod in front of the service (no key: no job data)."""
+        return {"status": "healthy"}
+
+    app.include_router(router)
+    for prefix in settings.service_prefixes:     # e.g. RUNPOD_ENDPOINT_URL + RUNPOD_TOUR_RENDER_PATH
+        app.include_router(router, prefix=prefix)
     return app
 
 
 def _segment_model(settings: Settings) -> str | None:
-    """The OneFormer checkpoint tour_segment would use ("<hf id>@<revision>")."""
+    """The segmentation model tour_segment would use ("<hf id>@<revision>")."""
     try:
         from tour_worker.vision.segment import model_id
         return model_id(settings.segment_model)

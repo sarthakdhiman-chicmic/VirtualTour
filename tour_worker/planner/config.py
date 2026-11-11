@@ -1,28 +1,49 @@
 from pydantic import BaseModel, ConfigDict
 
 
+# pacing control (client review 2026-11-05: Slow / Normal / Fast across the 3-8 s range)
+PACING = {"slow": 1.35, "normal": 1.0, "fast": 0.75}
+
+
 class PlannerConfig(BaseModel):
-    # shot lengths (user 2026-10-19): "content" = each shot its natural length from what the photo
-    # shows (planner/scene_context.py richness), no lower limit on the tour, max_total_s the hard
-    # ceiling, nothing stretched to fill time. "fill" = the old fill-to-target allocation.
+    # shot lengths. "content" (client review 2026-11-05): each room gets a time budget - room_base_s
+    # x its screen-time multiplier (hero rooms 2x, exteriors 1.5x; scoring/selector.py) x the pacing
+    # - split into shots of shot_min_s..shot_max_s (3-8 s); the opening (establishing) and final
+    # shots get the long end; a standard listing lands at min_total_s..max_total_s (60-120 s) by
+    # stretching shots within shot_max_s, never by padding. "fill" = the old fill-to-target allocation.
     length_mode: str = "content"
-    normal_shot_s: tuple[float, float] = (2.8, 3.6)
+    pacing: str = "normal"              # slow | normal | fast (PACING)
+    outdoor_boost: float = 1.0          # x screen time for exterior-tier rooms (the Lifestyle preset: 1.5)
+    room_base_s: float = 4.0            # a normal room at normal pacing
+    room_shot_s: float = 3.6            # a room budget this long per shot or more adds a detail shot
+    establishing_min_s: float = 5.0     # the opening shot, at normal pacing
+    normal_shot_s: tuple[float, float] = (2.8, 3.6)   # "fill" mode and older callers
     hero_shot_s: tuple[float, float] = (3.2, 5.0)
     target_total_s: float = 75.0        # "fill" only
-    min_total_s: float = 0.0
+    min_total_s: float = 60.0
     max_total_s: float = 120.0
-    shot_min_s: float = 2.8
-    shot_max_s: float = 5.5
+    shot_min_s: float = 3.0
+    shot_max_s: float = 8.0
     base_shot_s: float = 4.2
     detail_shot_factor: float = 0.85
     max_detail_shots_per_room: int = 2
-    final_shot_min_s: float = 3.5
+    final_shot_min_s: float = 5.0       # the closing shot holds (at normal pacing; never under 3.5)
     min_photos: int = 5
     min_room_types: int = 2
     slideshow_max_shots: int = 20
     fps: int = 30
     output_width: int = 1920
     output_height: int = 1080
+    output_max_bytes: int | None = None   # a platform's file-size limit (the plan's output.max_bytes)
+    output_hevc: bool = False             # also an H.265 copy (the plan's output.hevc)
+    output_room_labels: dict | None = None   # {font, scale, placement}: room-name captions; None: none
+    output_mls_copy: bool = False         # also the MLS copy, without captions (the plan's output.mls_copy)
+    staged_photos: frozenset[str] = frozenset()   # photo ids of virtually staged photos
+    transitions: bool = True              # content-chosen whip / push / fade (planner/transitions.py); off: all cuts
+    dusk_photos: frozenset[str] = frozenset()   # photo ids of twilight photos (planner/transitions.py is_dusk)
+    voiceover: dict | None = None         # {uri, balance}: the plan's voiceover
+    output_branding: dict | None = None   # title card / end card / corner logo (the plan's output.branding)
+    end_card_hold_s: float = 6.0          # with an end card, the final shot is at least this long
     kb_zoom_delta: float = 0.08
     kb_hero_zoom_delta: float = 0.10
     kb_final_zoom_delta: float = 0.05
@@ -197,7 +218,8 @@ class PlannerConfig(BaseModel):
     music_hit_weight: float = 1.0
     music_hit_cap: float = 1.0
     music_bar_weight_with_hits: float = 0.0
-    music_fade_out_s: float = 1.5
+    # 3 s, linear (client review 2026-11-05: the old ~1 s fade 'ends abruptly'; 2-4 s, on a phrase end)
+    music_fade_out_s: float = 3.0
     # hooks (user 2026-10-19: "synced to some random beat"; cuts belong on the drop / the hook):
     # whooshes and big musical changes get a bonus that outweighs any allowed length change
     music_hook_change: float = 0.6
@@ -209,8 +231,14 @@ class PlannerConfig(BaseModel):
     }
     # synced shots shrink more freely than they stretch (review 2026-10-19: shots "too long for
     # no reason")
-    music_shot_abs_min_s: float = 2.5
-    music_shot_abs_max_s: float = 6.0
+    music_hero_min_factor: float = 0.9   # a hero shot synced no shorter than this x its planned length
+    music_shot_abs_min_s: float = 3.0
+    music_shot_abs_max_s: float = 8.0
+    # the music's energy sets the pace (client review 2026-11-05: "hold longer through breakdowns,
+    # cut faster into the drops"): a shot's target length x this factor for the section level it
+    # plays over (music/structure.py sections), before the cuts are snapped
+    music_energy_pace: dict[str, float] = {"low": 1.3, "mid": 1.0, "high": 0.85}
+    music_v2_open_high: float = 0.0     # the music opening in a high section: this bonus (Just Listed: 6)
     # retiming: the first 40% of a shot's real time plays at normal pace, the rear speeds up (or
     # slows) to land the planned move on the cut; at the 0.75 bound the rear runs ~1.56x
     music_warp_hold: float = 0.4
@@ -223,8 +251,10 @@ class PlannerConfig(BaseModel):
     # the shot to ramp_peak x (CapCut-style "velocity" into the hit)
     music_ramp_share: float = 0.35
     music_ramp_peak: float = 1.6
-    # cuts one frame before the beat (a cut exactly on the onset reads as late)
-    music_cut_lead_frames: int = 1
+    # cuts on the beat (client review 2026-11-05: a 1-frame lead, plus AAC's 21 ms priming in tools
+    # that ignore the MP4 edit list, read as "1-2 frames ahead of the beat, systematic"); frame_align
+    # still supports a lead for tuning
+    music_cut_lead_frames: int = 0
     # zoom punches: a shot opening on a hook, and accents (hooks with no cut) mid-shot
     # zoom punches (a quick zoom in / out on a hero moment): OFF (user 2026-10-23: "we dont need
     # that rapid zoom in and zoom out for a bass or smth" -> none at all). The music is followed by
@@ -278,6 +308,6 @@ class PlannerConfig(BaseModel):
     # object of the same kind a little later still, so none move in lockstep
     perceptual_phase_step: float = 0.6
 
-    version: str = "3.0.0"
+    version: str = "3.1.0"
 
     model_config = ConfigDict(frozen=True)

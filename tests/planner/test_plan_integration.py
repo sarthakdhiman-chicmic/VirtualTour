@@ -98,21 +98,14 @@ def test_perceptual_regions_make_plan_14(report):
     assert off.plan_version == "1.3" and not any(s.motion_regions for s in off.shots)
 
 
-def test_single_photo_rooms_hero_only_when_top_ranked(report):
-    """A room with one photo is not automatically a hero: only the top hero_room_count rooms are,
-    the rest are normal-length shots (review 2026-10-19: mixed shot lengths)."""
-    from tour_worker.planner.allocate import allocate_shots
-
-    cfg = PlannerConfig()
-    top = report.config.ranking.hero_room_count
-    shots, _ = allocate_shots(report, cfg)
-    lead = {s.room_key: s for s in shots if s.is_lead}
-    for room in report.rooms:
-        s = lead.get(room.room_key)
-        if s is None:
-            continue
-        expect_hero = len(room.photos) > 1 or room.importance_rank <= top
-        assert s.is_hero is expect_hero
-        assert s.role == ("hero" if expect_hero else "detail")
-    singles = [r for r in report.rooms if len(r.photos) == 1]
-    assert any(not lead[r.room_key].is_hero for r in singles if r.room_key in lead)
+def test_hero_rooms_are_the_best_living_room_kitchen_and_primary_bedroom(report):
+    """Client review 2026-11-05: the hero rooms are the best room of the living, kitchen and
+    primary-bedroom tiers (not the top 3 by rank, which let a family room take the primary
+    bedroom's place); they get 2x screen time, exteriors 1.5x."""
+    heroes = {r.room_key for r in report.rooms if r.screen_time_multiplier == 2.0}
+    tiers = report.config.ranking.hero_tiers
+    best = {}
+    for r in sorted(report.rooms, key=lambda r: r.importance_rank):
+        best.setdefault(r.tier, r.room_key)
+    assert heroes == {best[t] for t in tiers if t in best}
+    assert all(r.screen_time_multiplier == 1.5 for r in report.rooms if r.tier == "exterior" and r.room_key not in heroes)

@@ -38,7 +38,8 @@ def _music_plan():
 def no_render(monkeypatch, tmp_path):
     seen = {}
 
-    def fake_render(plan, workdir, warnings=None, music_path=None, workers=None):
+    def fake_render(plan, workdir, warnings=None, music_path=None, workers=None, voice_path=None, timings=None,
+                    progress=None):
         seen["music_path"] = music_path
         out = os.path.join(workdir, "out.mp4")
         open(out, "wb").close()
@@ -71,3 +72,43 @@ def test_a_failed_music_fetch_renders_without_music(no_render, tmp_path):
                                "image_urls": {MUSIC_URI: SIGNED}}, Storage(fail=True), str(tmp_path))
     assert res["status"] == "completed"
     assert "music_fetch_failed" in res["warnings"] and no_render["music_path"] is None
+
+
+def test_the_hevc_copy_is_checked_and_stored_next_to_the_master(no_render, monkeypatch, tmp_path):
+    checked = []
+    monkeypatch.setattr(render_job, "verify", lambda path, plan, codec=None: checked.append(codec))
+    p = _plan([_region()], version="1.5")
+    p["output"]["hevc"] = True
+    p["provenance"]["plan_hash"] = compute_plan_hash(p)
+    storage = Storage()
+    res = render_job.run_tour({"plan": p, "output_prefix": "s3://b/o/"}, storage, str(tmp_path))
+    assert res["status"] == "completed", res
+    assert checked == [None, "hevc"]
+    assert storage.puts == ["s3://b/o/master.mp4", "s3://b/o/master_hevc.mp4"]
+    assert res["hevc_uri"] == "s3://b/o/master_hevc.mp4"
+
+
+def test_no_hevc_copy_unless_asked(no_render, tmp_path):
+    storage = Storage()
+    res = render_job.run_tour({"plan": _music_plan(), "output_prefix": "s3://b/o/"}, storage, str(tmp_path))
+    assert res["hevc_uri"] is None and storage.puts == ["s3://b/o/master.mp4"]
+
+
+def test_the_mls_copy_is_checked_and_stored_next_to_the_master(no_render, monkeypatch, tmp_path):
+    checked = []
+    monkeypatch.setattr(render_job, "verify", lambda path, plan, codec=None: checked.append(os.path.basename(path)))
+    p = _plan([_region()], version="1.5")
+    p["output"]["mls_copy"] = True
+    p["provenance"]["plan_hash"] = compute_plan_hash(p)
+    storage = Storage()
+    res = render_job.run_tour({"plan": p, "output_prefix": "s3://b/o/"}, storage, str(tmp_path))
+    assert res["status"] == "completed", res
+    assert checked == ["out.mp4", "out_mls.mp4"]
+    assert storage.puts == ["s3://b/o/master.mp4", "s3://b/o/master_mls.mp4"]
+    assert res["mls_uri"] == "s3://b/o/master_mls.mp4" and res["hevc_uri"] is None
+
+
+def test_no_mls_copy_unless_asked(no_render, tmp_path):
+    storage = Storage()
+    res = render_job.run_tour({"plan": _music_plan(), "output_prefix": "s3://b/o/"}, storage, str(tmp_path))
+    assert res["mls_uri"] is None and storage.puts == ["s3://b/o/master.mp4"]

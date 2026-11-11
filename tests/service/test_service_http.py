@@ -146,7 +146,7 @@ def test_health(make_client):
     assert h["jobs"] == {"inQueue": 0, "inProgress": 0, "completed": 1, "failed": 0, "cancelled": 0}
     assert h["workers"] == {"running": 0, "idle": 2, "concurrency": 2}
     assert h["jobTypes"] == ["tour_render", "tour_segment", "tour_plan"]
-    assert h["segmentModel"] == "shi-labs/oneformer_coco_swin_large@3a263017ca"
+    assert h["segmentModel"] == "facebook/mask2former-swin-large-ade-panoptic@ae53ed7ab3"
     assert "version" in h and "workerId" in h
 
 

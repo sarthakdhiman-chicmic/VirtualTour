@@ -30,48 +30,60 @@ def natural_length(role: str, ctx: SceneContext | None, cfg: PlannerConfig) -> f
     return lo + r * (hi - lo)
 
 
+def pace_factor(cfg: PlannerConfig) -> float:
+    from .config import PACING
+    return PACING.get(cfg.pacing, 1.0)
+
+
+def room_shots(budget: float, n_photos: int, cfg: PlannerConfig, pace: float, richness: float) -> list[float]:
+    """A room's time budget split into its shots: one shot per room_shot_s of budget (paced), as
+    many as it has photos and max_detail_shots_per_room allow. The lead shot takes the larger
+    share (more for a rich photo); every shot within shot_min_s..shot_max_s."""
+    n = max(1, min(n_photos, 1 + cfg.max_detail_shots_per_room, int(budget // (cfg.room_shot_s * pace))))
+    if n == 1:
+        lengths = [budget]
+    else:
+        lead = budget * (0.40 + 0.15 * richness) if n > 2 else budget * (0.50 + 0.10 * richness)
+        lengths = [lead] + [(budget - lead) / (n - 1)] * (n - 1)
+    return [max(cfg.shot_min_s, min(cfg.shot_max_s, d)) for d in lengths]
+
+
 def allocate_content(
     report: ScoringReport, cfg: PlannerConfig, contexts: dict[str, SceneContext]
 ) -> tuple[list[SelectedShot], list[str]]:
-    """Shots at their natural lengths (user 2026-10-19: no lower limit on the tour, nothing is
-    stretched to fill time; max_total_s is the hard ceiling). Every room's lead shot, then its
-    other good photos (most important rooms first, at most max_detail_shots_per_room each, no
-    low-score photos) while the tour stays under the ceiling; over it, details of the least
-    important rooms go first, then whole rooms."""
+    """Room budgets (client review 2026-11-05): each room gets room_base_s x its screen-time
+    multiplier (hero rooms - the best living room, kitchen and primary bedroom - 2x, exteriors
+    1.5x; scoring/selector.py) x the pacing (Slow / Normal / Fast), split into 3-8 s shots: its
+    best photo first, then its other good photos. The opening shot gets at least
+    establishing_min_s and the last final_shot_min_s (paced). Under min_total_s (x the pace for
+    Fast) the shots are stretched (never past shot_max_s, never padded with extra photos); over max_total_s, details
+    of the least important rooms go first, then whole rooms."""
     warnings: list[str] = []
+    pace = pace_factor(cfg)
     rooms_in_sequence = [r for k in report.sequence for r in report.rooms if r.room_key == k]
     low = {p.photo_id for p in report.photos if "low_score" in p.flags}
-    hero_rooms = report.config.ranking.hero_room_count
     shots: list[SelectedShot] = []
     for room in rooms_in_sequence:
-        hero = len(room.photos) > 1 or room.importance_rank <= hero_rooms
-        role = "hero" if hero else "detail"
-        shots.append(SelectedShot(
-            photo_id=room.hero_photo_id, room_key=room.room_key, role=role,
-            raw_duration=natural_length(role, contexts.get(room.hero_photo_id), cfg),
-            is_hero=hero, is_lead=True, narrative_order=room.narrative_order,
-            importance_rank=room.importance_rank,
-        ))
+        hero = room.screen_time_multiplier >= 2.0
+        others = [p.photo_id for p in room.photos if p.photo_id != room.hero_photo_id and p.photo_id not in low]
+        ctx = contexts.get(room.hero_photo_id)
+        boost = cfg.outdoor_boost if room.tier == "exterior" else 1.0
+        budget = cfg.room_base_s * room.screen_time_multiplier * pace * boost
+        lengths = room_shots(budget, 1 + len(others), cfg, pace, ctx.richness if ctx is not None else 0.5)
+        for k, (pid, d) in enumerate(zip([room.hero_photo_id] + others, lengths)):
+            shots.append(SelectedShot(
+                photo_id=pid, room_key=room.room_key, role="hero" if (hero and k == 0) else "detail",
+                raw_duration=d, is_hero=hero and k == 0, is_lead=k == 0,
+                narrative_order=room.narrative_order, importance_rank=room.importance_rank,
+            ))
+    if shots:                                     # the long establishing and closing shots
+        shots[0].raw_duration = max(shots[0].raw_duration, min(cfg.shot_max_s, cfg.establishing_min_s * pace))
+        shots[0].role = "hero"
+        last = max(3.5, min(cfg.shot_max_s, cfg.final_shot_min_s * pace))
+        shots[-1].raw_duration = max(shots[-1].raw_duration, last)
 
     def total():
         return sum(s.raw_duration for s in shots)
-
-    for room in sorted(report.rooms, key=lambda r: r.importance_rank):
-        added = 0
-        for p in room.photos:
-            if p.photo_id == room.hero_photo_id or p.photo_id in low:
-                continue
-            if added >= cfg.max_detail_shots_per_room:
-                break
-            d = natural_length("detail", contexts.get(p.photo_id), cfg)
-            if total() + d > cfg.max_total_s:
-                break
-            last = max((i for i, s in enumerate(shots) if s.room_key == room.room_key), default=-1)
-            shots.insert(last + 1, SelectedShot(
-                photo_id=p.photo_id, room_key=room.room_key, role="detail", raw_duration=d,
-                narrative_order=room.narrative_order, importance_rank=room.importance_rank,
-            ))
-            added += 1
 
     while total() > cfg.max_total_s and shots:
         details = [s for s in shots if not s.is_lead]
@@ -83,11 +95,21 @@ def allocate_content(
         if "trimmed" not in warnings:
             warnings.append("trimmed")
 
+    # a standard listing lands at 60 s or more; Fast pacing keeps its pace (its floor is 0.75 x 60)
+    floor = cfg.min_total_s * min(1.0, pace)
+    if shots and total() < floor:
+        for _ in range(3):
+            room_left = sum(cfg.shot_max_s - s.raw_duration for s in shots)
+            short = floor - total()
+            if short <= 1e-6 or room_left <= 1e-6:
+                break
+            k = min(1.0, short / room_left)
+            for s in shots:
+                s.raw_duration += k * (cfg.shot_max_s - s.raw_duration)
+
     for i, s in enumerate(shots):
         s.order_idx = i + 1
         s.final_duration = round(max(cfg.shot_min_s, min(cfg.shot_max_s, s.raw_duration)), 2)
-    if shots and shots[-1].final_duration < cfg.final_shot_min_s:
-        shots[-1].final_duration = cfg.final_shot_min_s
     return shots, warnings
 
 

@@ -5,11 +5,54 @@ from tour_worker.render.camera_path import PROJECTIONS, CompoundPath, KeyframePa
 from typing import List, Optional, Any
 from pydantic import BaseModel, ConfigDict, Field
 
+# room labels (overlays, SOW 3.2.1a; user 2026-11-05): the room's name in a script font, drawn by
+# tour_worker/render/overlays.py. The fonts ship in tour_worker/render/fonts (SIL OFL).
+LABEL_FONTS = ("sacramento", "mr_dafoe", "pacifico", "kaushan_script")
+LABEL_PLACEMENTS = ("bottom_left", "bottom_center", "bottom_right", "top_left", "top_center", "top_right")
+LABEL_SCALE_RANGE = (0.6, 1.0)          # x the reviewed maximum size; the user's default is 0.8
+MAX_CAPTION_CHARS = 40
+
+class RoomLabels(BaseModel):
+    font: str = "sacramento"
+    scale: float = 0.8
+    placement: str = "bottom_left"
+    model_config = ConfigDict(extra='ignore')
+
+# branding and finishing (client review 2026-11-05: "no title card, address, branding or end card"),
+# drawn by tour_worker/render/overlays.py; the MLS copy is the unbranded version (no agent card,
+# logo or room labels; the address title and the staged disclosure stay)
+MAX_BRAND_CHARS = 120
+
+class AgentCard(BaseModel):
+    name: Optional[str] = None
+    phone: Optional[str] = None
+    email: Optional[str] = None
+    photo_uri: Optional[str] = None    # fetched like the photos (image_urls), drawn as a circle
+    model_config = ConfigDict(extra='ignore')
+
+class Branding(BaseModel):
+    kicker: Optional[str] = None       # a line above the address ("Just Listed")
+    address: Optional[str] = None      # the title card's first line
+    locality: Optional[str] = None     # city, state - its second line
+    title: Optional[str] = None        # the request's intro text, under the address
+    agent: Optional[AgentCard] = None  # the end card (branded copy only)
+    logo_uri: Optional[str] = None     # the brokerage logo: on the end card and in the corner
+    corner_logo: bool = False
+    model_config = ConfigDict(extra='ignore')
+
+    def image_uris(self) -> list[str]:
+        return [u for u in (self.agent.photo_uri if self.agent else None, self.logo_uri) if u]
+
 class OutputConfig(BaseModel):
     width: int
     height: int
     fps: int
     codec: str
+    max_bytes: Optional[int] = None    # a platform's file-size limit: the encoder caps its bitrate to fit
+    hevc: bool = False                 # also render the optional H.265 copy (render/direct.py)
+    room_labels: Optional[RoomLabels] = None   # draw each shot's caption (render/overlays.py)
+    mls_copy: bool = False             # also render the MLS copy: no captions, the staged label kept
+    branding: Optional[Branding] = None   # title card, end card, corner logo (render/overlays.py)
     model_config = ConfigDict(extra='ignore')
 
 class Size(BaseModel):
@@ -80,6 +123,11 @@ class Punch(BaseModel):
     decay_s: float
     model_config = ConfigDict(extra='ignore')
 
+# cut (the default, on the beat); fade; whip (both shots slide sideways with motion blur) and push
+# (zoom through into the next room) - beat-timed motion transitions centred on the cut (client
+# review 2026-11-05; tour_worker/render/direct.py draws them, planner/transitions.py chooses)
+TRANSITIONS = ("cut", "fade", "whip", "push")
+
 class Transition(BaseModel):
     type: str
     duration_s: float
@@ -117,6 +165,8 @@ class Shot(BaseModel):
     camera: Camera
     transition_in: Transition
     motion_regions: Optional[List[MotionRegion]] = None   # plan 1.4
+    caption: Optional[str] = None     # the room label, on a room's first shot (output.room_labels)
+    staged: bool = False              # the photo is virtually staged: the disclosure label is drawn
     model_config = ConfigDict(extra='ignore')
 
 class Provenance(BaseModel):
@@ -155,6 +205,13 @@ class Music(BaseModel):
     hooks: Optional[List[dict]] = None     # [{t, kind: cut|accent|missed, reason}]
     model_config = ConfigDict(extra='ignore')
 
+class Voiceover(BaseModel):
+    """A narration over the tour (client review 2026-11-05): it plays from the tour's start, the music
+    ducks under it by `balance` (0: barely, 1: far down), and the mix is normalised like the music."""
+    uri: str
+    balance: float = 0.5
+    model_config = ConfigDict(extra='ignore')
+
 class Plan(BaseModel):
     plan_version: str
     listing_id: str
@@ -167,6 +224,7 @@ class Plan(BaseModel):
     warnings: List[Any] = Field(default_factory=list)
     provenance: Provenance
     music: Optional[Music] = None
+    voiceover: Optional[Voiceover] = None
     model_config = ConfigDict(extra='ignore')
 
 def compute_plan_hash(plan_dict: dict) -> str:
@@ -333,10 +391,10 @@ def check_transitions(plan: Plan):
                 raise ValueError("plan_version 1.0 only supports cut transitions")
         elif plan.plan_version in ("1.1", "1.2", "1.3", "1.4", "1.5"):
             t = shot.transition_in
-            if t.type not in ("cut", "fade"):
+            if t.type not in TRANSITIONS:
                 raise ValueError(f"Unsupported transition type: {t.type}")
-            if t.type == "fade" and t.duration_s > shot.duration_s * 0.5:
-                raise ValueError("fade duration cannot exceed 50% of shot duration")
+            if t.type != "cut" and t.duration_s > shot.duration_s * 0.5:
+                raise ValueError(f"{t.type} duration cannot exceed 50% of shot duration")
 
 def check_motion_regions(plan: Plan):
     for shot in plan.shots:
@@ -356,6 +414,44 @@ def check_motion_regions(plan: Plan):
             if not r.mask_uri.startswith(("s3://", "http://", "https://", "local://")) and "/" not in r.mask_uri:
                 raise ValueError(f"invalid_plan: motion region {r.id} mask_uri")
 
+def check_overlays(plan: Plan):
+    labels = plan.output.room_labels
+    if labels is not None:
+        if labels.font not in LABEL_FONTS:
+            raise ValueError(f"invalid_plan: room_labels.font must be one of {', '.join(LABEL_FONTS)}")
+        if labels.placement not in LABEL_PLACEMENTS:
+            raise ValueError(f"invalid_plan: room_labels.placement must be one of {', '.join(LABEL_PLACEMENTS)}")
+        lo, hi = LABEL_SCALE_RANGE
+        if not lo <= labels.scale <= hi:
+            raise ValueError(f"invalid_plan: room_labels.scale must be within {lo}-{hi}")
+    for shot in plan.shots:
+        if shot.caption is None:
+            continue
+        if labels is None:
+            raise ValueError(f"invalid_plan: shot {shot.shot_id} has a caption but the plan has no room_labels")
+        if not shot.caption.strip() or len(shot.caption) > MAX_CAPTION_CHARS:
+            raise ValueError(f"invalid_plan: shot {shot.shot_id} caption must be 1-{MAX_CAPTION_CHARS} characters")
+
+def check_voiceover(plan: Plan):
+    v = plan.voiceover
+    if v is None:
+        return
+    if not 0.0 <= v.balance <= 1.0:
+        raise ValueError("invalid_plan: voiceover.balance must be within 0-1")
+    if not v.uri.startswith(("s3://", "http://", "https://", "local://", "file://")):
+        raise ValueError(f"invalid_plan: voiceover uri {v.uri!r}")
+
+def check_branding(plan: Plan):
+    b = plan.output.branding
+    if b is None:
+        return
+    texts = [b.kicker, b.address, b.locality, b.title] + ([b.agent.name, b.agent.phone, b.agent.email] if b.agent else [])
+    if any(t is not None and len(t) > MAX_BRAND_CHARS for t in texts):
+        raise ValueError(f"invalid_plan: branding text must be at most {MAX_BRAND_CHARS} characters")
+    for u in b.image_uris():
+        if not u.startswith(("s3://", "http://", "https://", "local://")):
+            raise ValueError(f"invalid_plan: branding image uri {u!r}")
+
 def parse_plan(data: dict) -> Plan:
     validate_plan_hash(data)
     plan = Plan(**data)
@@ -368,6 +464,9 @@ def parse_plan(data: dict) -> Plan:
     check_path_bounds(plan)
     check_motion_regions(plan)
     check_music_segments(plan)
+    check_overlays(plan)
+    check_branding(plan)
+    check_voiceover(plan)
     return plan
 
 

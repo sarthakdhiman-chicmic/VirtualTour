@@ -32,7 +32,8 @@ def fetch_and_prepare(plan, storage, workdir, image_urls=None):
                 if w != shot.source.width or h != shot.source.height:
                     warnings.append(f"Image {basename} dimensions {w}x{h} do not match plan {shot.source.width}x{shot.source.height}. Clamping camera.")
                 
-                target_max = int(plan.output.width * 1.2)
+                # the output's longer side: a portrait frame needs the photo's full height
+                target_max = int(max(plan.output.width, plan.output.height) * 1.2)
                 if max(w, h) > target_max:
                     scale = target_max / max(w, h)
                     new_w = int(w * scale)
@@ -55,4 +56,23 @@ def fetch_and_prepare(plan, storage, workdir, image_urls=None):
             except Exception as e:
                 warnings.append(f"motion_mask_fetch_failed:{shot.shot_id}:{region.id} ({e})")
 
+    # branding images (the agent's photo, the brokerage logo): a failed fetch is a warning and the
+    # card is drawn without that image (tour_worker/render/overlays.py)
+    branding = getattr(plan.output, "branding", None)
+    for uri in (branding.image_uris() if branding is not None else []):
+        dest = branding_path(images_dir, uri)
+        os.makedirs(os.path.dirname(dest), exist_ok=True)
+        if os.path.exists(dest):
+            continue
+        try:
+            storage.get(image_urls.get(uri, uri), dest)
+        except Exception as e:
+            warnings.append(f"branding_image_fetch_failed:{type(e).__name__}")
+
     return warnings
+
+
+def branding_path(images_dir: str, uri: str) -> str:
+    """Where a branding image is fetched to (named by its URI's hash: URIs may be long URLs)."""
+    import hashlib
+    return os.path.join(images_dir, "branding", hashlib.sha1(uri.encode()).hexdigest()[:16])

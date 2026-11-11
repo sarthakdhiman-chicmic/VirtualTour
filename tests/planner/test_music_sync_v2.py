@@ -11,7 +11,10 @@ from tour_worker.planner import music_sync, music_sync_v2
 from tour_worker.planner.config import PlannerConfig
 from tour_worker.planner.music_sync import apply_sync, sync_to_music
 
-CFG = PlannerConfig()
+# these tests are about where cuts land, on synthetic tracks planned around ~3.3 s shots: they keep
+# the sync's older 2.5-6 s absolute limits (the planner's 3-8 s room budgets are tested in
+# tests/planner/test_room_budgets.py)
+CFG = PlannerConfig(music_shot_abs_min_s=2.5, music_shot_abs_max_s=6.0, final_shot_min_s=3.5)
 BEAT = 0.5
 TOL = (1 + CFG.music_cut_lead_frames) / CFG.fps
 
@@ -61,7 +64,7 @@ def test_a_drop_gets_its_cut():
     assert any(h.kind == "cut" and h.tier == 1 for h in r.music.hooks)
 
 
-PUNCHY = PlannerConfig(music_punches=True)        # punches are off by default (user 2026-10-23)
+PUNCHY = CFG.model_copy(update={"music_punches": True})   # punches are off by default (user 2026-10-23)
 
 
 def test_a_run_of_heroes_cuts_the_strongest_and_punches_the_rest():
@@ -184,3 +187,42 @@ def test_the_planner_never_imports_librosa():
             "print('librosa' in sys.modules)")
     out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True)
     assert out.stdout.strip() == "False"
+
+
+def test_shots_hold_through_breakdowns_and_cut_faster_in_drops():
+    """Client review 2026-11-05: shot length follows the music. A shot over a low section (a
+    breakdown) is planned longer, over a high section (a drop) shorter; the opening and closing
+    shots never get shorter; edits (segments) map tour time to track time."""
+    from tour_worker.planner.music_sync_v2 import energy_targets
+    cfg = PlannerConfig()
+    an = {"sections": [{"start": 0.0, "end": 10.0, "level": "mid"}, {"start": 10.0, "end": 20.0, "level": "low"},
+                       {"start": 20.0, "end": 40.0, "level": "high"}, {"start": 40.0, "end": 90.0, "level": "mid"}]}
+    out = energy_targets([5.0, 4.0, 4.0, 4.0, 4.0, 4.0, 4.0, 5.0], an, [(0.0, 90.0)], cfg)
+    assert out[0] == 5.0                                      # mid: unchanged
+    assert out[2] > 4.0 + 1e-6                                # ~13 s: the breakdown holds longer
+    assert any(d < 4.0 - 1e-6 for d in out[3:7])              # 20-40 s: the drop cuts faster
+    assert out[-1] >= 5.0
+    assert all(3.0 - 1e-6 <= d <= 8.0 + 1e-6 for d in out)
+    late = energy_targets([4.0, 4.0], an, [(10.0, 20.0), (40.0, 60.0)], cfg)   # starts in the breakdown
+    assert late[0] >= 4.0 and late == energy_targets([4.0, 4.0], an, [(10.0, 20.0), (40.0, 60.0)], cfg)
+    assert energy_targets([4.0, 4.0], {}, [(0.0, 60.0)], cfg) == [4.0, 4.0]
+
+
+
+def test_the_per_beat_loudness_finds_breakdowns_the_sections_miss():
+    """Solarflex's sections call 12-132 s "high", but a 12 dB dip at 41-45 s is a breakdown (the
+    client heard it at 28-32 s of the demo): beat energy decides, sections are the fallback."""
+    from tour_worker.planner.music_sync_v2 import energy_targets
+    cfg = PlannerConfig()
+    beats = np.arange(0.0, 90.0, 0.4)
+    loud = np.where((beats >= 41) & (beats < 45), -30.0, -18.0)
+    an = {"music_start": 0.0, "rhythm_end": 90.0,
+          "beat_energy": [{"t": float(t), "loud_db": float(v), "sub_db": 0.0} for t, v in zip(beats, loud)],
+          "sections": [{"start": 0.0, "end": 90.0, "level": "high"}],
+          "heroes": [{"t": 60.0, "kind": "drop", "tier": 1}]}
+    out = energy_targets([5.0] + [4.0] * 20 + [5.0], an, [(13.0, 90.0)], cfg)
+    starts = np.concatenate([[0.0], np.cumsum(out)[:-1]]) + 13.0
+    over_dip = [d for s0, d in zip(starts, out) if min(45, s0 + d) - max(41, s0) >= d / 2]
+    assert over_dip and all(d > 4.0 + 1e-6 for d in over_dip)      # held through the breakdown
+    over_drop = [d for s0, d in zip(starts, out) if s0 - 0.25 <= 60.0 < s0 + d]
+    assert over_drop and over_drop[0] < 4.0 - 1e-6                 # the drop cuts faster

@@ -66,6 +66,9 @@ segment-gpu = [
 [tool.setuptools.packages.find]
 include = ["tour_worker*"]
 
+[tool.setuptools.package-data]
+"tour_worker.render" = ["fonts/*.ttf", "fonts/*.txt"]   # room-label fonts (SIL OFL, LICENSES.md)
+
 [tool.uv]
 conflicts = [[{ extra = "segment" }, { extra = "segment-gpu" }]]
 

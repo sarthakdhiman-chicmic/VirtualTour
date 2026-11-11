@@ -31,10 +31,20 @@ def build_rooms(scores: list[PhotoScore], cfg: ScoringConfig) -> list[RoomResult
     narrative = sorted(partial, key=lambda t: (stage_index(t[1]), rank_of[t[2]]))
     order_of = {t[2]: i for i, t in enumerate(narrative, start=1)}
 
+    # the hero rooms: per hero tier, the best-ranked room OF THAT TYPE (a living_room, not a family
+    # room that scored higher - the demo's family room took the living room's 2x), else the tier's
+    # best-ranked room
+    tier_top = {}
+    for tier, _, key, room_type, *_ in partial:
+        if tier not in tier_top or (room_type == tier and tier_top[tier][1] != tier):
+            tier_top[tier] = (key, room_type)
+    tier_top = {t: k for t, (k, _) in tier_top.items()}
+    hero_keys = {tier_top[t] for t in cfg.ranking.hero_tiers if t in tier_top}
+
     rooms: list[RoomResult] = []
     for tier, stage, key, room_type, hero, photos in partial:
         rank = rank_of[key]
-        if rank <= cfg.ranking.hero_room_count:
+        if key in hero_keys:
             mult = cfg.ranking.hero_multiplier
         elif tier == "exterior":
             mult = cfg.ranking.exterior_multiplier
@@ -57,3 +67,20 @@ def build_report(scores: list[PhotoScore], cfg: ScoringConfig | None = None,
     sequence = [r.room_key for r in sorted(rooms, key=lambda r: r.narrative_order)]
     return ScoringReport(config=cfg, photos=ordered, rooms=rooms, sequence=sequence,
                          warnings=warnings or [])
+
+
+def manual_order(report: ScoringReport, photo_ids: list[str]) -> ScoringReport:
+    """The user's order (drag-to-reorder; client review 2026-11-05): rooms play in the order their
+    first photo appears in photo_ids, and each room's photos in that order - its first photo leads.
+    Scores, multipliers and everything else are unchanged."""
+    pos = {pid: i for i, pid in enumerate(photo_ids)}
+    end = len(photo_ids)
+    rooms = []
+    for r in report.rooms:
+        photos = sorted(r.photos, key=lambda p: (pos.get(p.photo_id, end), p.photo_id))
+        rooms.append(r.model_copy(update={"photos": photos, "hero_photo_id": photos[0].photo_id}))
+    first = {r.room_key: pos.get(r.photos[0].photo_id, end) for r in rooms}
+    sequence = sorted(report.sequence, key=lambda k: (first.get(k, end), k))
+    order = {k: i for i, k in enumerate(sequence, start=1)}
+    rooms = [r.model_copy(update={"narrative_order": order[r.room_key]}) for r in rooms]
+    return report.model_copy(update={"rooms": rooms, "sequence": sequence})

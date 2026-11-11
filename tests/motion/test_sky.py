@@ -128,7 +128,7 @@ def test_segmentation_makes_one_sky_region_of_all_its_pieces():
     seg[50:, :] = 3
     info = [{"id": 1, "label_id": 0, "score": 0.9}, {"id": 2, "label_id": 0, "score": 0.8},
             {"id": 3, "label_id": 1, "score": 0.9}]
-    regions = segments_to_regions(seg, info, {0: "sky-other-merged", 1: "tree-merged"}, (200, 100))
+    regions = segments_to_regions(seg, info, {0: "sky", 1: "tree"}, (200, 100))   # ADE20K labels (Mask2Former)
     skies = [r for r in regions if r["class_name"] == "sky"]
     assert len(skies) == 1 and skies[0]["bbox"] == [0, 0, 200, 30]
     assert int((skies[0]["mask"] > 0).sum()) == 30 * 80 + 30 * 80

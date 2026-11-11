@@ -1,16 +1,28 @@
 # Licences
 
-## OneFormer (tour_segment)
-- **Weights:** `shi-labs/oneformer_coco_swin_large` and `shi-labs/oneformer_ade20k_swin_large`,
-  MIT. The revisions and sha256 are pinned in `tour_worker/vision/segment.py`.
-- **COCO** (the primary model's training data): the annotations are CC BY 4.0. The images are
-  under their Flickr licences, and COCO disclaims them. This dataset question needs a legal
-  sign-off before production use.
-- **ADE20K** (the fireplace-aware model): the dataset images are for non-commercial research and
-  education (MIT CSAIL terms). The product owner accepted this, pending legal review.
+## Mask2Former (tour_segment)
+- **Weights:** `facebook/mask2former-swin-large-ade-panoptic`. The revision and sha256 are pinned
+  in `tour_worker/vision/segment.py`. The Hugging Face model card gives the licence as "other";
+  the Mask2Former code (Meta) is MIT. This needs a legal check of the weights' terms.
+- **ADE20K** (its training data): the dataset images are for non-commercial research and
+  education (MIT CSAIL terms). The product owner accepted this for the earlier ADE20K model,
+  pending legal review; the same question applies here.
+- Replaced OneFormer (COCO + ADE20K, two passes) on 2026-11-11. `training/fireplace_adapter/` is
+  an offline OneFormer experiment and is not used by any job.
 
 ## Music analysis (the `music` extra, offline)
 - `librosa` (ISC), `scipy` (BSD-3-Clause), `soundfile` (BSD-3-Clause).
+
+## Room-label fonts (`tour_worker/render/fonts`)
+All under the SIL Open Font License 1.1; each font's licence text is next to it (`OFL-*.txt`).
+Bundling them in the worker and drawing them into videos is allowed; the fonts themselves may not
+be sold on their own.
+- **Sacramento** (default): Brian J. Bonislawsky, Astigmatic.
+- **Mr Dafoe:** Alejandro Paul (Sudtipos).
+- **Pacifico:** The Pacifico Project Authors.
+- **Kaushan Script:** Pablo Impallari, Igino Marini.
+- **Lato** (the room index, the "Virtually Staged" label and the title / end card text): Łukasz
+  Dziedzic (tyPoland).
 
 ## Codecs
 - H.264 is encoded with ffmpeg / x264, which are system tools and not shipped in this package.

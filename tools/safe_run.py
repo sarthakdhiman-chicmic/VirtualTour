@@ -46,6 +46,27 @@ def log(msg: str) -> None:
         os.fsync(fh.fileno())                     # on disk even if the machine resets
 
 
+HEADROOM = 1.5 * 2**30     # memory left to the rest of the machine (desktop, IDE, browser)
+
+
+def _bytes(size: str) -> int:
+    unit = {"K": 2**10, "M": 2**20, "G": 2**30, "T": 2**40}.get(size[-1].upper())
+    return int(float(size[:-1]) * unit) if unit else int(size)
+
+
+def memory_cap(asked: str) -> str:
+    """The scope's MemoryMax: what was asked, but never more than the machine has available now
+    less HEADROOM. A 9G cap on a 15 GB machine with 4 GB free never fired: the machine ran out
+    first and went down (2026-10-27, twice, in a 4K render). Under this cap the kernel kills the
+    job inside its scope instead; the job fails, the machine stays up."""
+    try:
+        avail = next(int(l.split()[1]) * 1024 for l in open("/proc/meminfo") if l.startswith("MemAvailable:"))
+    except (OSError, StopIteration):
+        return asked
+    cap = min(_bytes(asked), max(int(avail - HEADROOM), 512 * 2**20))
+    return f"{cap // 2**20}M"
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--cpus", default="0,2,4,6")
@@ -64,10 +85,12 @@ def main() -> int:
     unit = f"safe-run-{os.getpid()}"
     inner = ["taskset", "-c", a.cpus] + cmd
     scoped = shutil.which("systemd-run") is not None
-    full = (["systemd-run", "--user", "--scope", "--quiet", f"--unit={unit}", "-p", f"MemoryMax={a.memory}"]
-            + inner) if scoped else inner
+    memory = memory_cap(a.memory)
+    full = (["systemd-run", "--user", "--scope", "--quiet", f"--unit={unit}", "-p", f"MemoryMax={memory}",
+             "-p", "MemorySwapMax=0"] + inner) if scoped else inner
     temp_path = pkg_temp_path()
-    log(f"start cpus={a.cpus} max={a.max_temp}C resume={a.resume_temp}C mem={a.memory} cmd={' '.join(cmd)}")
+    log(f"start cpus={a.cpus} max={a.max_temp}C resume={a.resume_temp}C mem={memory} (asked {a.memory}) "
+        f"cmd={' '.join(cmd)}")
     proc = subprocess.Popen(full, env=env, start_new_session=True)
 
     def freeze_file():

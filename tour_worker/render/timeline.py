@@ -20,7 +20,7 @@ def compute_timeline(plan: Plan):
     D_k = [0] * len(plan.shots)
     for i, shot in enumerate(plan.shots):
         trans = shot.transition_in
-        if trans.type == "fade":
+        if trans.type in ("fade", "whip", "push"):     # overlaps centred on the cut
             D_k[i] = round(trans.duration_s * fps)
         else:
             D_k[i] = 0

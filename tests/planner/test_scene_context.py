@@ -81,16 +81,11 @@ def test_no_scene_summary_falls_back_to_saliency():
     assert not c.semantic and (c.interest_x, c.interest_y) == (0.3, 0.4)
 
 
-def test_natural_lengths_nothing_stretched(report):  # noqa: F811
-    """Shots keep their own lengths; no lower limit, max_total_s is the ceiling."""
-    cfg = PlannerConfig()
-    shots, _ = allocate_shots(report, cfg, {})
-    for s in shots[:-1]:
-        lo, hi = cfg.hero_shot_s if s.role == "hero" else cfg.normal_shot_s
-        assert lo - 1e-6 <= s.final_duration <= hi + 1e-6
-    assert sum(s.final_duration for s in shots) <= cfg.max_total_s
-    tight = PlannerConfig(max_total_s=20.0)
-    few, warns = allocate_shots(report, tight, {})
+def test_tight_ceiling_trims_details_then_rooms(report):  # noqa: F811
+    """max_total_s is the ceiling (the room budgets themselves: tests/planner/test_room_budgets.py)."""
+    shots, _ = allocate_shots(report, PlannerConfig(), {})
+    assert sum(s.final_duration for s in shots) <= PlannerConfig().max_total_s
+    few, warns = allocate_shots(report, PlannerConfig(max_total_s=20.0, min_total_s=0.0), {})
     assert sum(s.final_duration for s in few) <= 20.0 and "trimmed" in warns
 
 

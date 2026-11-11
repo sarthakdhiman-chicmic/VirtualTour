@@ -19,11 +19,43 @@ class CameraEasing(str, Enum):
     EASE_IN_OUT = "ease_in_out"
 
 
+class RoomLabels(BaseModel):
+    font: str = "sacramento"
+    scale: float = 0.8
+    placement: str = "bottom_left"
+
+
+class AgentCard(BaseModel):
+    name: str | None = None
+    phone: str | None = None
+    email: str | None = None
+    photo_uri: str | None = None
+
+
+class Branding(BaseModel):
+    kicker: str | None = None
+    address: str | None = None
+    locality: str | None = None
+    title: str | None = None
+    agent: AgentCard | None = None
+    logo_uri: str | None = None
+    corner_logo: bool = False
+
+
 class OutputParams(BaseModel):
     width: int
     height: int
     fps: int
     codec: str = "h264"
+    max_bytes: int | None = None     # a platform's file-size limit (render/encode.py video_profile)
+    hevc: bool | None = None         # True: also an H.265 copy (render/direct.py); None when not asked
+    room_labels: RoomLabels | None = None   # room-name captions (render/overlays.py); None: none
+    mls_copy: bool | None = None     # True: also the MLS copy, without captions; None when not asked
+    branding: Branding | None = None # title card, end card, corner logo; None: none
+
+    @model_serializer(mode="wrap")
+    def _omit_unset_additions(self, handler):
+        return _omit_none(handler(self), ("max_bytes", "hevc", "room_labels", "mls_copy", "branding"))
 
 
 class SourceImage(BaseModel):
@@ -131,6 +163,12 @@ class Shot(BaseModel):
     camera: CameraParams
     transition_in: TransitionParams = Field(default_factory=TransitionParams)
     motion_regions: list[MotionRegion] | None = None
+    caption: str | None = None       # the room label, on a room's first shot (planner/captions.py)
+    staged: bool | None = None       # True: a virtually staged photo (the disclosure label)
+
+    @model_serializer(mode="wrap")
+    def _omit_unset_additions(self, handler):
+        return _omit_none(handler(self), ("caption", "staged"))
 
 
 class MusicTrack(BaseModel):
@@ -191,6 +229,11 @@ class PlanProvenance(BaseModel):
     plan_hash: str | None = None
 
 
+class Voiceover(BaseModel):
+    uri: str
+    balance: float = 0.5
+
+
 class ShotPlan(BaseModel):
     plan_version: str = "1.2"
     listing_id: str
@@ -203,6 +246,11 @@ class ShotPlan(BaseModel):
     warnings: list[str] = Field(default_factory=list)
     provenance: PlanProvenance
     music: MusicTrack | None = None
+    voiceover: Voiceover | None = None   # narration over the tour; None: none (left out of the JSON)
+
+    @model_serializer(mode="wrap")
+    def _omit_unset_additions(self, handler):
+        return _omit_none(handler(self), ("voiceover",))
 
 def build_tour_render_request(
     plan: ShotPlan, 

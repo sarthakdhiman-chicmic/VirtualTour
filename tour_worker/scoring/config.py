@@ -110,13 +110,17 @@ class MotionConfig(BaseModel):
 
 
 class RankingConfig(BaseModel):
-    hero_room_count: int = 3
+    hero_room_count: int = 3            # (kept for older callers; hero rooms are hero_tiers now)
+    # the hero rooms (SOW 5.2C; client review 2026-11-05: "living, kitchen, primary bedroom should
+    # clearly get double the screen time"): the best room of each of these tiers. By rank alone a
+    # family room (living tier) took the primary bedroom's place.
+    hero_tiers: tuple[str, ...] = ("living_room", "kitchen", "primary_bedroom")
     hero_multiplier: float = 2.0
     exterior_multiplier: float = 1.5
 
 
 class ScoringConfig(BaseModel):
-    version: str = "0.3.0"
+    version: str = "0.4.0"
     weights: Weights = Field(default_factory=Weights)
     analysis_long_side: int = 1024
     min_acceptable_score: float = 0.40

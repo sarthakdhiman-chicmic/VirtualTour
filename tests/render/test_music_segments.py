@@ -10,7 +10,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from tour_worker.render.direct import _audio_args
+from tour_worker.render.direct import _music_graph
 
 pytestmark = pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="needs ffmpeg")
 SR = 48000
@@ -31,8 +31,8 @@ def _click_track(path, clicks, dur):
 
 def _render(music, track, out):
     plan = SimpleNamespace(total_duration_s=music.end_s, music=music)
-    ins, args = _audio_args(plan, track, 0)
-    graph = args[args.index("-filter_complex") + 1].replace(",aresample=48000[music]", "[music]")
+    ins, graph = _music_graph(plan, track, 0)
+    graph = graph.replace(",aresample=48000[music]", "[music]")
     subprocess.run(["ffmpeg", "-v", "error", "-y", *ins, "-filter_complex", graph, "-map", "[music]",
                     "-ac", "1", "-ar", str(SR), "-c:a", "pcm_s16le", out], check=True)
     import wave

@@ -33,7 +33,7 @@ class SegmentImage(BaseModel):
 
 
 class TourSegmentRequest(_Request):
-    """OneFormer masks for a tour's photos, before tour_plan plans."""
+    """Mask2Former masks for a tour's photos, before tour_plan plans."""
     job_type: Literal["tour_segment"]
     images: list[SegmentImage] = Field(min_length=1)
     output_prefix: str = Field(min_length=1)  # masks go to <output_prefix><photo_id>/<object_id>.png
@@ -44,6 +44,7 @@ class PlanPhoto(BaseModel):
     photo_id: str = Field(min_length=1)       # the planner's id (scoring, segments, scenes keys)
     uri: str = Field(min_length=1)            # the canonical URI: the plan's image_uri, as hashed
     room_type: Optional[str] = None           # as chosen by the user at upload ("Living Room")
+    staged: bool = False                      # virtually staged: the "Virtually Staged" label is drawn
 
 
 class MusicTrackInput(BaseModel):
@@ -64,6 +65,35 @@ class PlanOptions(BaseModel):
     output_width: int = Field(1920, gt=0)
     output_height: int = Field(1080, gt=0)
     max_total_s: float = Field(120.0, gt=0)   # the tour's ceiling (the backend caps it at 120)
+    max_bytes: Optional[int] = Field(None, gt=0)   # a platform's file-size limit (Instagram Reels: 100 MB)
+    hevc: bool = False                        # also render an H.265 copy next to the H.264 master
+    photo_order: Literal["narrative", "manual"] = "narrative"   # manual: the photos' order in the request
+    pacing: Optional[Literal["slow", "normal", "fast"]] = None   # 3-8 s shots (planner/config.py PACING); None: the preset's
+    room_labels: Optional[RoomLabelsOption] = None   # room-name captions (absent: none)
+    mls_copy: bool = False                    # also render the MLS copy (no captions)
+    branding: Optional[dict[str, Any]] = None  # tour_worker.contract.plan.Branding: title / end card / logo
+    voiceover: Optional[dict[str, Any]] = None # tour_worker.contract.plan.Voiceover: {uri, balance}
+
+
+class RoomLabelsOption(BaseModel):
+    """Room-name captions: a font from LABEL_FONTS, a scale within LABEL_SCALE_RANGE (x the maximum
+    size; 0.8 is the default) and a placement from LABEL_PLACEMENTS (tour_worker.contract.plan)."""
+    model_config = ConfigDict(extra="forbid")
+    font: str = "sacramento"
+    scale: float = 0.8
+    placement: str = "bottom_left"
+
+    @model_validator(mode="after")
+    def _known(self):
+        from tour_worker.contract.plan import LABEL_FONTS, LABEL_PLACEMENTS, LABEL_SCALE_RANGE
+        if self.font not in LABEL_FONTS:
+            raise ValueError(f"room_labels.font must be one of {', '.join(LABEL_FONTS)}")
+        if self.placement not in LABEL_PLACEMENTS:
+            raise ValueError(f"room_labels.placement must be one of {', '.join(LABEL_PLACEMENTS)}")
+        lo, hi = LABEL_SCALE_RANGE
+        if not lo <= self.scale <= hi:
+            raise ValueError(f"room_labels.scale must be within {lo}-{hi}")
+        return self
 
 
 class TourPlanRequest(_Request):
@@ -107,6 +137,9 @@ class TourRenderResult(BaseModel):
     render_seconds: float
     plan_hash: Optional[str]
     warnings: list[Any]
+    hevc_uri: Optional[str] = None            # the H.265 copy, when the plan asked for one
+    mls_uri: Optional[str] = None             # the MLS copy (no captions), when the plan asked for one
+    timings: Optional[dict[str, Any]] = None  # tour_worker.timing: seconds per stage, total, host
     error: None = None
 
 
@@ -134,6 +167,7 @@ class TourPlanResult(BaseModel):
     scoring: ScoringSummary
     warnings: list[str]                       # photos left out (photo_fetch_failed / photo_unreadable)
     seconds: float
+    timings: Optional[dict[str, Any]] = None  # tour_worker.timing: seconds per stage, total, host
 
 
 class SegmentRegion(BaseModel):
@@ -154,5 +188,6 @@ class TourSegmentResult(BaseModel):
     cached: list[str] = []                              # photo_ids whose known_version is current
     segment_version: Optional[str] = None               # what the results depend on (jobs.segment)
     model: str                                          # "<hf id>@<revision[:10]>"
-    fireplace_model: Optional[str] = None               # the fireplace pass's model (None: off)
+    fireplace_model: Optional[str] = None               # (OneFormer era: the second fireplace pass; now unused)
     seconds: float
+    timings: Optional[dict[str, Any]] = None            # tour_worker.timing: stages, total, host

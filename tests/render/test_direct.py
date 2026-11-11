@@ -106,6 +106,117 @@ def test_music_is_queued_trimmed_and_as_long_as_the_video():
         assert abs(float(s["audio"]["duration"]) - float(s["video"]["duration"])) <= 1 / 30 + 0.03
 
 
+def test_a_loud_track_is_delivered_at_minus_14_lufs_under_minus_1_dbtp():
+    """Client review 2026-11-05: the demo's music was -10.1 LUFS with a +0.4 dBTP peak. The track is
+    normalised (two-pass, linear gain) and verify() checks loudness and true peak on the file."""
+    from tour_worker.errors import WorkerError
+    from tour_worker.render.probe import audio_loudness
+    with tempfile.TemporaryDirectory() as td:
+        _workdir(td)
+        track = os.path.join(td, "loud.wav")                        # stereo tones at full scale
+        tone = "0.5*sin(2*PI*220*t)+0.5*sin(2*PI*3001*t)"
+        subprocess.run(["ffmpeg", "-loglevel", "error", "-f", "lavfi", "-i", f"aevalsrc={tone}|{tone}:d=3.5:s=48000",
+                        track], check=True)
+        assert audio_loudness(track)["true_peak_dbtp"] > -1.0          # it would clip as delivered
+        music = {"track_id": "t", "uri": "file://" + track, "end_s": 3.0, "loops": 1,
+                 "track_duration_s": 3.5, "fade_out_s": 1.0, "synced": True}
+        plan = _plan(music=music)
+        out = render_direct(plan, td, music_path=track, workers=1)
+        pb = verify(out, plan)
+        assert abs(pb["loudness_lufs"] + 14.0) <= 1.0 and pb["true_peak_dbtp"] <= -1.0
+        loud = os.path.join(td, "loud.mp4")                         # the same video with the raw track
+        subprocess.run(["ffmpeg", "-loglevel", "error", "-i", out, "-i", track, "-map", "0:v", "-map", "1:a",
+                        "-c:v", "copy", "-c:a", "aac", "-t", "3", "-movflags", "+faststart", loud], check=True)
+        with pytest.raises(WorkerError, match="loudness|true peak"):
+            verify(loud, plan)
+
+
+def test_a_beat_at_the_cut_plays_at_the_cut():
+    """Client review 2026-11-05: cuts read ~50 ms ahead of the beat (a 1-frame planning lead + AAC's
+    21 ms priming in tools that ignore the edit list). The muxed audio, decoded as a player does
+    (edit list honoured), puts a click at the cut time to the sample."""
+    import wave
+    sr = 48000
+    with tempfile.TemporaryDirectory() as td:
+        _workdir(td)
+        y = np.zeros((int(3.5 * sr), 2), np.int16)
+        y[int(1.5 * sr):int(1.5 * sr) + 96] = 26000                 # a click at the cut (1.5 s)
+        track = os.path.join(td, "click.wav")
+        with wave.open(track, "wb") as w:
+            w.setnchannels(2), w.setsampwidth(2), w.setframerate(sr), w.writeframes(y.tobytes())
+        music = {"track_id": "t", "uri": "file://" + track, "end_s": 3.0, "loops": 1,
+                 "track_duration_s": 3.5, "fade_out_s": 0.2, "synced": True}
+        out = render_direct(_plan(music=music), td, music_path=track, workers=1)
+        raw = subprocess.run(["ffmpeg", "-v", "error", "-i", out, "-map", "0:a", "-ac", "1", "-ar", str(sr),
+                              "-f", "f32le", "-"], capture_output=True, check=True).stdout
+        a = np.abs(np.frombuffer(raw, np.float32))
+        assert abs(np.argmax(a > 0.2) / sr - 1.5) < 0.002
+
+
+def test_a_voiceover_ducks_the_music_and_the_mix_is_delivered_at_minus_14_lufs():
+    """plan.voiceover (client review 2026-11-05): the music ducks under the voice (balance 0.8),
+    comes back after it, and the mix is normalised like music alone."""
+    import wave
+    from tour_worker.contract.plan import Voiceover
+    sr = 48000
+
+    def wav(path, fn, dur):
+        t = np.arange(int(dur * sr)) / sr
+        y = (np.clip(fn(t), -1, 1) * 32767).astype(np.int16)
+        with wave.open(path, "wb") as w:
+            w.setnchannels(2), w.setsampwidth(2), w.setframerate(sr), w.writeframes(np.repeat(y, 2).tobytes())
+
+    with tempfile.TemporaryDirectory() as td:
+        _workdir(td)
+        music, voice = os.path.join(td, "m.wav"), os.path.join(td, "v.wav")
+        wav(music, lambda t: 0.3 * np.sin(2 * np.pi * 220 * t), 3.5)
+        wav(voice, lambda t: 0.5 * np.sin(2 * np.pi * 1000 * t) * ((t > 1.0) & (t < 2.0)), 2.5)
+        m = {"track_id": "t", "uri": "file://" + music, "end_s": 3.0, "loops": 1, "track_duration_s": 3.5,
+             "fade_out_s": 0.1, "synced": True}
+        plan = _plan(music=m).model_copy(update={"voiceover": Voiceover(uri="file://" + voice, balance=0.8)})
+        out = render_direct(plan, td, music_path=music, voice_path=voice, workers=1)
+        pb = verify(out, plan)
+        assert abs(pb["loudness_lufs"] + 14.0) <= 1.0 and pb["true_peak_dbtp"] <= -1.0
+        raw = subprocess.run(["ffmpeg", "-v", "error", "-i", out, "-map", "0:a", "-ac", "1", "-ar", str(sr),
+                              "-f", "f32le", "-"], capture_output=True, check=True).stdout
+        y = np.frombuffer(raw, np.float32)
+
+        def band220(a, b):                                   # the music's level in [a, b) s
+            seg = y[int(a * sr):int(b * sr)]
+            spec = np.abs(np.fft.rfft(seg * np.hanning(len(seg))))
+            f = np.fft.rfftfreq(len(seg), 1 / sr)
+            return spec[(f > 200) & (f < 240)].max()
+
+        before, under, after = band220(0.4, 0.8), band220(1.4, 1.8), band220(2.4, 2.8)   # equal windows
+        assert 20 * np.log10(before / under) >= 6.0              # ducked by 6 dB or more under the voice
+        assert 20 * np.log10(before / after) < 3.0               # and back after it
+
+
+def test_whip_and_push_carry_one_shot_into_the_next_around_the_cut():
+    from tour_worker.render.direct import _push, _whip
+    a = np.zeros((90, 160, 3), np.uint8)
+    b = np.full((90, 160, 3), 200, np.uint8)
+    a[:, 70:90] = 255                                            # a bright bar in the outgoing shot
+    mid = _whip(a, b, 0.5, 1)
+    assert mid[:, :60].mean() < 120 and mid[:, 100:].mean() > 120  # half out, half in
+    assert np.abs(np.diff(mid[45].astype(int), axis=0)).max() < 120   # blurred: no hard edge at the seam
+    assert _whip(a, b, 0.05, 1)[:, :60].mean() < 40 and _whip(a, b, 0.97, 1).mean() > 190
+    assert _push(a, b, 0.1).mean() < 60 and _push(a, b, 0.95).mean() > 180
+
+
+def test_a_plan_with_whips_and_pushes_renders_and_verifies():
+    raw = _plan().model_dump(mode="json")
+    raw["plan_version"] = "1.4"
+    raw["shots"][1]["transition_in"] = {"type": "whip", "duration_s": 0.33}
+    raw["provenance"]["plan_hash"] = compute_plan_hash(raw)
+    plan = parse_plan(raw)
+    with tempfile.TemporaryDirectory() as td:
+        _workdir(td)
+        out = render_direct(plan, td, workers=1)
+        verify(out, plan)
+        assert total_frames(plan) == 90
+
+
 def test_fades_blend_like_the_browser_composition():
     plan = _plan(fade=0.4)
     with tempfile.TemporaryDirectory() as td:
@@ -182,3 +293,27 @@ def test_punch_zooms_in_on_the_hit_and_settles():
 def test_a_bad_punch_is_rejected():
     with pytest.raises(ValueError, match="punch"):
         _punched_plan([{"at_s": 0.0, "amount": 0.2, "decay_s": 0.35}])
+
+
+def test_a_photo_stored_smaller_than_the_plan_frames_and_moves_like_the_full_size_one():
+    """The worker may store a photo smaller than the plan's source size; the shot is still drawn
+    at the plan's size, so the camera window and the motion masks must use that size too (they
+    used the stored one: masks shrunk toward the top-left and the window zoomed in, 2026-11-03)."""
+    plan = _plan()
+    shot, n = plan.shots[1], compute_timeline(plan)[1]["render_frames"]
+    with tempfile.TemporaryDirectory() as full, tempfile.TemporaryDirectory() as small:
+        _workdir(full), _workdir(small)
+        p = os.path.join(small, "images", "b.jpg")
+        cv2.imwrite(p, cv2.resize(cv2.imread(p), (SW * 3 // 4, SH * 3 // 4), interpolation=cv2.INTER_AREA),
+                    [cv2.IMWRITE_JPEG_QUALITY, 98])
+        warnings = []
+        a = ShotWarp(plan, shot, n, os.path.join(full, "images"))
+        b = ShotWarp(plan, shot, n, os.path.join(small, "images"), warnings)
+        assert any(w.startswith("image_resized:s02:") for w in warnings)
+        assert (b.sw, b.sh) == (a.sw, a.sh) == (SW, SH)
+        assert len(b.regions) == len(a.regions) == 1
+        assert b.regions[0].feather.shape == a.regions[0].feather.shape == (SH, SW)
+        assert ((b.regions[0].feather > 0.5) == (a.regions[0].feather > 0.5)).mean() > 0.995
+        for f in (0, n // 2, n - 1):
+            fa, fb = a.frame(f).astype(np.float32), b.frame(f).astype(np.float32)
+            assert np.abs(fa - fb).mean() < 4.0                  # same framing; only the lost detail differs

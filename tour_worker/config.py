@@ -10,14 +10,9 @@ Every setting, its environment variable and default (also in README.md):
   PREWARP_WORKERS      (auto)     processes drawing + encoding frames; auto = min(8, CPUs - 1),
                                   capped by available memory (600 MB each)
   MODELS_DIR           <repo>/models   where model weights live (one folder per model)
-  SEGMENT_MODEL        "coco"     OneFormer checkpoint for tour_segment: "coco" or "ade20k"
-                                  (tour_worker.vision.segment.MODELS)
-  ONEFORMER_DIR        (unset)    that checkpoint's folder; default MODELS_DIR/<its dir name>
-  COCO_FIRE_SEARCH     "0"        "1": look for lit fires by colour with the COCO model (off: it
-                                  failed validation, 4/11 fires found)
-  FIREPLACE_MODEL      "ade20k"   a second OneFormer pass that finds fireplaces (COCO has no such
-                                  class); lit fires are looked for inside them. "" = off
-  FIREPLACE_DIR        (unset)    that checkpoint's folder; default MODELS_DIR/<its dir name>
+  SEGMENT_MODEL        "m2f_ade20k"  the tour_segment model (tour_worker.vision.segment.MODELS):
+                                  Mask2Former ADE20K panoptic, one pass for every motion class
+  SEGMENT_DIR          (unset)    its weights folder; default MODELS_DIR/<its dir name>
 
 The HTTP service (python -m tour_worker.service; handler.py, the RunPod entry, ignores these):
 
@@ -31,6 +26,9 @@ The HTTP service (python -m tour_worker.service; handler.py, the RunPod entry, i
   RUNSYNC_TIMEOUT_S    300        how long POST /runsync waits before returning the job's status
   HOST                 127.0.0.1  address the service listens on (the Docker images set 0.0.0.0)
   PORT                 8000       its port
+  SERVICE_PREFIXES     (unset)    extra path prefixes the routes also answer under, comma
+                                  separated, e.g. "/tour/render,/tour/segment": the backend's
+                                  RUNPOD_ENDPOINT_URL + RUNPOD_TOUR_*_PATH routed here
 
 AWS credentials and region are not settings of the worker: boto3 reads them itself
 (AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_DEFAULT_REGION, or an instance role).
@@ -51,11 +49,8 @@ class Settings:
     images_dir: str = "/tmp"
     render_workers: int | None = None       # None: automatic
     models_dir: str = os.path.join(REPO_ROOT, "models")
-    segment_model: str = "coco"
-    oneformer_dir: str | None = None
-    coco_fire_search: bool = False
-    fireplace_model: str = "ade20k"         # "" = no fireplace pass
-    fireplace_dir: str | None = None
+    segment_model: str = "m2f_ade20k"
+    segment_dir: str | None = None
     # the HTTP service (tour_worker.service)
     api_key: str | None = field(default=None, repr=False)     # never in a repr / log
     allow_no_auth: bool = False
@@ -65,6 +60,7 @@ class Settings:
     runsync_timeout_s: float = 300.0
     host: str = "127.0.0.1"
     port: int = 8000
+    service_prefixes: tuple[str, ...] = ()
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> "Settings":
@@ -75,11 +71,8 @@ class Settings:
             images_dir=env.get("IMAGES_DIR", "/tmp"),
             render_workers=max(1, int(workers)) if workers else None,
             models_dir=env.get("MODELS_DIR") or os.path.join(REPO_ROOT, "models"),
-            segment_model=env.get("SEGMENT_MODEL", "coco"),
-            oneformer_dir=env.get("ONEFORMER_DIR") or None,
-            coco_fire_search=env.get("COCO_FIRE_SEARCH", "") == "1",
-            fireplace_model=env.get("FIREPLACE_MODEL", "ade20k").strip(),
-            fireplace_dir=env.get("FIREPLACE_DIR") or None,
+            segment_model=env.get("SEGMENT_MODEL", "m2f_ade20k"),
+            segment_dir=env.get("SEGMENT_DIR") or None,
             api_key=env.get("WORKER_API_KEY") or None,
             allow_no_auth=env.get("WORKER_ALLOW_NO_AUTH", "") == "1",
             job_concurrency=max(1, int(env.get("JOB_CONCURRENCY") or 1)),
@@ -88,20 +81,14 @@ class Settings:
             runsync_timeout_s=max(0.0, float(env.get("RUNSYNC_TIMEOUT_S") or 300)),
             host=env.get("HOST") or "127.0.0.1",
             port=int(env.get("PORT") or 8000),
+            service_prefixes=tuple("/" + p.strip().strip("/") for p in (env.get("SERVICE_PREFIXES") or "").split(",")
+                                   if p.strip().strip("/")),
         )
 
-    def oneformer_path(self) -> str:
-        """The folder of the configured OneFormer checkpoint."""
+    def segment_path(self) -> str:
+        """The folder of the configured segmentation model's weights."""
         from tour_worker.vision.segment import MODELS
-        return self.oneformer_dir or os.path.join(self.models_dir, MODELS[self.segment_model]["dir"])
-
-
-    def fireplace_path(self) -> str | None:
-        """The folder of the fireplace pass's checkpoint (None: the pass is off)."""
-        if not self.fireplace_model:
-            return None
-        from tour_worker.vision.segment import MODELS
-        return self.fireplace_dir or os.path.join(self.models_dir, MODELS[self.fireplace_model]["dir"])
+        return self.segment_dir or os.path.join(self.models_dir, MODELS[self.segment_model]["dir"])
 
 
 @functools.lru_cache(maxsize=1)

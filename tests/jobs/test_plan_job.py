@@ -84,6 +84,61 @@ def test_same_plan_as_scoring_and_planner_called_directly():
     assert res["plan"] == direct
 
 
+def test_a_file_size_limit_reaches_the_plan_and_is_absent_otherwise():
+    """A platform's file-size limit (the backend's Instagram Reels preset: 100 MB) becomes the
+    plan's output.max_bytes; without one the output (and so plan_hash) is what it always was."""
+    from tour_worker.contract.plan import parse_plan
+    res = run_job(_request(options={"output_width": 1080, "output_height": 1920, "max_total_s": 90,
+                                    "max_bytes": 100_000_000}), storage=FakeStorage())
+    assert res["plan"]["output"]["max_bytes"] == 100_000_000
+    assert parse_plan(res["plan"]).output.max_bytes == 100_000_000
+    res = run_job(_request(), storage=FakeStorage())
+    assert "max_bytes" not in res["plan"]["output"]
+
+
+def test_the_hevc_copy_reaches_the_plan_and_is_absent_otherwise():
+    """options.hevc (the SOW's optional H.265) becomes the plan's output.hevc; without it the
+    output (and so plan_hash) is what it always was."""
+    from tour_worker.contract.plan import parse_plan
+    res = run_job(_request(options={"hevc": True}), storage=FakeStorage())
+    assert res["plan"]["output"]["hevc"] is True and parse_plan(res["plan"]).output.hevc
+    res = run_job(_request(), storage=FakeStorage())
+    assert "hevc" not in res["plan"]["output"] and not parse_plan(res["plan"]).output.hevc
+
+
+def test_room_labels_caption_each_rooms_first_shot_and_are_absent_otherwise():
+    """options.room_labels: the plan carries the labels' settings and each room's first shot its
+    display name; staged photos are flagged. Without them, no caption / staged / room_labels key
+    appears, so the output and plan_hash are what they always were."""
+    photos = _request()["photos"]
+    photos[3]["staged"] = True                              # a kitchen photo
+    res = run_job(_request(photos=photos, options={"room_labels": {"scale": 0.9, "placement": "top_left"},
+                                                   "mls_copy": True}), storage=FakeStorage())
+    plan = res["plan"]
+    assert plan["output"]["room_labels"] == {"font": "sacramento", "scale": 0.9, "placement": "top_left"}
+    assert plan["output"]["mls_copy"] is True
+    rooms, captions = [], []
+    for shot in plan["shots"]:
+        first = not rooms or rooms[-1] != shot["room_key"]
+        rooms.append(shot["room_key"])
+        assert ("caption" in shot) == first
+        if first:
+            captions.append(shot["caption"])
+    assert "Kitchen" in captions and "Living Room" in captions
+    assert all(s.get("staged") is (True if s["asset_id"] == "img_3" else None) for s in plan["shots"])
+    parsed = parse_plan(plan)
+    assert parsed.output.room_labels.placement == "top_left" and parsed.output.mls_copy
+    plain = run_job(_request(), storage=FakeStorage())["plan"]
+    assert not {"room_labels", "mls_copy"} & set(plain["output"])
+    assert not any({"caption", "staged"} & set(s) for s in plain["shots"])
+
+
+def test_bad_room_labels_are_invalid_request():
+    for bad in ({"font": "comic_sans"}, {"scale": 0.4}, {"placement": "middle"}, {"colour": "red"}):
+        res = run_job(_request(options={"room_labels": bad}), storage=FakeStorage())
+        assert res["error"]["code"] == "invalid_request", bad
+
+
 def test_image_urls_are_fetched_instead_and_stay_out_of_the_plan():
     signed = {uri: f"https://signed.example/{i}?X-Amz-Signature=sig" for i, uri in enumerate(PHOTOS)}
     photos = {signed[u]: d for u, d in PHOTOS.items()}
@@ -189,3 +244,68 @@ def test_the_runpod_handler_runs_tour_plan(tmp_path, monkeypatch):
         assert os.path.basename(a.pop("image_uri")) == os.path.basename(b.pop("image_uri"))
     ours["provenance"].pop("plan_hash"); expected["provenance"].pop("plan_hash")
     assert ours == expected
+
+
+def test_pacing_reaches_the_planner():
+    """options.pacing (Slow / Normal / Fast): a slow tour is longer than a fast one, shots within 3-8 s."""
+    slow = run_job(_request(options={"pacing": "slow"}), storage=FakeStorage())["plan"]
+    fast = run_job(_request(options={"pacing": "fast"}), storage=FakeStorage())["plan"]
+    assert slow["total_duration_s"] > fast["total_duration_s"]
+    assert all(3.0 - 1e-6 <= s["duration_s"] <= 8.0 + 1e-6 for s in slow["shots"] + fast["shots"])
+    assert run_job(_request(options={"pacing": "turbo"}), storage=FakeStorage())["error"]["code"] == "invalid_request"
+
+
+def test_branding_reaches_the_plan_and_an_end_card_holds_the_final_shot():
+    branding = {"address": "1030 Turkey Trot", "locality": "Greensboro, GA",
+                "agent": {"name": "Jordan Avery", "photo_uri": "s3://b/a.jpg"}, "logo_uri": "s3://b/l.png"}
+    plan = run_job(_request(options={"branding": branding}), storage=FakeStorage())["plan"]
+    assert plan["output"]["branding"]["agent"]["name"] == "Jordan Avery"
+    assert plan["shots"][-1]["duration_s"] >= 6.0 - 1e-6
+    assert "branding" not in run_job(_request(), storage=FakeStorage())["plan"]["output"]
+    bad = run_job(_request(options={"branding": {"logo_uri": "ftp://x"}}), storage=FakeStorage())
+    assert bad["status"] == "failed"
+
+
+def test_presets_set_the_pace_the_kicker_and_outdoor_time_and_the_request_wins():
+    """Property Showcase (Normal), Just Listed (Fast, "Just Listed" on the title card), Lifestyle
+    (Slow, exteriors 1.5x); an explicit pacing beats the preset's."""
+    def plan(**options):
+        return run_job(_request(options=options), storage=FakeStorage())["plan"]
+
+    def ext_time(p):
+        return sum(s["duration_s"] for s in p["shots"] if s["room_type"] in ("exterior",))
+
+    show, listed, life = plan(preset="property_showcase"), plan(preset="just_listed"), plan(preset="lifestyle")
+    assert listed["output"]["branding"]["kicker"] == "Just Listed"
+    assert "branding" not in show["output"] and "branding" not in life["output"]
+    assert ext_time(life) > ext_time(show)
+    assert plan(preset="lifestyle", pacing="fast")["total_duration_s"] < life["total_duration_s"]
+    assert "preset_not_defined" in plan(preset="mystery")["warnings"]
+
+
+def test_manual_order_plays_the_rooms_and_photos_as_the_request_lists_them():
+    """photo_order "manual" (drag-to-reorder): rooms in the order of their first photo in the
+    request, each room's photos in request order; "narrative" (default) is the planner's order."""
+    photos = _request()["photos"]
+    reordered = [photos[i] for i in (6, 0, 3, 1, 4, 2, 5, 7)]       # bedroom first, then exterior...
+    plan = run_job(_request(photos=reordered, options={"photo_order": "manual"}), storage=FakeStorage())["plan"]
+    rooms = []
+    for s in plan["shots"]:
+        if not rooms or rooms[-1] != s["room_type"]:
+            rooms.append(s["room_type"])
+    listed = []
+    for p in reordered:
+        if p["room_type"] not in listed:
+            listed.append(p["room_type"])
+    assert rooms == [r for r in listed if r in rooms]
+    natural = run_job(_request(photos=reordered), storage=FakeStorage())["plan"]
+    assert natural["shots"][0]["room_type"] == "exterior"            # the narrative opens outside
+
+
+def test_a_voiceover_reaches_the_plan_and_is_absent_otherwise():
+    plan = run_job(_request(options={"voiceover": {"uri": "s3://b/vo.mp3", "balance": 0.7}}), storage=FakeStorage())["plan"]
+    assert plan["voiceover"] == {"uri": "s3://b/vo.mp3", "balance": 0.7}
+    assert parse_plan(plan).voiceover.balance == 0.7
+    assert "voiceover" not in run_job(_request(), storage=FakeStorage())["plan"]
+    bad = run_job(_request(options={"voiceover": {"uri": "s3://b/vo.mp3", "balance": 2}}), storage=FakeStorage())
+    assert bad["status"] == "failed"

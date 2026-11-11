@@ -213,8 +213,11 @@ def length_bounds(targets: list[float], roles: list[str] | None, cfg: PlannerCon
         role = (roles[k] if roles else None) or "detail"
         f_lo, f_hi = (cfg.music_wide_bounds if wide
                       else cfg.music_role_bounds.get(role, cfg.music_role_bounds["detail"]))
-        lo.append(max(cfg.music_shot_abs_min_s, f_lo * t))
-        hi.append(min(cfg.music_shot_abs_max_s, f_hi * t))
+        if role == "hero":                     # a hero room's 2x time is never given away to the music
+            f_lo = max(f_lo, cfg.music_hero_min_factor)
+        h = min(cfg.music_shot_abs_max_s, f_hi * t)
+        lo.append(min(h, max(cfg.music_shot_abs_min_s, f_lo * t)))   # never an empty window
+        hi.append(h)
     return np.array(lo), np.array(hi)
 
 
@@ -390,8 +393,8 @@ def _sync_v3(
         last_acc = max((float(starts[a]) + b for a, b in accents), default=-1e9)
         near_cut = float(np.abs(cuts - t).min()) if len(cuts) else 1e9
         spaced = min(near_cut, t - last_acc) >= cfg.music_accent_min_gap_s
-        if not cfg.music_punches and why != "merged":   # punches off: the hook plays uncut
-            report.append(MusicHook(t=round(t, 3), kind="uncut", reason=why))
+        if not cfg.music_punches:                      # punches off: the hook plays uncut
+            report.append(MusicHook(t=round(t, 3), kind="covered" if why == "merged" else "uncut", reason=why))
         elif (spaced and at >= cfg.music_accent_edge_s
                 and durations[k] - at >= cfg.music_accent_edge_s):
             accents.append((k, at))

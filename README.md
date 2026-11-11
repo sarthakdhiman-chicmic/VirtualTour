@@ -11,8 +11,11 @@ or locally. A tour is `tour_segment` -> `tour_plan` -> `tour_render`; the backen
   It fetches the photos, motion-region masks and music, draws every frame with OpenCV (the
   camera moves, beat-sync retiming and zoom punches, and perceptual motion: curtains, plants,
   trees, water and fire), encodes with ffmpeg, checks that the file plays smoothly, and uploads
-  `<output_prefix>master.mp4`. The same plan always gives a byte-identical file.
-- **`tour_segment`**: runs OneFormer on a tour's photos before planning. It uploads one PNG mask
+  `<output_prefix>master.mp4`. The same plan always gives a byte-identical file. A plan with
+  `output.hevc` also gets an H.265 copy, `<output_prefix>master_hevc.mp4`. A plan with
+  `output.room_labels` draws each room's name; with `output.mls_copy` it also gets
+  `<output_prefix>master_mls.mp4`, the same video without the room labels.
+- **`tour_segment`**: runs Mask2Former on a tour's photos before planning. It uploads one PNG mask
   per object that can move (curtain, blinds, potted plant, tree, water, lit fire) and returns
   JSON only: the regions and a scene summary per photo.
 
@@ -23,8 +26,8 @@ playback checks use ffprobe). Python 3.10 or later.
 
 ```bash
 uv sync                          # the render job, plus the dev group (pytest)
-uv sync --extra segment          # + OneFormer on CPU PyTorch (dev machines)
-uv sync --extra segment-gpu      # + OneFormer on CUDA 12.6 PyTorch (RunPod GPU worker)
+uv sync --extra segment          # + Mask2Former on CPU PyTorch (dev machines)
+uv sync --extra segment-gpu      # + Mask2Former on CUDA 12.6 PyTorch (GPU host)
 uv sync --extra music            # + music analysis (librosa 0.10.2.post1, pinned)
 uv sync --extra http             # + the HTTP service (fastapi, uvicorn)
 pip install -e ".[segment,dev]"  # the same with pip
@@ -68,6 +71,20 @@ Request (full example: `examples/tour_render.json`):
 ```
 
 - `output_prefix` is **required**. The video is written to `<output_prefix>master.mp4`.
+- **Delivery (client review 2026-11-05), all checked by `render/probe.py verify()`:**
+  - **Colour:** BT.709 conversion and tags.
+  - **Audio:** normalised to -14 LUFS with a true peak at or below -1 dBTP. This is a two-pass,
+    linear gain applied once and stream-copied into every copy.
+  - **Music fade:** 3 s at the end.
+  - **Cuts:** on the beat, with no lead.
+- `output.hevc` (optional, plan field): also writes an H.265 copy to
+  `<output_prefix>master_hevc.mp4` (the SOW's optional H.265).
+  - The same drawn frames go to a second encoder (x265) in the same ffmpeg process, so nothing is
+    drawn twice and the copy is not a re-encode of the H.264 file.
+  - HEVC Main, tagged `hvc1` for Apple players, at the master's level, bitrate cap and keyframe
+    spacing. It passes the same playback checks and is byte-identical for the same plan.
+  - Each render worker needs more memory (x265: about 0.43 GB at 1080p, 1.35 GB at 4K), so fewer
+    workers start on the same machine.
 - `image_urls` is optional. It maps a URI in the plan (a shot's `image_uri`, a region's
   `mask_uri`, or `music.uri`) to the URL the worker should fetch instead.
 - Plan versions 1.0 to 1.5 are accepted:
@@ -78,7 +95,7 @@ Request (full example: `examples/tour_render.json`):
   - 1.4: adds `motion_regions`, with the effects `fabric_sway`, `foliage_sway`, `canopy_flutter`, `calm_water`, `water_ripple`, `fire_flicker` and `sky_drift`.
     - `sky_drift` (2026-10-27): the clouds drift with the shot's wind (2% of the photo width per second at the top) and slowly billow (`amplitude_px` / `freq_hz`).
     - The sky is a layer under everything. It is refined to the pixel, so roofs and leaves stay put, and the sky hidden behind them is filled with nearby cloud texture.
-    - OneFormer's sky mask takes in thin things whole: twigs, loose leaves, wires, a weathervane, part of a gutter. Anything darker than the clear blue sky nearby that hangs off the foreground is kept out, so it stays still instead of drifting with the clouds.
+    - The segmentation's sky mask takes in thin things whole: twigs, loose leaves, wires, a weathervane, part of a gutter. Anything darker than the clear blue sky nearby that hangs off the foreground is kept out, so it stays still instead of drifting with the clouds.
     - At their soft edges only the sky's share of each pixel changes, so no outline of the old sky shows when a cloud passes behind them.
     - A sky whose mask cannot be read stays still, with a warning.
   - 1.5: adds the `music` block, `time_warp` and `punches`.
@@ -88,11 +105,32 @@ Request (full example: `examples/tour_render.json`):
 
 Result:
 
+- **Room labels** (`output.room_labels`: `font`, `scale`, `placement`; `render/overlays.py`):
+  each shot with a `caption` (a room's first shot) gets the room's name in a script font after a
+  small gold index and a thin rule, e.g. "02 | Kitchen", over a soft gradient.
+  - **Animation:** 0.4 s after the room's first cut the rule draws down and the index fades in.
+    The name writes on left to right over 0.9 s. It holds for at most 3.6 s, or until 0.35 s
+    before the room ends, then fades out over 0.5 s. A room too short to write its name out gets
+    no label.
+  - **`font`:** `sacramento` (default), `mr_dafoe`, `pacifico` or `kaushan_script`. The fonts ship
+    in `tour_worker/render/fonts` (SIL OFL, `LICENSES.md`).
+  - **`scale`:** 0.6–1.0 of the reviewed maximum size; the default is 0.8. Sizes are set for a
+    1080 px short side and scale with the output.
+  - **`placement`:** `bottom_left` (default), `bottom_center`, `bottom_right`, `top_left`,
+    `top_center` or `top_right`. Right placements mirror the label ("Kitchen | 02"); top ones
+    move the gradient to the top.
+- **"Virtually Staged":** every shot with `staged: true` shows the disclosure at the bottom right
+  for the whole shot (bottom left when the labels sit bottom right). It is drawn with or without
+  room labels.
+- `output.mls_copy` (optional): also writes `<output_prefix>master_mls.mp4`. The same drawn frames
+  go to a second x264 before the room labels are added; the staged disclosure stays. It passes
+  the same checks; each render worker budgets a second encoder's memory.
+
 ```json
 {"status": "completed", "video_uri": "s3://bucket/virtual_tour/<job>/master.mp4",
  "duration_s": 71.6, "width": 1920, "height": 1080, "fps": 30, "codec": "h264",
  "render_seconds": 412.3, "plan_hash": "...", "warnings": ["motion_region_dropped:s17:seg_002:faint_0.3px"],
- "error": null}
+ "hevc_uri": null, "mls_uri": null, "error": null}
 ```
 
 A warning never fails the job. These are the warnings:
@@ -123,11 +161,11 @@ Result:
                              "mask_url": "s3://.../segments/job1/living.jpg/seg_000.png"}]},
  "scenes": {"living.jpg": {"space": [w, h], "classes": {"bed": {"area": 0.12, "count": 1,
                                                                "bbox": [...], "centroid": [...]}}}},
- "warnings": [], "model": "shi-labs/oneformer_coco_swin_large@3a263017ca", "seconds": 13.2}
+ "warnings": [], "model": "facebook/mask2former-swin-large-ade-panoptic@ae53ed7ab3", "seconds": 13.2}
 ```
 
 `bbox` and the masks are in `space` pixels: the photo scaled to at most 2048 px on its long side.
-The scene summary lists every OneFormer class in the photo; the planner uses it to choose camera
+The scene summary lists every Mask2Former class in the photo; the planner uses it to choose camera
 moves.
 
 ### `tour_plan`
@@ -181,6 +219,52 @@ Request (example: `examples/tour_plan.json`; contract `TourPlanRequest` in
     (`music_sync_v2_fallback:<reason>`).
 - `options` (optional, no other keys): `max_total_s` is the tour's ceiling; `budget_blocked`
   makes a slideshow. Everything else is the planner's default (`tour_worker/planner/config.py`).
+  - **Shot lengths (client review 2026-11-05):**
+    - Each room gets a budget of `room_base_s` (4 s) x its screen-time multiplier x the pacing. The
+      multiplier is 2x for the best living room, kitchen and primary bedroom, and 1.5x for exteriors.
+    - The budget is split into shots of 3-8 s.
+    - The opening shot is at least 5 s and the closing shot at least 5 s.
+    - Tours land at 60-120 s by stretching shots up to 8 s, never by adding padding shots. With Fast
+      pacing the floor is 45 s.
+    - Beat sync scales each shot by the music's loudness under it: x1.3 through a breakdown,
+      x0.85 into a drop.
+  - **Transitions** (`planner/transitions.py`):
+    - **Cut on the beat:** within a part of the home.
+    - **Whip:** into a new part of the home when the incoming camera moves sideways.
+    - **Push:** into a new part of the home when it moves into depth.
+    - **Fade:** daylight to twilight.
+    - Motion transitions last 0.33 s and are centred on the cut, so the cut stays on the beat.
+  - `max_bytes` (optional): a platform's file-size limit, e.g. Instagram Reels' 100 MB. It
+    becomes the plan's `output.max_bytes`; the encoder caps its bitrate so the file fits, and
+    the playback check fails a file over it. Left out of the plan when unset.
+  - `hevc` (optional, default false): also render the H.265 copy (the plan's `output.hevc`,
+    left out of the plan when false).
+  - `room_labels` (optional): `{"font", "scale", "placement"}` (defaults `sacramento`, 0.8,
+    `bottom_left`). The plan gets `output.room_labels`, and each room's first shot a `caption`:
+    its display name (`planner/captions.py`, e.g. `primary_bedroom` -> "Primary Suite").
+    Left out of the plan when unset. An unknown font or placement, or a scale outside 0.6–1.0,
+    is `invalid_request`.
+  - `mls_copy` (optional, default false): also render the MLS copy (the plan's `output.mls_copy`).
+    It is the unbranded version: no room labels, agent card or logo.
+  - `preset` (default `property_showcase`): `planner/tour_presets.py`.
+    - **`property_showcase`:** Normal pacing.
+    - **`just_listed`:** Fast pacing, "Just Listed" above the address, and the music opening in a
+      high-energy section if one fits.
+    - **`lifestyle`:** Slow pacing and 1.5x time for exteriors, outdoor living and amenities.
+  - `pacing` (optional): `slow`, `normal` or `fast`, scaling every room's time across the 3-8 s
+    shot range. It overrides the preset's pacing.
+  - `photo_order` (default `narrative`): `manual` plays the rooms and photos in request order
+    (drag-to-reorder).
+  - `branding` (optional): `{kicker?, address?, locality?, title?, agent?: {name, phone, email,
+    photo_uri}, logo_uri?, corner_logo?}`.
+    - The title card, end card and corner logo are drawn by `render/overlays.py`.
+    - The images are fetched like the photos.
+    - With an end card, the final shot holds at least 6 s.
+  - `voiceover` (optional): `{uri, balance}`. Narration over the tour; the music ducks under it,
+    more as `balance` (0-1) rises.
+  - A photo with `"staged": true` (a virtually staged generation) marks its shots `staged`.
+  - Frame size picks the encode (`render/encode.py` `video_profile`): up to 1080p, H.264 High
+    Level 4.1 with a 10 Mbps cap; larger frames (4K), Level 5.1 with a 40 Mbps cap.
 
 Result (`TourPlanResult`):
 
@@ -235,7 +319,8 @@ tour_worker/
   render/probe.py         the playback checks a finished file must pass
   motion/                 perceptual motion: region.py (core, apply_regions), masks.py,
                           loader.py, one module per effect: fabric, foliage, canopy, water, fire
-  vision/segment.py       OneFormer: pinned checkpoints, Segmenter, scene summary
+  vision/segment.py       Mask2Former: pinned checkpoint, Segmenter, scene summary
+  vision/refine.py        water (above-waterline structure out) and flame-core refinements of its masks
   vision/fire_detect.py   lit fires inside fireplace masks
   music/                  beat analysis for beat sync (the `music` extra; offline, not a job);
                           structure.py: sections, phrases and hero moments (analysis v4)
@@ -266,11 +351,8 @@ tests/                    mirrors tour_worker/
 | `IMAGES_DIR` | `/tmp` | the folder `WORKER_STORAGE=local` reads from and writes to |
 | `PREWARP_WORKERS` | auto | processes that draw and encode frames. Auto is min(8, CPUs available - 1), capped by available memory at about 600 MB each. Output is identical for any count. |
 | `MODELS_DIR` | `<repo>/models` | folder holding the model weights, one subfolder per model. Set it when the package is installed outside the repo. |
-| `SEGMENT_MODEL` | `coco` | OneFormer checkpoint for `tour_segment`: `coco` (primary) or `ade20k` (knows fireplaces) |
-| `ONEFORMER_DIR` | `MODELS_DIR/<checkpoint dir>` | folder of that checkpoint: `oneformer_coco_swin_large` or `oneformer_ade20k_swin_large` |
-| `COCO_FIRE_SEARCH` | `0` | `1`: look for lit fires by colour with the COCO model. Off by default because it failed validation (it found 4 of 11 fires). |
-| `FIREPLACE_MODEL` | `ade20k` | A second OneFormer pass in `tour_segment` that finds fireplaces (COCO has no fireplace class); lit fires are detected inside them and added as `fire` regions. Empty: off. About 7 s per photo on CPU. |
-| `FIREPLACE_DIR` | (unset) | That checkpoint's folder; default `MODELS_DIR/<its dir name>`. |
+| `SEGMENT_MODEL` | `m2f_ade20k` | The `tour_segment` model: Mask2Former ADE20K panoptic, one pass for every motion class, fireplaces included. Water and fireplace masks are refined after it (`tour_worker/vision/refine.py`). |
+| `SEGMENT_DIR` | `MODELS_DIR/mask2former_swin_large_ade_panoptic` | Folder of its weights. |
 
 The HTTP service (`python -m tour_worker.service`) adds these; `handler.py` ignores them:
 
@@ -357,7 +439,7 @@ unchanged.
 {"jobs": {"inQueue": 0, "inProgress": 1, "completed": 12, "failed": 1, "cancelled": 0},
  "workers": {"running": 1, "idle": 0, "concurrency": 1},
  "version": "0.3.0", "jobTypes": ["tour_render", "tour_segment", "tour_plan"],
- "segmentModel": "shi-labs/oneformer_coco_swin_large@3a263017ca", "workerId": "<hostname>"}
+ "segmentModel": "facebook/mask2former-swin-large-ade-panoptic@ae53ed7ab3", "workerId": "<hostname>"}
 ```
 
 **Errors.** Every HTTP error has the worker's failure shape,
@@ -400,7 +482,38 @@ image, and a missing checkpoint fails at once instead of downloading.
 
 ### RunPod
 
-Deploy the same image as a serverless endpoint with the container start command
+**The FastAPI service, run directly (how the backend uses it).** The backend's Celery task calls
+the worker's HTTP API: `POST /run`, `GET /status/{id}`, `POST /cancel/{id}`, `GET /health`, and
+`GET /ping`. No container image is involved: install the worker on the host (a RunPod GPU pod,
+for example) and run the service.
+
+```bash
+sudo apt-get install -y ffmpeg                         # render: encoding, loudness, probes
+uv sync --extra http --extra segment-gpu               # or --extra segment for CPU PyTorch
+export WORKER_API_KEY=...                              # the backend's key for this service
+export AWS_ACCESS_KEY_ID=... AWS_SECRET_ACCESS_KEY=... AWS_DEFAULT_REGION=...
+export HOST=0.0.0.0 PORT=8000 JOBS_DIR=/var/lib/tour-worker/jobs
+export SERVICE_PREFIXES=/tour/render,/tour/segment     # when it sits behind RUNPOD_ENDPOINT_URL + paths
+uv run python -m tour_worker.service
+```
+
+- **Backend settings:**
+  - `TOUR_WORKER_TRANSPORT="http"`: the backend calls `TOUR_RENDER_WORKER_URL` /
+    `TOUR_SEGMENT_WORKER_URL` (e.g. `http://<host>:8000`) with `TOUR_*_WORKER_KEY`.
+  - `TOUR_WORKER_TRANSPORT="runpod"`: it calls `RUNPOD_ENDPOINT_URL` + `RUNPOD_TOUR_RENDER_PATH` /
+    `RUNPOD_TOUR_SEGMENT_PATH` with `RUNPOD_API_KEY`. The service answers under those prefixes
+    (`SERVICE_PREFIXES`).
+- **One process per host.** Jobs and their statuses live in the service process; `JOBS_DIR`
+  keeps the records across restarts. Behind a proxy with several hosts, every `/status` for a
+  job must reach the host that took it. Either use one host, or share `JOBS_DIR` between hosts.
+- **Models:** the Mask2Former weights are fetched to `MODELS_DIR` on first use. Pre-fetch them once on
+  the host so a timed run does not include the download.
+- **AWS:** the credentials must allow reading the photos and writing the outputs.
+- **Timing a run:** every job result carries `timings` (stages, total, host). For a cold-cache run,
+  restart the service and use a listing the mask cache has never seen, then run
+  `python -m tools.timing_report` on the tour job's `extra["timings"]`.
+
+**Serverless (queue) endpoint.** Deploy the same image as a serverless endpoint with the container start command
 `python -u handler.py` (RunPod runs the handler; `WORKER_API_KEY` and the service settings are
 not used). The segment image needs a GPU worker; the render image runs on CPU. The request and
 result JSON are identical; two differences the client must allow for:
@@ -468,18 +581,32 @@ On a machine that overheats, wrap heavy commands:
 
 ## Segmentation models
 
-`tour_segment` needs the `segment` (CPU) or `segment-gpu` extra and a pinned OneFormer checkpoint
-(MIT weights):
+`tour_segment` needs the `segment` (CPU) or `segment-gpu` extra and the pinned Mask2Former
+checkpoint:
 
 | `SEGMENT_MODEL` | Hugging Face model | revision | folder |
 |---|---|---|---|
-| `coco` | `shi-labs/oneformer_coco_swin_large` | `3a263017ca5c` | `oneformer_coco_swin_large` |
-| `ade20k` | `shi-labs/oneformer_ade20k_swin_large` | `4a5bac8e64f8` | `oneformer_ade20k_swin_large` |
+| `m2f_ade20k` | `facebook/mask2former-swin-large-ade-panoptic` | `ae53ed7ab37f` | `mask2former_swin_large_ade_panoptic` |
 
-If the weights are missing, the first job downloads them from the pinned revision into
-`ONEFORMER_DIR`. Every load checks `pytorch_model.bin` against its pinned sha256. Bake the folder
-into the worker image so no job downloads. One photo takes about 13 s on 4 CPU threads; the model
-loads once per warm worker.
+- **Download:** if the weights are missing, the first job downloads them from the pinned revision
+  into `SEGMENT_DIR`. Every load checks `model.safetensors` against its pinned sha256.
+- **Pre-fetching:** fetch the folder once on the host so no job downloads it.
+- **Speed:** about 2.2 s per photo on CPU (the 2026-11-11 benchmark); the model loads once per
+  warm worker.
+- **Refinements** (`tour_worker/vision/refine.py`):
+  - A pool or water mask keeps the model's mask, so reflections, submerged shelves and steps,
+    dark water and sunlit water keep moving. Only what stands above the waterline stays still:
+    dark walls with neutral, clearly brighter stone directly above them (a spa wall under its
+    coping), thin dark rims along the edge, grey or pale coping that is not water-hued, and a thin
+    non-water-coloured lip. A reflection mirrors what stands above it (dark trees over a dark tree
+    reflection), so it fails the wall test; a dark part bigger than a third of the water is dark
+    water. Thresholds are relative to the pool's own water (the brighter half of its pixels).
+    Checked on 104 varied photos (pools, spas, indoor, night, lakes, ponds, sea).
+  - Known limits: water the model does not label at all (a dark, mirror-like raised spa) cannot be
+    recovered here; mid-tone tile bands on a spa's outer face can ripple; the model's own false
+    positives (a railing, a tub shell, steam) pass through.
+  - A fireplace becomes a `fire` region holding only its flame core, and only when it is lit;
+    the mantel and surround stay still.
 
 ## Tests
 
@@ -492,4 +619,4 @@ or two (use `tools/safe_run.py` on a hot machine).
 
 ## Licences
 
-See `LICENSES.md`: the OneFormer weights and their training data (COCO, ADE20K), and librosa.
+See `LICENSES.md`: the Mask2Former weights and their training data (ADE20K), and librosa.

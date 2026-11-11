@@ -16,7 +16,10 @@ from tour_worker.planner.music_sync import (
 )
 from tour_worker.planner.planner import _compute_plan_hash, build_shot_plan
 
-CFG = PlannerConfig()
+# these tests are about where cuts land, on synthetic tracks planned around ~3.3 s shots: they keep
+# the sync's older 2.5-6 s absolute limits (the planner's 3-8 s room budgets are tested in
+# tests/planner/test_room_budgets.py)
+CFG = PlannerConfig(music_shot_abs_min_s=2.5, music_shot_abs_max_s=6.0, final_shot_min_s=3.5)
 # cuts sit music_cut_lead_frames before their beat (the tour end does not)
 TOL = (1 + CFG.music_cut_lead_frames) / CFG.fps
 
@@ -114,9 +117,10 @@ def test_planner_plans_cameras_at_normal_length_then_retimes(report, monkeypatch
         return real(inputs, frames, *a, **k)
 
     monkeypatch.setattr(planner_mod, "plan_cameras", spy)
-    planned = [s.duration_s for s in build_shot_plan(report, "t", _assets(), cfg=CFG).shots]
+    FULL = PlannerConfig()      # the whole planner: its own 3-8 s room budgets and sync limits
+    planned = [s.duration_s for s in build_shot_plan(report, "t", _assets(), cfg=FULL).shots]
     tr = track(duration=90.0, bpm=100.0)
-    plan = build_shot_plan(report, "t", _assets(), cfg=CFG, music_track=tr)
+    plan = build_shot_plan(report, "t", _assets(), cfg=FULL, music_track=tr)
     assert plan.plan_version == "1.5" and plan.music is not None and plan.music.synced
     assert seen["durations"] == planned                      # cameras: the NORMAL lengths
     durs = [s.duration_s for s in plan.shots]
@@ -219,7 +223,8 @@ def test_every_hook_moment_gets_a_cut_and_close_pairs_become_cut_plus_accent():
     hooks = [5.85, 15.35, 17.75, 25.25]
     tr = with_hooks(track(duration=60.0), hooks)
     roles = ["hero"] * len(TARGETS)
-    r = sync_to_music(TARGETS, tr, CFG, roles)
+    punchy = CFG.model_copy(update={"music_punches": True})   # accents exist only with punches on
+    r = sync_to_music(TARGETS, tr, punchy, roles)
     assert r.music.synced and r.music.hooks_required and r.warning is None
     kinds = {h.t: h.kind for h in r.music.hooks}
     assert kinds[5.85] == kinds[25.25] == "cut"

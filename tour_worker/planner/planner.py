@@ -7,6 +7,8 @@ from tour_worker.scoring.schemas import ScoringReport
 
 from .allocate import SelectedShot, allocate_shots
 from .camera import generate_ken_burns
+from .captions import apply_captions
+from .transitions import choose_transitions
 from .cinematic import ShotInput, plan_cameras
 from .config import PlannerConfig
 from .music_sync import apply_sync, sync_to_music
@@ -18,11 +20,14 @@ from .schemas import (
     CameraParams,
     CameraPoint,
     OutputParams,
+    Branding,
     PlanProvenance,
+    RoomLabels,
     Shot,
     ShotPlan,
     SourceImage,
     TransitionParams,
+    Voiceover,
 )
 
 
@@ -61,7 +66,8 @@ def build_shot_plan(
     warnings = []
 
     # 9. Presets handling
-    if preset not in ("property_showcase",):
+    from .tour_presets import TOUR_PRESETS
+    if preset not in TOUR_PRESETS:
         warnings.append("preset_not_defined")
 
     # Unclassified photos warning
@@ -174,7 +180,11 @@ def build_shot_plan(
 
     # Build Output
     output_params = OutputParams(
-        width=cfg.output_width, height=cfg.output_height, fps=cfg.fps, codec="h264"
+        width=cfg.output_width, height=cfg.output_height, fps=cfg.fps, codec="h264",
+        max_bytes=cfg.output_max_bytes, hevc=cfg.output_hevc or None,
+        room_labels=RoomLabels(**cfg.output_room_labels) if cfg.output_room_labels is not None else None,
+        mls_copy=cfg.output_mls_copy or None,
+        branding=Branding(**cfg.output_branding) if cfg.output_branding else None,
     )
 
     # 3. Assemble Plan
@@ -439,6 +449,14 @@ def build_shot_plan(
     if music is not None:
         chosen_plan_version = "1.5"
 
+    # transitions chosen by content: cuts by default, whip / push into a new part of the home, a fade
+    # for daylight <-> twilight (planner/transitions.py); centred on the cuts, so they stay on the beat
+    if cfg.transitions and mode == "cinematic" and len(final_shots) > 1:
+        choose_transitions(final_shots, cfg.dusk_photos)
+
+    # room labels and the staged disclosure (render/overlays.py); unset fields stay out of the JSON
+    apply_captions(final_shots, cfg.output_room_labels is not None, cfg.staged_photos)
+
     prov = PlanProvenance(
         scoring_config_version=report.config.version,
         planner_config_version=cfg.version,
@@ -457,6 +475,7 @@ def build_shot_plan(
         warnings=sorted(warnings),
         provenance=prov,
         music=music,
+        voiceover=Voiceover(**cfg.voiceover) if cfg.voiceover else None,
     )
 
     plan_dict = plan.model_dump(mode="json")
