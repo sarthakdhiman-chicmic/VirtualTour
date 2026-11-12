@@ -12,6 +12,8 @@ def fetch_and_prepare(plan, storage, workdir, image_urls=None):
     os.makedirs(images_dir, exist_ok=True)
     
     for shot in plan.shots:
+        if shot.image_uri is None:              # a 3D shot (plan 1.6): rendered from the scene
+            continue
         basename = shot.image_uri.split("/")[-1]
         dest_path = os.path.join(images_dir, basename)
         

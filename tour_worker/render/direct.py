@@ -75,22 +75,30 @@ def total_frames(plan) -> int:
     return compute_timeline(plan)[-1]["nominal_end"] if plan.shots else 0
 
 
-def _init(plan, images: str) -> None:
+def _init(plan, images: str, splat=None, supersample: float = 1.5) -> None:
     cv2.setNumThreads(1)
     _STATE.clear()
     timeline = compute_timeline(plan)
-    _STATE.update(plan=plan, images=images, timeline=timeline, shots={})
+    # splat: the scene's renderer for plan 1.6 3D shots (render/splat_shot.py), drawn in this process
+    _STATE.update(plan=plan, images=images, timeline=timeline, shots={}, splat=splat,
+                  supersample=supersample, splat_stats={})
     overlays = Overlays(plan, timeline, images)
     _STATE["overlays"] = overlays if overlays.active else None
 
 
-def _shot(i: int) -> ShotWarp:
+def _shot(i: int):
+    """Shot i's frame source: a ShotWarp (photo) or a SplatShot (plan 1.6 3D), same interface."""
     cache = _STATE["shots"]
     if i not in cache:
         for k in [k for k in cache if k < i - 1]:            # shots run in order: keep the last two
             del cache[k]
         plan = _STATE["plan"]
-        cache[i] = ShotWarp(plan, plan.shots[i], _STATE["timeline"][i]["render_frames"], _STATE["images"])
+        n = _STATE["timeline"][i]["render_frames"]
+        if plan.shots[i].camera.type == "bezier_path":
+            from tour_worker.render.splat_shot import SplatShot
+            cache[i] = SplatShot(plan, plan.shots[i], n, _STATE["splat"], _STATE["supersample"], _STATE["splat_stats"])
+        else:
+            cache[i] = ShotWarp(plan, plan.shots[i], n, _STATE["images"])
     return cache[i]
 
 
@@ -338,24 +346,29 @@ def _segment_inputs(m, music_path: str, first_input: int, tail: str) -> tuple[li
 
 def render_direct(plan, workdir: str, warnings: list | None = None, music_path: str | None = None,
                   workers: int | None = None, voice_path: str | None = None, timings=None,
-                  progress=None) -> str:
+                  progress=None, splat=None, splat_supersample: float = 1.5) -> str:
     """Draw and encode the whole tour; returns <workdir>/out.mp4 (and writes <workdir>/out_hevc.mp4,
     the H.265 copy with the same audio, and <workdir>/out_mls.mp4, the MLS copy without the room
     labels, when the plan asks for them). timings: a tour_worker.timing.Stopwatch (stages
     draw_encode, audio, join; info render_workers, chunks); progress(done, total): called as
-    chunks finish."""
+    chunks finish. splat: the scene renderer for a plan 1.6 tour (render/splat_shot.make_renderer);
+    its frames are drawn in this process, in order (one GPU), and fed to the same chunk encoders."""
     from contextlib import nullcontext
     stage = timings.stage if timings is not None else (lambda name: nullcontext())
     import multiprocessing as mp
     from concurrent.futures import ProcessPoolExecutor
     images = os.path.join(workdir, "images")
     tl = compute_timeline(plan)
+    three_d = any(s.camera.type == "bezier_path" for s in plan.shots)
+    if three_d and splat is None:
+        raise WorkerError("scene_render_failed", "a 3D plan needs its scene renderer")
     for shot, t in zip(plan.shots, tl):                       # validate early; collect warnings once
-        ShotWarp(plan, shot, t["render_frames"], images, warnings)
+        if shot.camera.type != "bezier_path":
+            ShotWarp(plan, shot, t["render_frames"], images, warnings)
     n = total_frames(plan)
     step = CHUNK_GOPS * GOP_S * plan.output.fps
-    workers = render_workers(workers, plan.output.width, plan.output.height, hevc=wants_hevc(plan),
-                             mls=wants_mls(plan))
+    workers = 1 if three_d else render_workers(workers, plan.output.width, plan.output.height,
+                                                hevc=wants_hevc(plan), mls=wants_mls(plan))
     out_path = os.path.join(workdir, "out.mp4")
     with tempfile.TemporaryDirectory(prefix="direct_", dir=workdir) as td:
         tasks = [(k, a, min(n, a + step), td) for k, a in enumerate(range(0, n, step))]
@@ -364,11 +377,16 @@ def render_direct(plan, workdir: str, warnings: list | None = None, music_path: 
         parts = []
         with stage("draw_encode"):
             if workers <= 1 or len(tasks) <= 1:
-                _init(plan, images)
+                _init(plan, images, splat, splat_supersample)
                 for t in tasks:
                     parts.append(_encode_chunk(t))
                     if progress:
                         progress(len(parts), len(tasks))
+                if three_d and timings is not None:
+                    st = _STATE["splat_stats"]
+                    timings.info.update(splat_backend=getattr(splat, "info", {}), supersample=splat_supersample,
+                                        rasterise_s=round(st.get("rasterise_s", 0.0), 3),
+                                        frames_rasterised=st.get("frames", 0))
             else:
                 with ProcessPoolExecutor(max_workers=min(workers, len(tasks)), mp_context=mp.get_context("spawn"),
                                          initializer=_init, initargs=(plan, images)) as pool:

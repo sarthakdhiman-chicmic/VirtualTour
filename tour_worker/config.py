@@ -13,6 +13,12 @@ Every setting, its environment variable and default (also in README.md):
   SEGMENT_MODEL        "m2f_ade20k"  the tour_segment model (tour_worker.vision.segment.MODELS):
                                   Mask2Former ADE20K panoptic, one pass for every motion class
   SEGMENT_DIR          (unset)    its weights folder; default MODELS_DIR/<its dir name>
+  SPLAT_BACKEND        "auto"     3D tours (plan 1.6): "gsplat" (CUDA), "cpu" (the reference
+                                  rasteriser: slow, for checking a scene without a GPU) or "auto"
+                                  (gsplat when CUDA is available, else the render fails)
+  SPLAT_SUPERSAMPLE    1.5        3D frames are rasterised at this x the output size, then reduced
+  SPLAT_SH_DEGREE      3          view-dependent colour detail kept from the scene (0-3)
+  SCENE_CACHE_DIR      ~/.cache/tour-worker/scenes   scene files by sha256 (fetched once)
 
 The HTTP service (python -m tour_worker.service; handler.py, the RunPod entry, ignores these):
 
@@ -61,6 +67,11 @@ class Settings:
     host: str = "127.0.0.1"
     port: int = 8000
     service_prefixes: tuple[str, ...] = ()
+    # 3D tours (plan 1.6; tour_worker/render/splat_shot.py)
+    splat_backend: str = "auto"
+    splat_supersample: float = 1.5
+    splat_sh_degree: int = 3
+    scene_cache_dir: str = os.path.join(os.path.expanduser("~"), ".cache", "tour-worker", "scenes")
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> "Settings":
@@ -83,6 +94,11 @@ class Settings:
             port=int(env.get("PORT") or 8000),
             service_prefixes=tuple("/" + p.strip().strip("/") for p in (env.get("SERVICE_PREFIXES") or "").split(",")
                                    if p.strip().strip("/")),
+            splat_backend=(env.get("SPLAT_BACKEND") or "auto").strip().lower(),
+            splat_supersample=min(3.0, max(1.0, float(env.get("SPLAT_SUPERSAMPLE") or 1.5))),
+            splat_sh_degree=min(3, max(0, int(env.get("SPLAT_SH_DEGREE") or 3))),
+            scene_cache_dir=env.get("SCENE_CACHE_DIR") or os.path.join(os.path.expanduser("~"), ".cache",
+                                                                         "tour-worker", "scenes"),
         )
 
     def segment_path(self) -> str:

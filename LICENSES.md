@@ -10,6 +10,15 @@
 - Replaced OneFormer (COCO + ADE20K, two passes) on 2026-11-11. `training/fireplace_adapter/` is
   an offline OneFormer experiment and is not used by any job.
 
+## 3D tours (plan 1.6)
+- **gsplat** (Apache-2.0, nerfstudio-project): the CUDA rasteriser for Gaussian splat scenes
+  (`tour_worker/render/splat_shot.py`). It is imported only on the GPU host, from the RunPod
+  image's pinned requirements; the worker does not install it.
+- **Not used, on purpose:** Inria's `diff-gaussian-rasterization` and the original 3DGS code
+  (non-commercial research licence). The CPU reference rasteriser (`render/splat_cpu.py`) is our
+  own code, written from the published method, and uses only `torch` (BSD-3-Clause) and `numpy`.
+- Scene files (`.ply`, `.splat`) are the customer's data; no third-party scene or model ships here.
+
 ## Music analysis (the `music` extra, offline)
 - `librosa` (ISC), `scipy` (BSD-3-Clause), `soundfile` (BSD-3-Clause).
 

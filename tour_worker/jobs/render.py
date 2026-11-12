@@ -12,9 +12,35 @@ from tour_worker.config import Settings, get_settings
 from tour_worker.contract.plan import parse_plan, plan_failure
 from tour_worker.errors import failure, from_exception
 from tour_worker.io.images import fetch_and_prepare
+from tour_worker.scene import SceneInvalid
 from tour_worker.render.direct import HEVC_NAME, MLS_NAME, render_direct, wants_hevc, wants_mls
 from tour_worker.render.probe import verify
 from tour_worker.timing import Stopwatch
+
+
+_SCENE: dict = {}          # the last scene's renderer, kept for the next render of the same scene
+
+
+def scene_renderer(plan, storage, settings, image_urls: dict, sw):
+    """The plan's scene, fetched through the sha256 cache, loaded and on its renderer. The last one
+    is kept in this process (a 6 M-splat scene takes ~4 s to load and 1-2 GB to hold)."""
+    from tour_worker.render.splat_shot import make_renderer
+    from tour_worker.scene.cache import ensure_scene
+    from tour_worker.scene.splat_io import load_scene
+    sc = plan.scene
+    key = (sc.sha256, settings.splat_sh_degree, settings.splat_backend)
+    if _SCENE.get("key") == key:
+        sw.info.update(scene_cached=True)
+        return _SCENE["renderer"]
+    _SCENE.clear()
+    with sw.stage("scene_fetch"):
+        path = ensure_scene(sc.uri, sc.sha256, sc.format, storage, settings.scene_cache_dir, image_urls.get(sc.uri))
+    with sw.stage("scene_load"):
+        model = load_scene(path, sc.format, max_sh_degree=settings.splat_sh_degree)
+        renderer = make_renderer(model, settings.splat_backend, settings.splat_sh_degree)
+    sw.info.update(scene_splats=len(model), scene_sh_degree=model.sh_degree, scene_cached=False)
+    _SCENE.update(key=key, renderer=renderer)
+    return renderer
 
 
 def run_tour(request: dict, storage, workdir: str, settings: Settings | None = None, progress=None) -> dict:
@@ -60,8 +86,15 @@ def run_tour(request: dict, storage, workdir: str, settings: Settings | None = N
                 warnings.append("voiceover_fetch_failed")
                 voice_path = None
         sw.lap("fetch")
+        splat = None
+        if plan.scene is not None:                 # plan 1.6: the 3D scene and its renderer
+            try:
+                splat = scene_renderer(plan, storage, settings, image_urls, sw)
+            except SceneInvalid as e:
+                return failure("scene_invalid", str(e))
+        three_d = {"splat": splat, "splat_supersample": settings.splat_supersample} if splat is not None else {}
         out_path = render_direct(plan, workdir, warnings=warnings, music_path=music_path, voice_path=voice_path,
-                                 workers=settings.render_workers, timings=sw, progress=progress)
+                                 workers=settings.render_workers, timings=sw, progress=progress, **three_d)
 
         sw.lap()
         verify(out_path, plan)
