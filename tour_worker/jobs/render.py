@@ -54,6 +54,42 @@ def scene_renderer(plan, storage, settings, image_urls: dict, sw, workdir: str):
     return renderer
 
 
+def scene_motion(plan, renderer, storage, image_urls: dict, sw, workdir: str, warnings: list) -> None:
+    """Attach the plan's 3D motion (scene.motion_uri) to the renderer, or take it off when the plan
+    has none. A motion file that cannot be used never fails the tour: it renders still, with a
+    warning (scene_motion_skipped)."""
+    from tour_worker.render.splat_shot import GPU_LOCK
+    from tour_worker.scene.cache import ensure_scene
+    from tour_worker.scene.motion3d import MotionInvalid, check_binding, load_motion
+    sc = plan.scene
+    want = sc.motion_sha256 if sc.motion_uri else None
+    if not hasattr(renderer, "attach_motion") or renderer.motion_sha256 == want:
+        if want is not None:
+            sw.info.update(motion_cached=True)
+        return
+    if want is None:
+        with GPU_LOCK:
+            renderer.attach_motion(None)
+        return
+    try:
+        with sw.stage("motion_fetch"):
+            path = ensure_scene(sc.motion_uri, sc.motion_sha256, "npz", storage, os.path.join(workdir, "motion"),
+                                image_urls.get(sc.motion_uri))
+        field = load_motion(path)
+        why = check_binding(field, sc.sha256, int(renderer.means.shape[0]))
+        if why:
+            raise MotionInvalid(why)
+    except Exception as e:                       # noqa: BLE001 - motion never fails the tour
+        warnings.append("scene_motion_skipped")
+        sw.info.update(motion_skipped=str(e)[:300])
+        with GPU_LOCK:
+            renderer.attach_motion(None)
+        return
+    with GPU_LOCK:
+        renderer.attach_motion(field, sc.motion_sha256)
+    sw.info.update(motion_splats=len(field), motion_classes=field.classes, motion_cached=False)
+
+
 def run_tour(request: dict, storage, workdir: str, settings: Settings | None = None, progress=None) -> dict:
     """Run one tour_render request in workdir (an empty folder the caller removes). progress(done,
     total): render progress, as chunks finish (the RunPod handler reports it)."""
@@ -103,6 +139,7 @@ def run_tour(request: dict, storage, workdir: str, settings: Settings | None = N
                 splat = scene_renderer(plan, storage, settings, image_urls, sw, workdir)
             except SceneInvalid as e:
                 return failure("scene_invalid", str(e))
+            scene_motion(plan, splat, storage, image_urls, sw, workdir, warnings)
         three_d = {"splat": splat, "splat_supersample": settings.splat_supersample} if splat is not None else {}
         out_path = render_direct(plan, workdir, warnings=warnings, music_path=music_path, voice_path=voice_path,
                                  workers=settings.render_workers, timings=sw, progress=progress, **three_d)

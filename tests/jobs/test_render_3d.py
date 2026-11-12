@@ -1,6 +1,7 @@
 """tour_render on a plan 1.6 (3D) tour, end to end on the CPU backend: the scene is fetched once
 through the sha256 cache, both shots are rasterised, composed (a fade) and encoded like photo shots."""
 import json
+import math
 import os
 import subprocess
 
@@ -159,3 +160,65 @@ def test_parallel_3d_encoders_give_the_same_bytes_as_one(cpu_backend, monkeypatc
         masters.append(open(work / "stored_master.mp4", "rb").read())
     reset_settings()
     assert masters[0] == masters[1]
+
+
+def _striped_room():
+    """The box room with a magenta stripe on the +x wall (shot 1 looks at it): something to see move."""
+    m = box_room()
+    p = m.means
+    band = (p[:, 0] > 1.95) & (np.abs(p[:, 1]) < 0.3) & (p[:, 2] > 0.9) & (p[:, 2] < 1.5)
+    m.sh[band, 0] = (np.array([1.0, 0.0, 1.0]) - 0.5) / 0.28209479
+    return m, band
+
+
+def _wall_motion(model, band, scene_sha, path, sha_override=None):
+    """The stripe slides 9 cm sideways: a frequency-0 term with phase pi/2 is a constant offset."""
+    from tour_worker.scene.motion3d import TERMS, MotionField
+    idx = np.flatnonzero(band).astype(np.int64)
+    n = len(idx)
+    dirs = np.zeros((n, TERMS, 3), np.float32); dirs[:, :, 1] = 1.0
+    amp = np.zeros((n, TERMS), np.float32); amp[:, 0] = 0.09
+    phase = np.full((n, TERMS), math.pi / 2, np.float32)
+    f = MotionField(idx, dirs, amp, np.zeros((n, TERMS), np.float32), phase, sha_override or scene_sha,
+                    len(model), {"curtain": n})
+    f.save(path)
+    return sha256_file(path)
+
+
+def test_3d_motion_moves_the_frames_deterministically_and_a_bad_file_only_warns(cpu_backend, tmp_path):
+    from tour_worker.scene.splat_io import load_scene
+    scene = tmp_path / "box_room.splat"
+    room, _ = _striped_room()
+    write_splat(scene, room)
+    sha = sha256_file(str(scene))
+    model = load_scene(str(scene))                 # as the worker loads it (indices refer to this)
+    band = (model.means[:, 0] > 1.95) & (np.abs(model.means[:, 1]) < 0.3) & (model.means[:, 2] > 0.9) & (model.means[:, 2] < 1.5)
+    good = tmp_path / "motion.npz"
+    msha = _wall_motion(model, band, sha, str(good))
+    bad = tmp_path / "motion_other.npz"
+    bsha = _wall_motion(model, band, sha, str(bad), sha_override="cd" * 32)
+    files = {"s3://scenes/box_room.splat": str(scene), "s3://scenes/motion.npz": str(good),
+             "s3://scenes/motion_other.npz": str(bad)}
+
+    def render(tag, motion=None):
+        p = _plan(scene, sha)
+        if motion:
+            p["scene"]["motion_uri"], p["scene"]["motion_sha256"] = motion
+        p["provenance"]["plan_hash"] = compute_plan_hash(p)
+        work = tmp_path / tag
+        work.mkdir()
+        out = render_job.run_tour({"plan": p, "output_prefix": "s3://o/"}, DiskStorage(files), str(work))
+        assert out["status"] == "completed", out
+        return out, str(work / "stored_master.mp4")
+
+    _, still = render("still")
+    out, moving = render("moving", ("s3://scenes/motion.npz", msha))
+    assert out["timings"]["motion_splats"] > 0
+    _, moving2 = render("moving2", ("s3://scenes/motion.npz", msha))
+    assert open(moving, "rb").read() == open(moving2, "rb").read()             # deterministic
+    diff = np.abs(_frame(moving, 0.8) - _frame(still, 0.8)).max()
+    assert diff > 0.2                                                          # the stripe moved
+    _, still2 = render("still2")                                               # cached renderer: motion taken off
+    assert open(still2, "rb").read() == open(still, "rb").read()
+    out, _ = render("bad", ("s3://scenes/motion_other.npz", bsha))
+    assert "scene_motion_skipped" in out["warnings"] and "another scene" in out["timings"]["motion_skipped"]

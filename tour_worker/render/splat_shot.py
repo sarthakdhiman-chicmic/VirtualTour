@@ -29,6 +29,7 @@ import numpy as np
 
 from tour_worker.errors import WorkerError
 from tour_worker.scene.camera import BezierCameraPath, intrinsics, look_at
+from tour_worker.scene.motion3d import MotionMixin
 from tour_worker.scene.splat_io import SplatModel
 
 DEFAULT_UP = (0.0, 0.0, 1.0)
@@ -65,7 +66,7 @@ def area_reduce_bgr8(img, ow: int, oh: int, weights: dict | None = None):
     return torch.clamp(img[..., [2, 1, 0]] * 255.0 + 0.5, 0, 255).to(torch.uint8)
 
 
-class GsplatRenderer:
+class GsplatRenderer(MotionMixin):
     """gsplat on CUDA. Deterministic for a given GPU, driver and gsplat version (tested on the GPU host)."""
 
     def __init__(self, model: SplatModel, sh_degree: int | None = None, background=(0.0, 0.0, 0.0)):
@@ -147,9 +148,11 @@ def make_renderer(model: SplatModel, backend: str = "auto", sh_degree: int | Non
 class SplatShot:
     """Everything needed to draw any frame of one 3D shot."""
 
-    def __init__(self, plan, shot, n: int, renderer, supersample: float = 1.5, stats: dict | None = None):
+    def __init__(self, plan, shot, n: int, renderer, supersample: float = 1.5, stats: dict | None = None,
+                 start_frame: int = 0):
         cam = shot.camera
         self.shot, self.n = shot, n
+        self.start_frame, self.fps = start_frame, plan.output.fps     # the tour clock, for 3D motion
         self.ow, self.oh = plan.output.width, plan.output.height
         self.ss = max(1.0, float(supersample))
         self.rw, self.rh = int(math.ceil(self.ow * self.ss)), int(math.ceil(self.oh * self.ss))
@@ -169,6 +172,8 @@ class SplatShot:
         V, K = self.view(f)
         with GPU_LOCK:
             t0 = time.perf_counter()
+            if hasattr(self.renderer, "set_time"):               # 3D motion runs on the tour's clock
+                self.renderer.set_time((self.start_frame + f) / self.fps)
             if hasattr(self.renderer, "render_bgr8"):          # gsplat: reduced + converted on the GPU
                 out = self.renderer.render_bgr8(V, K, self.rw, self.rh, self.ow, self.oh)
             else:                                              # the CPU reference renderer

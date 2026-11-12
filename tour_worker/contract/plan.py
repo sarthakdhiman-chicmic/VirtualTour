@@ -236,6 +236,10 @@ class Scene(BaseModel):
     json_uri: Optional[str] = None     # scene.json, when an operator authored one
     json_sha256: Optional[str] = None
     up_axis: Optional[List[float]] = None   # the scene's up in its own axes; None: +z
+    # 3D motion (curtains sway, plants stir): a labels file made once per scene by
+    # tools/scene/label_motion.py (tour_worker/scene/motion3d.py); None: the scene is still
+    motion_uri: Optional[str] = None
+    motion_sha256: Optional[str] = None
     model_config = ConfigDict(extra='ignore')
 
 class Plan(BaseModel):
@@ -341,10 +345,10 @@ def check_scene(plan: Plan):
             raise ValueError("invalid_plan: plan_version 1.6 needs a scene and mode cinematic_3d")
         if sc.format not in SCENE_FORMATS:
             raise ValueError(f"invalid_plan: scene.format must be one of {', '.join(SCENE_FORMATS)}")
-        for u in (sc.uri, sc.json_uri):
+        for u in (sc.uri, sc.json_uri, sc.motion_uri):
             if u is not None and not u.startswith(("s3://", "http://", "https://", "local://", "file://")):
                 raise ValueError(f"invalid_plan: scene uri {u!r}")
-        for h in (sc.sha256, sc.json_sha256):
+        for h in (sc.sha256, sc.json_sha256, sc.motion_sha256):
             if h is not None and (len(h) != 64 or any(ch not in "0123456789abcdef" for ch in h)):
                 raise ValueError("invalid_plan: scene sha256 must be 64 lowercase hex characters")
         if sc.up_axis is not None and not (len(sc.up_axis) == 3 and all(math.isfinite(v) for v in sc.up_axis)
@@ -352,6 +356,8 @@ def check_scene(plan: Plan):
             raise ValueError("invalid_plan: scene.up_axis must be a non-zero 3D vector")
         if (sc.json_uri is None) != (sc.json_sha256 is None):
             raise ValueError("invalid_plan: scene.json_uri and scene.json_sha256 go together")
+        if (sc.motion_uri is None) != (sc.motion_sha256 is None):
+            raise ValueError("invalid_plan: scene.motion_uri and scene.motion_sha256 go together")
         for shot in plan.shots:
             if shot.image_uri is not None or shot.source is not None or shot.motion_regions:
                 raise ValueError(f"invalid_plan: 3D shot {shot.shot_id} has no image_uri, source or motion_regions")

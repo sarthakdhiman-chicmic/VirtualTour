@@ -107,7 +107,8 @@ def _shot(i: int):
         n = _STATE["timeline"][i]["render_frames"]
         if plan.shots[i].camera.type == "bezier_path":
             from tour_worker.render.splat_shot import SplatShot
-            got = SplatShot(plan, plan.shots[i], n, _STATE["splat"], _STATE["supersample"], _STATE["splat_stats"])
+            got = SplatShot(plan, plan.shots[i], n, _STATE["splat"], _STATE["supersample"], _STATE["splat_stats"],
+                            start_frame=_STATE["timeline"][i]["render_from"])
         else:
             got = ShotWarp(plan, plan.shots[i], n, _STATE["images"])
         cache[i] = got

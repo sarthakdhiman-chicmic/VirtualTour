@@ -238,10 +238,13 @@ class Scene(BaseModel):
     json_uri: str | None = None      # scene.json, when an operator authored one
     json_sha256: str | None = None
     up_axis: list[float] | None = None   # the scene's up in its own axes; None: +z
+    # 3D motion labels (tools/scene/label_motion.py, tour_worker/scene/motion3d.py); None: still
+    motion_uri: str | None = None
+    motion_sha256: str | None = None
 
     @model_serializer(mode="wrap")
     def _omit_unset_additions(self, handler):
-        return _omit_none(handler(self), ("json_uri", "json_sha256", "up_axis"))
+        return _omit_none(handler(self), ("json_uri", "json_sha256", "up_axis", "motion_uri", "motion_sha256"))
 
 
 class PlanProvenance(BaseModel):

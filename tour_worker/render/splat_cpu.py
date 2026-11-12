@@ -19,6 +19,7 @@ import math
 import numpy as np
 import torch
 
+from tour_worker.scene.motion3d import MotionMixin
 from tour_worker.scene.splat_io import SplatModel
 
 NEAR = 0.05                  # scene units in front of the camera
@@ -67,7 +68,7 @@ def quat_to_rotmat(q: torch.Tensor) -> torch.Tensor:
         2 * (x * z - w * y), 2 * (y * z + w * x), 1 - 2 * (x * x + y * y)], 1).reshape(-1, 3, 3)
 
 
-class CpuSplatRenderer:
+class CpuSplatRenderer(MotionMixin):
     """Holds a scene's tensors (and each Gaussian's 3D covariance, computed once) and renders views."""
 
     def __init__(self, model: SplatModel, sh_degree: int | None = None, background=(0.0, 0.0, 0.0)):
