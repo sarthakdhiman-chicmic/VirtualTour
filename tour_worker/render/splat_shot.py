@@ -11,11 +11,17 @@ Backends (SPLAT_BACKEND):
   auto    gsplat when CUDA is available, else refuse (a CPU render of a whole tour would take hours)
 
 Supersampling (SPLAT_SUPERSAMPLE, default 1.5): each frame is rasterised at 1.5x the output size and
-reduced with INTER_AREA, which calms the shimmer of tiny splats as the camera moves.
+reduced by area averaging (OpenCV's INTER_AREA weights), which calms the shimmer of tiny splats as the
+camera moves. On gsplat the reduction, the clip and the 8-bit BGR conversion all run on the GPU and only
+the finished frame is copied back (render_bgr8); the CPU renderer reduces with cv2 as before.
+
+Several encoders may draw frames at once (render/direct.py encodes 3D chunks in parallel threads):
+GPU_LOCK serialises the renderer, so frames are identical however many encoders run.
 """
 from __future__ import annotations
 
 import math
+import threading
 import time
 
 import cv2
@@ -26,6 +32,37 @@ from tour_worker.scene.camera import BezierCameraPath, intrinsics, look_at
 from tour_worker.scene.splat_io import SplatModel
 
 DEFAULT_UP = (0.0, 0.0, 1.0)
+GPU_LOCK = threading.Lock()          # one frame on the renderer at a time (encoders run in threads)
+
+
+def area_weights(n_in: int, n_out: int) -> np.ndarray:
+    """(n_out, n_in) weights of an area-average reduction along one axis - OpenCV's INTER_AREA for a
+    downscale: output pixel i averages input [i*s, (i+1)*s), s = n_in / n_out, partial pixels by
+    their overlap. Applied along both axes it is the 2D area reduction (it is separable)."""
+    s = n_in / n_out
+    w = np.zeros((n_out, n_in), np.float64)
+    for i in range(n_out):
+        a, b = i * s, (i + 1) * s
+        for j in range(int(math.floor(a)), min(n_in, int(math.ceil(b)))):
+            w[i, j] = (min(b, j + 1) - max(a, j)) / s
+    return w
+
+
+def area_reduce_bgr8(img, ow: int, oh: int, weights: dict | None = None):
+    """A torch (H, W, 3) RGB float frame -> (oh, ow, 3) BGR uint8 on the same device: area reduction,
+    then clip(x * 255 + 0.5) - the same formula as the CPU path. weights: a cache of the matrices."""
+    import torch
+    h, w = int(img.shape[0]), int(img.shape[1])
+    if (h, w) != (oh, ow):
+        cache = weights if weights is not None else {}
+        key = (h, w, oh, ow, str(img.device))
+        if key not in cache:
+            cache[key] = (torch.from_numpy(area_weights(h, oh)).float().to(img.device),
+                          torch.from_numpy(area_weights(w, ow)).float().to(img.device))
+        ry, rx = cache[key]
+        img = torch.einsum("ij,jkc->ikc", ry, img)            # rows
+        img = torch.einsum("kj,ijc->ikc", rx, img)            # columns
+    return torch.clamp(img[..., [2, 1, 0]] * 255.0 + 0.5, 0, 255).to(torch.uint8)
 
 
 class GsplatRenderer:
@@ -46,6 +83,7 @@ class GsplatRenderer:
         self.opac = torch.from_numpy(model.opacities).to(dev)
         self.sh = torch.from_numpy(np.ascontiguousarray(model.sh[:, :k])).to(dev)
         self.bg = torch.tensor([background], dtype=torch.float32, device=dev)
+        self._weights: dict = {}
         self.info = {"backend": "gsplat", "gsplat_version": getattr(gsplat, "__version__", "?"),
                      "gpu": torch.cuda.get_device_name(0), "cuda": torch.version.cuda,
                      "driver": _nvidia_driver()}
@@ -59,6 +97,20 @@ class GsplatRenderer:
                                      sh_degree=self.degree, near_plane=0.05, far_plane=1e4,
                                      backgrounds=self.bg, packed=False, rasterize_mode="classic")
         return img[0].float().cpu().numpy()
+
+    def render_bgr8(self, viewmat: np.ndarray, K: np.ndarray, width: int, height: int,
+                    out_w: int, out_h: int) -> np.ndarray:
+        """The frame at the output size as BGR uint8: rasterised, reduced and converted on the GPU;
+        only the finished frame crosses to the CPU."""
+        t = self.torch
+        with t.no_grad():
+            v = t.from_numpy(np.asarray(viewmat, np.float32))[None].cuda()
+            k = t.from_numpy(np.asarray(K, np.float32))[None].cuda()
+            img, _, _ = self._raster(self.means, self.quats, self.scales, self.opac, self.sh, v, k, width, height,
+                                     sh_degree=self.degree, near_plane=0.05, far_plane=1e4,
+                                     backgrounds=self.bg, packed=False, rasterize_mode="classic")
+            out = area_reduce_bgr8(img[0].float(), out_w, out_h, self._weights)
+            return np.ascontiguousarray(out.cpu().numpy())
 
 
 def _nvidia_driver() -> str | None:
@@ -115,10 +167,17 @@ class SplatShot:
 
     def frame(self, f: int, step: int | None = None) -> np.ndarray:
         V, K = self.view(f)
-        t0 = time.perf_counter()
-        img = self.renderer.render(V, K, self.rw, self.rh)
-        self.stats["rasterise_s"] = self.stats.get("rasterise_s", 0.0) + time.perf_counter() - t0
-        self.stats["frames"] = self.stats.get("frames", 0) + 1
+        with GPU_LOCK:
+            t0 = time.perf_counter()
+            if hasattr(self.renderer, "render_bgr8"):          # gsplat: reduced + converted on the GPU
+                out = self.renderer.render_bgr8(V, K, self.rw, self.rh, self.ow, self.oh)
+            else:                                              # the CPU reference renderer
+                out = None
+                img = self.renderer.render(V, K, self.rw, self.rh)
+            self.stats["rasterise_s"] = self.stats.get("rasterise_s", 0.0) + time.perf_counter() - t0
+            self.stats["frames"] = self.stats.get("frames", 0) + 1
+        if out is not None:
+            return out
         if (self.rw, self.rh) != (self.ow, self.oh):         # reduce in float, round once
             img = cv2.resize(np.ascontiguousarray(img, np.float32), (self.ow, self.oh), interpolation=cv2.INTER_AREA)
         return np.ascontiguousarray(np.clip(img[:, :, ::-1] * 255.0 + 0.5, 0, 255).astype(np.uint8))

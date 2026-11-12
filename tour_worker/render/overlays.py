@@ -25,6 +25,8 @@ per frame in float32, the same arithmetic every run: renders stay byte-identical
 1080 px short side and scale with the output."""
 from __future__ import annotations
 
+import threading
+
 import os
 
 import numpy as np
@@ -180,6 +182,7 @@ class Overlays:
         self._cards: dict[str, _Layer | list] = {}
         self.labels = []                       # (spec, built _Label or None) in order
         self._built: dict[int, _Label] = {}
+        self._lock = threading.Lock()
         shots = plan.shots
         idx = 0
         for i, (shot, t) in enumerate(zip(shots, timeline)):
@@ -325,12 +328,12 @@ class Overlays:
         return _Layer(_box(x0, y1 - ph, x0 + tw + 2 * px, y1, W, H, 2), draw, blur=1)
 
     def _label(self, i: int) -> _Label:
-        if i not in self._built:
-            for k in [k for k in self._built if k < i - 1]:            # frames run in order
-                del self._built[k]
-            idx, name, labels, t0, t_out = self.labels[i]
-            self._built[i] = _Label(idx, name, labels, self.W, self.H, t0, t_out)
-        return self._built[i]
+        with self._lock:                       # 3D chunks draw from parallel threads
+            got = self._built.get(i)
+            if got is None:              # kept: a tour has a handful of labels, each a small text layer
+                idx, name, labels, t0, t_out = self.labels[i]
+                got = self._built[i] = _Label(idx, name, labels, self.W, self.H, t0, t_out)
+            return got
 
     @staticmethod
     def _blend(f: np.ndarray, layer: _Layer, k):

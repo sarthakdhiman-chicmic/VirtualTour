@@ -129,3 +129,33 @@ def test_without_scene_cache_dir_the_scene_is_not_kept_on_disk(cpu_backend, monk
         assert not [p for p in work.rglob("*") if p.suffix in (".splat", ".ply")]
     assert storage.gets == ["s3://scenes/box_room.splat"]
     assert not (tmp_path / "cache").exists()
+
+
+def test_parallel_3d_encoders_give_the_same_bytes_as_one(cpu_backend, monkeypatch, tmp_path):
+    """3D chunks are encoded by parallel threads sharing the one renderer: 1 encoder or 3, the
+    master is byte-identical (captions on, so the shared label cache is exercised too)."""
+    from tour_worker.config import reset_settings
+    scene = tmp_path / "box_room.splat"
+    write_splat(scene, box_room())
+    sha = sha256_file(str(scene))
+    p = _plan(scene, sha)
+    for s, d in zip(p["shots"], (5.0, 5.0)):                # 10 s at 12 fps: 3 chunks of 48 frames
+        s["duration_s"] = d
+    p["total_duration_s"] = 10.0
+    p["output"]["room_labels"] = {"font": "sacramento", "scale": 0.8, "placement": "bottom_left"}
+    p["shots"][0]["caption"], p["shots"][1]["caption"] = "Living Room", "Kitchen"
+    p["provenance"]["plan_hash"] = compute_plan_hash(p)
+    masters = []
+    for n in ("1", "3"):
+        monkeypatch.setenv("PREWARP_WORKERS", n)
+        reset_settings()
+        render_job._SCENE.clear()
+        storage = DiskStorage({"s3://scenes/box_room.splat": str(scene)})
+        work = tmp_path / f"enc{n}"
+        work.mkdir()
+        out = render_job.run_tour({"plan": p, "output_prefix": "s3://o/"}, storage, str(work))
+        assert out["status"] == "completed", out
+        assert out["timings"]["chunks"] == 3 and out["timings"]["render_workers"] == int(n)
+        masters.append(open(work / "stored_master.mp4", "rb").read())
+    reset_settings()
+    assert masters[0] == masters[1]

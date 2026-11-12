@@ -9,7 +9,6 @@ it is exactly the affinity count, as before.
 """
 from __future__ import annotations
 
-import functools
 import math
 import os
 
@@ -32,7 +31,6 @@ def _quota() -> float | None:
     return None
 
 
-@functools.lru_cache(maxsize=1)
 def usable_cpus() -> int:
     n = len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else (os.cpu_count() or 1)
     q = _quota()

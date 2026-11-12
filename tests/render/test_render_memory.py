@@ -4,6 +4,8 @@ caps a configured count too; the local heat guard never asks for more memory tha
 import importlib.util
 import os
 
+from tour_worker import cpus
+
 from tour_worker.render import frames
 
 GB = 2**30
@@ -20,6 +22,7 @@ def test_a_worker_costs_more_at_4k(monkeypatch):
 
 def test_the_worker_count_fits_the_memory_budget(monkeypatch):
     monkeypatch.setattr(os, "sched_getaffinity", lambda pid: set(range(16)))
+    monkeypatch.setattr(cpus, "_quota", lambda: None)            # this host's own CPU quota aside
     monkeypatch.setattr(frames, "_available_memory", lambda: 16 * GB)
     monkeypatch.setattr(frames, "_cgroup_headroom", lambda: None)
     assert frames.render_workers(None, 1920, 1080) == 7                 # 16 GB x 0.6 / 1.2 GB

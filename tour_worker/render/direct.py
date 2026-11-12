@@ -22,6 +22,8 @@ import math
 import os
 import subprocess
 import tempfile
+import threading
+from concurrent.futures import ThreadPoolExecutor
 
 import cv2
 import numpy as np
@@ -86,20 +88,30 @@ def _init(plan, images: str, splat=None, supersample: float = 1.5) -> None:
     _STATE["overlays"] = overlays if overlays.active else None
 
 
+_SHOTS_LOCK = threading.Lock()
+
+
 def _shot(i: int):
-    """Shot i's frame source: a ShotWarp (photo) or a SplatShot (plan 1.6 3D), same interface."""
+    """Shot i's frame source: a ShotWarp (photo) or a SplatShot (plan 1.6 3D), same interface.
+    Thread-safe: 3D chunks are encoded by parallel threads that share this cache."""
     cache = _STATE["shots"]
-    if i not in cache:
-        for k in [k for k in cache if k < i - 1]:            # shots run in order: keep the last two
-            del cache[k]
+    with _SHOTS_LOCK:
+        got = cache.get(i)
+        if got is not None:
+            return got
         plan = _STATE["plan"]
+        # photo shots run in order in their process: keep the last two (a ShotWarp holds a prewarped
+        # photo); SplatShots are small and parallel threads visit them out of order: keep them all
+        for k in [k for k in cache if k < i - 1 and plan.shots[k].camera.type != "bezier_path"]:
+            del cache[k]
         n = _STATE["timeline"][i]["render_frames"]
         if plan.shots[i].camera.type == "bezier_path":
             from tour_worker.render.splat_shot import SplatShot
-            cache[i] = SplatShot(plan, plan.shots[i], n, _STATE["splat"], _STATE["supersample"], _STATE["splat_stats"])
+            got = SplatShot(plan, plan.shots[i], n, _STATE["splat"], _STATE["supersample"], _STATE["splat_stats"])
         else:
-            cache[i] = ShotWarp(plan, plan.shots[i], n, _STATE["images"])
-    return cache[i]
+            got = ShotWarp(plan, plan.shots[i], n, _STATE["images"])
+        cache[i] = got
+        return got
 
 
 WHIP_BLUR = 0.12        # a whip's peak motion blur, share of the frame width
@@ -367,8 +379,11 @@ def render_direct(plan, workdir: str, warnings: list | None = None, music_path: 
             ShotWarp(plan, shot, t["render_frames"], images, warnings)
     n = total_frames(plan)
     step = CHUNK_GOPS * GOP_S * plan.output.fps
-    workers = 1 if three_d else render_workers(workers, plan.output.width, plan.output.height,
-                                                hevc=wants_hevc(plan), mls=wants_mls(plan))
+    # photo tours: worker processes, each drawing and encoding its chunks. 3D tours: the scene lives on
+    # the one GPU renderer in this process, so chunks are encoded by threads here instead - one x264
+    # per chunk, as many at once as the photo path would use, all drawing through the same renderer
+    workers = render_workers(workers, plan.output.width, plan.output.height,
+                             hevc=wants_hevc(plan), mls=wants_mls(plan))
     out_path = os.path.join(workdir, "out.mp4")
     with tempfile.TemporaryDirectory(prefix="direct_", dir=workdir) as td:
         tasks = [(k, a, min(n, a + step), td) for k, a in enumerate(range(0, n, step))]
@@ -376,12 +391,19 @@ def render_direct(plan, workdir: str, warnings: list | None = None, music_path: 
             timings.info.update(render_workers=workers, chunks=len(tasks), frames=n)
         parts = []
         with stage("draw_encode"):
-            if workers <= 1 or len(tasks) <= 1:
+            if three_d or workers <= 1 or len(tasks) <= 1:
                 _init(plan, images, splat, splat_supersample)
-                for t in tasks:
-                    parts.append(_encode_chunk(t))
-                    if progress:
-                        progress(len(parts), len(tasks))
+                if three_d and workers > 1 and len(tasks) > 1:
+                    with ThreadPoolExecutor(max_workers=min(workers, len(tasks))) as pool:
+                        for part in pool.map(_encode_chunk, tasks):
+                            parts.append(part)
+                            if progress:
+                                progress(len(parts), len(tasks))
+                else:
+                    for t in tasks:
+                        parts.append(_encode_chunk(t))
+                        if progress:
+                            progress(len(parts), len(tasks))
                 if three_d and timings is not None:
                     st = _STATE["splat_stats"]
                     timings.info.update(splat_backend=getattr(splat, "info", {}), supersample=splat_supersample,
