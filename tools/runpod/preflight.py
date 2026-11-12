@@ -157,7 +157,9 @@ def segment():
 def tests():
     suites = ["tests/render/test_splat_gpu.py", "tests/render/test_splat_cpu.py", "tests/jobs/test_render_3d.py",
               "tests/contract", "tests/scene"]
-    p = subprocess.run([sys.executable, "-m", "pytest", "-q", "-rs", *suites], cwd=REPO,
+    # the other environment's pytest plugins (dash, anyio, ...) are not ours: do not load them
+    env = {**os.environ, "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1"}
+    p = subprocess.run([sys.executable, "-m", "pytest", "-q", "-rs", *suites], cwd=REPO, env=env,
                        capture_output=True, text=True, timeout=1800)
     tail = [l for l in p.stdout.strip().splitlines() if l.strip()][-1:] or ["(no output)"]
     if p.returncode != 0:

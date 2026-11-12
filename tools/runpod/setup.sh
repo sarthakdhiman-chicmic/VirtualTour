@@ -83,6 +83,11 @@ echo "  pinned to the environment's versions: $(tr '\n' ' ' < "$CONSTRAINTS" | c
 
 say "the worker (+ http extra) under the pod's constraints"
 "$VENV/bin/python" -m pip install -q --upgrade-strategy only-if-needed -c "$CONSTRAINTS" -e "$REPO[http]"
+# gsplat compiles its CUDA kernels on first use with ninja (a small build tool; env.sh puts the
+# venv's bin/ on PATH so torch finds it)
+"$VENV/bin/python" -m pip install -q -c "$CONSTRAINTS" ninja
+command -v nvcc >/dev/null || [ -x "${CUDA_HOME:-/usr/local/cuda}/bin/nvcc" ] \
+    || echo "  WARNING: no nvcc found - gsplat cannot build its kernels (needs a CUDA toolkit / -devel image)"
 if [ "${WITH_GSPLAT:-0}" = "1" ]; then
     say "gsplat ${GSPLAT_VERSION:=1.5.3} into the venv (only if the pod has none)"
     if "$VENV/bin/python" -c "import importlib.metadata as m; m.version('gsplat')" 2>/dev/null; then
