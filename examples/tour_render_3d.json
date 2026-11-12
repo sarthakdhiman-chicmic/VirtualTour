@@ -1,0 +1,287 @@
+{
+ "input": {
+  "job_type": "tour_render",
+  "job_id": "job-render-3d-1",
+  "plan": {
+   "plan_version": "1.6",
+   "listing_id": "splat_demo_green_house",
+   "mode": "cinematic_3d",
+   "fallback_reason": null,
+   "preset": "property_showcase",
+   "output": {
+    "width": 1920,
+    "height": 1080,
+    "fps": 30,
+    "codec": "h264"
+   },
+   "total_duration_s": 12.0,
+   "shots": [
+    {
+     "shot_id": "s1",
+     "order": 1,
+     "asset_id": "scene",
+     "room_key": "dining_1",
+     "room_type": "dining_room",
+     "narrative_stage": "arrival",
+     "role": "establishing",
+     "duration_s": 5.0,
+     "camera": {
+      "type": "bezier_path",
+      "easing": "ease_in_out",
+      "preset": null,
+      "start": null,
+      "end": null,
+      "move": "push_in",
+      "keyframes": null,
+      "segments": [
+       {
+        "eye": [
+         [
+          -0.67,
+          0.5,
+          0.55
+         ],
+         [
+          -0.67,
+          0.35,
+          0.5333
+         ],
+         [
+          -0.67,
+          0.2,
+          0.5167
+         ],
+         [
+          -0.67,
+          0.05,
+          0.5
+         ]
+        ],
+        "target": [
+         [
+          -0.67,
+          -3.0,
+          0.15
+         ],
+         [
+          -0.67,
+          -3.0,
+          0.15
+         ],
+         [
+          -0.67,
+          -3.0,
+          0.15
+         ],
+         [
+          -0.67,
+          -3.0,
+          0.15
+         ]
+        ]
+       }
+      ],
+      "timing": null,
+      "projection": null,
+      "hfov_deg": [
+       72.0,
+       64.0
+      ],
+      "time_warp": null,
+      "punches": null
+     },
+     "transition_in": {
+      "type": "cut",
+      "duration_s": 0.0
+     },
+     "motion_regions": null
+    },
+    {
+     "shot_id": "s2",
+     "order": 2,
+     "asset_id": "scene",
+     "room_key": "living_1",
+     "room_type": "living_room",
+     "narrative_stage": "heart",
+     "role": "hero",
+     "duration_s": 7.0,
+     "camera": {
+      "type": "bezier_path",
+      "easing": "ease_in_out",
+      "preset": null,
+      "start": null,
+      "end": null,
+      "move": "pan",
+      "keyframes": null,
+      "segments": [
+       {
+        "eye": [
+         [
+          -0.85,
+          -1.95,
+          0.55
+         ],
+         [
+          -0.9056,
+          -2.0333,
+          0.55
+         ],
+         [
+          -0.9611,
+          -2.1167,
+          0.55
+         ],
+         [
+          -1.0167,
+          -2.2,
+          0.55
+         ]
+        ],
+        "target": [
+         [
+          0.0051,
+          0.3992,
+          0.3
+         ],
+         [
+          -0.8342,
+          0.7047,
+          0.3
+         ],
+         [
+          -1.9394,
+          0.2892,
+          0.3
+         ],
+         [
+          -2.6236,
+          -0.2849,
+          0.3
+         ]
+        ]
+       },
+       {
+        "eye": [
+         [
+          -1.0167,
+          -2.2,
+          0.55
+         ],
+         [
+          -1.0722,
+          -2.2833,
+          0.55
+         ],
+         [
+          -1.1278,
+          -2.3667,
+          0.55
+         ],
+         [
+          -1.1833,
+          -2.45,
+          0.55
+         ]
+        ],
+        "target": [
+         [
+          -2.6236,
+          -0.2849,
+          0.3
+         ],
+         [
+          -3.3078,
+          -0.859,
+          0.3
+         ],
+         [
+          -3.8004,
+          -2.0045,
+          0.3
+         ],
+         [
+          -3.6454,
+          -2.8841,
+          0.3
+         ]
+        ]
+       },
+       {
+        "eye": [
+         [
+          -1.1833,
+          -2.45,
+          0.55
+         ],
+         [
+          -1.2389,
+          -2.5333,
+          0.55
+         ],
+         [
+          -1.2944,
+          -2.6167,
+          0.55
+         ],
+         [
+          -1.35,
+          -2.7,
+          0.55
+         ]
+        ],
+        "target": [
+         [
+          -3.6454,
+          -2.8841,
+          0.3
+         ],
+         [
+          -3.4903,
+          -3.7637,
+          0.3
+         ],
+         [
+          -3.0443,
+          -4.7438,
+          0.3
+         ],
+         [
+          -2.2051,
+          -5.0492,
+          0.3
+         ]
+        ]
+       }
+      ],
+      "timing": null,
+      "projection": null,
+      "hfov_deg": [
+       68.0,
+       68.0
+      ],
+      "time_warp": null,
+      "punches": null
+     },
+     "transition_in": {
+      "type": "fade",
+      "duration_s": 0.5
+     },
+     "motion_regions": null
+    }
+   ],
+   "warnings": [],
+   "provenance": {
+    "scoring_config_version": "1",
+    "planner_config_version": "1",
+    "plan_hash": "c9ac55cf33dcf16b079121e158eb784ab36662bd45d64b04a735558fa7cb2d5b"
+   },
+   "music": null,
+   "scene": {
+    "uri": "s3://example-bucket/scenes/green_model_house_3dgs.ply",
+    "sha256": "68dfddac0b602ed1af698dad0411de43551c6dd48cc788af908b90a2bfa1d028",
+    "format": "ply"
+   }
+  },
+  "output_prefix": "s3://example-bucket/tours/splat-demo/"
+ }
+}

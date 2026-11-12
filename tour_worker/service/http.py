@@ -157,6 +157,7 @@ def create_app(settings: Settings | None = None, store: JobStore | None = None) 
             "version": package_version(),
             "jobTypes": list(JOB_TYPES),
             "segmentModel": _segment_model(settings),
+            "splat": _splat_info(settings),
             "workerId": socket.gethostname(),
         }
 
@@ -169,6 +170,19 @@ def create_app(settings: Settings | None = None, store: JobStore | None = None) 
     for prefix in settings.service_prefixes:     # e.g. RUNPOD_ENDPOINT_URL + RUNPOD_TOUR_RENDER_PATH
         app.include_router(router, prefix=prefix)
     return app
+
+
+def _splat_info(settings: Settings) -> dict:
+    """3D tours (plan 1.6): the backend this service draws with, and the installed versions of
+    gsplat / torch (package metadata only: /health never imports torch or touches the GPU)."""
+    from importlib.metadata import PackageNotFoundError, version
+
+    def _v(name: str) -> str | None:
+        try:
+            return version(name)
+        except PackageNotFoundError:
+            return None
+    return {"backend": settings.splat_backend, "gsplatVersion": _v("gsplat"), "torchVersion": _v("torch")}
 
 
 def _segment_model(settings: Settings) -> str | None:

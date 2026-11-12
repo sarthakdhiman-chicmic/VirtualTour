@@ -55,7 +55,7 @@ def test_validate_request_accepts_the_examples_and_checks_the_plan_hash():
     import os
     from tour_worker.config import REPO_ROOT
     from tour_worker.jobs.router import validate_request
-    for name in ("tour_render.json", "tour_segment.json", "tour_plan.json"):
+    for name in ("tour_render.json", "tour_segment.json", "tour_plan.json", "tour_render_3d.json"):
         req = json.load(open(os.path.join(REPO_ROOT, "examples", name)))["input"]
         assert validate_request(req) is None
     req = json.load(open(os.path.join(REPO_ROOT, "examples", "tour_render.json")))["input"]

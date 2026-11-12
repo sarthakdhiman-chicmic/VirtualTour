@@ -325,6 +325,7 @@ tour_worker/
   music/                  beat analysis for beat sync (the `music` extra; offline, not a job);
                           structure.py: sections, phrases and hero moments (analysis v4)
 tools/render.py           local CLI: plan + images folder -> MP4
+tools/runpod/             GPU pod: setup.sh, preflight.py, start.sh, bench.py (3D timing), worker.env.example
 tools/quality/            perceptual_quality.py (motion quality gate), sync_quality.py (beat sync score,
                           incl. hero metrics), sync_timeline.py (picture of cuts / punches vs the music)
 tools/music/              analyze_library.py (re-analyse a library folder as v4), tap_heroes.html
@@ -353,6 +354,10 @@ tests/                    mirrors tour_worker/
 | `MODELS_DIR` | `<repo>/models` | folder holding the model weights, one subfolder per model. Set it when the package is installed outside the repo. |
 | `SEGMENT_MODEL` | `m2f_ade20k` | The `tour_segment` model: Mask2Former ADE20K panoptic, one pass for every motion class, fireplaces included. Water and fireplace masks are refined after it (`tour_worker/vision/refine.py`). |
 | `SEGMENT_DIR` | `MODELS_DIR/mask2former_swin_large_ade_panoptic` | Folder of its weights. |
+| `SPLAT_BACKEND` | `auto` | 3D tours (plan 1.6): `gsplat` (CUDA), `cpu` (the reference rasteriser: seconds a frame, for checking a scene without a GPU) or `auto` (gsplat when CUDA is available, else the render fails with `scene_render_failed`). |
+| `SPLAT_SUPERSAMPLE` | `1.5` | 3D frames are rasterised at this x the output size and reduced (INTER_AREA): less shimmer. 1.0-3.0. |
+| `SPLAT_SH_DEGREE` | `3` | View-dependent colour detail kept from the scene (0-3); lower saves memory. |
+| `SCENE_CACHE_DIR` | `~/.cache/tour-worker/scenes` | Scene files by sha256: fetched and checked once, reused by later renders. |
 
 The HTTP service (`python -m tour_worker.service`) adds these; `handler.py` ignores them:
 
@@ -482,20 +487,41 @@ image, and a missing checkpoint fails at once instead of downloading.
 
 ### RunPod
 
-**The FastAPI service, run directly (how the backend uses it).** The backend's Celery task calls
-the worker's HTTP API: `POST /run`, `GET /status/{id}`, `POST /cancel/{id}`, `GET /health`, and
-`GET /ping`. No container image is involved: install the worker on the host (a RunPod GPU pod,
-for example) and run the service.
+**The FastAPI service on a RunPod GPU pod (how the backend uses it).** The backend's Celery task
+calls the worker's HTTP API: `POST /run`, `GET /status/{id}`, `POST /cancel/{id}`, `GET /health`,
+and `GET /ping`. No container image is involved: the worker is installed on the pod, on top of the
+pod's own pinned GPU stack (torch, CUDA, gsplat), and runs as a plain process. `tools/runpod/`:
+
+| file | what |
+|---|---|
+| `setup.sh` | ffmpeg if missing; a virtualenv (`.venv-pod`) that sees the pod's packages; the worker and its `http` extra installed under a constraints file frozen from the pod, so torch / gsplat are never replaced (pip stops instead). `WITH_SEGMENT=1` adds transformers etc. for `tour_segment` if the pod lacks them. Ends by checking torch / torchvision / gsplat / numpy are unchanged. |
+| `preflight.py` | one report: ffmpeg + libx264; GPU, VRAM, CUDA, driver, torch; a gsplat render (its first call, which may build the CUDA kernels, and ms per 1080p frame); optional S3 write/read (`--s3-prefix`), scene HEAD (`--scene`), segmentation weights (`--segment`), and the GPU / 3D test suites (`--tests`). Exit 1 when anything failed. |
+| `start.sh` | `start` / `stop` / `status` / `logs` of the service; settings from `~/.config/tour-worker/worker.env` (`worker.env.example` lists them; keep the real file out of the repo). Waits for `/ping`, prints `/health`. |
+| `bench.py` | times a 3D tour through the real `tour_render` job: the sample apartment, a push-in and a 180-degree pan (`examples/tour_render_3d.json` is its request). |
 
 ```bash
-sudo apt-get install -y ffmpeg                         # render: encoding, loudness, probes
-uv sync --extra http --extra segment-gpu               # or --extra segment for CPU PyTorch
-export WORKER_API_KEY=...                              # the backend's key for this service
-export AWS_ACCESS_KEY_ID=... AWS_SECRET_ACCESS_KEY=... AWS_DEFAULT_REGION=...
-export HOST=0.0.0.0 PORT=8000 JOBS_DIR=/var/lib/tour-worker/jobs
-export SERVICE_PREFIXES=/tour/render,/tour/segment     # when it sits behind RUNPOD_ENDPOINT_URL + paths
-uv run python -m tour_worker.service
+git clone <worker repo> && cd tour-worker && git checkout <branch>
+tools/runpod/setup.sh                                  # WITH_SEGMENT=1 for tour_segment as well
+.venv-pod/bin/python -m tools.runpod.preflight --tests \
+    --s3-prefix s3://<bucket>/virtual_tour/splat_demo/preflight/ \
+    --scene s3://<bucket>/virtual_tour/splat_demo/scenes/green_model_house_3dgs.ply
+mkdir -p ~/.config/tour-worker && cp tools/runpod/worker.env.example ~/.config/tour-worker/worker.env
+$EDITOR ~/.config/tour-worker/worker.env               # WORKER_API_KEY, AWS keys, cache dirs
+tools/runpod/start.sh                                  # then: status | logs | stop
 ```
+
+`/health` reports `splat`: the 3D backend and the installed gsplat / torch versions.
+
+**Timing a 3D tour on the pod** (the AWS keys exported, or the env file sourced):
+
+```bash
+.venv-pod/bin/python -m tools.runpod.bench \
+    --scene s3://<bucket>/virtual_tour/splat_demo/scenes/green_model_house_3dgs.ply \
+    --sha256 68dfddac0b602ed1af698dad0411de43551c6dd48cc788af908b90a2bfa1d028 \
+    --output-prefix s3://<bucket>/virtual_tour/splat_demo/renders/<run>/   # --width 3840 --height 2160 for 4K
+```
+
+The first run downloads the scene to `SCENE_CACHE_DIR`; a second run shows the warm-cache time.
 
 - **Backend settings:**
   - `TOUR_WORKER_TRANSPORT="http"`: the backend calls `TOUR_RENDER_WORKER_URL` /
@@ -607,6 +633,29 @@ checkpoint:
     positives (a railing, a tub shell, steam) pass through.
   - A fireplace becomes a `fire` region holding only its flame core, and only when it is lit;
     the mantel and surround stay still.
+
+## 3D tours (plan 1.6)
+A tour can be rendered from a Gaussian splat scene instead of photos: the backend passes the scene
+file's link (`plan.scene`: `uri`, `sha256`, `format` `ply` | `splat`, optional `up_axis`), and
+every shot is a `bezier_path` camera flying through it.
+
+- **Scene files** (`tour_worker/scene/splat_io.py`): `.ply` as 3DGS training writes it
+  (spherical-harmonic colour to degree 3, logit opacity, log scale, w x y z rotation) and the
+  web-viewer `.splat`. Loaded in chunks and validated; a few broken splats are dropped, more than
+  1 % is `scene_invalid`. Cached on disk by sha256 (`scene/cache.py`).
+- **Orientation** (`scene/orient.py`): with no `scene.json`, up, floor and ceiling come from the
+  geometry (floor and ceiling planes; furniture mass for the sign, the file's axis convention when
+  that is ambiguous). An explicit `scene.up_axis` wins.
+- **Cameras** (`scene/camera.py`): OpenCV axes, intrinsics from `hfov_deg`, cubic Beziers
+  reparameterised by arc length so the camera moves evenly before easing and the beat-sync
+  `time_warp`.
+- **Rendering** (`render/splat_shot.py`): `SplatShot` has ShotWarp's frame interface, so 3D shots
+  go through the same composition (fades, whip, push, overlays), chunk encoders, audio and join.
+  3D plans draw in one process (one GPU). gsplat on CUDA in production; `render/splat_cpu.py` is
+  a CPU reference rasteriser (same maths) for checking scenes without a GPU and as the reference
+  the GPU path is compared against (PSNR >= 45 dB; tests skip without CUDA).
+- `scene.json` (rooms and camera anchors marked by an operator) is optional; when given it is
+  validated strictly (`scene/scene_json.py`).
 
 ## Tests
 

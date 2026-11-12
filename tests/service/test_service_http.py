@@ -148,6 +148,7 @@ def test_health(make_client):
     assert h["jobTypes"] == ["tour_render", "tour_segment", "tour_plan"]
     assert h["segmentModel"] == "facebook/mask2former-swin-large-ade-panoptic@ae53ed7ab3"
     assert "version" in h and "workerId" in h
+    assert h["splat"]["backend"] == "auto" and set(h["splat"]) == {"backend", "gsplatVersion", "torchVersion"}
 
 
 # ---- validation ----------------------------------------------------------------------------------
@@ -191,7 +192,7 @@ def test_a_body_that_is_not_json_is_400_and_not_echoed(make_client):
 
 def test_the_examples_are_accepted(make_client):
     c = make_client(runner=lambda inp: {"status": "completed"})
-    for name in ("tour_render.json", "tour_segment.json", "tour_plan.json"):
+    for name in ("tour_render.json", "tour_segment.json", "tour_plan.json", "tour_render_3d.json"):
         assert c.post("/run", headers=AUTH, json={"input": _example(name)}).status_code == 200
 
 
