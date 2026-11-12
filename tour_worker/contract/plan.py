@@ -2,7 +2,8 @@ import hashlib
 import json
 
 from tour_worker.render.camera_path import PROJECTIONS, CompoundPath, KeyframePath, validate_compound, frame_margin_out_px, validate_keyframes
-from typing import List, Optional, Any
+import math
+from typing import List, Optional, Any, Union
 from pydantic import BaseModel, ConfigDict, Field
 
 # room labels (overlays, SOW 3.2.1a; user 2026-11-05): the room's name in a script font, drawn by
@@ -84,6 +85,13 @@ class Segment(BaseModel):
     zoom: float
     model_config = ConfigDict(extra='ignore')
 
+class BezierSegment(BaseModel):
+    """Plan 1.6 bezier_path: one cubic Bezier for the eye and one for the point it looks at, four
+    control points each, in scene units (tour_worker/scene). Consecutive segments join end to start."""
+    eye: List[List[float]]
+    target: List[List[float]]
+    model_config = ConfigDict(extra='ignore')
+
 class Timing(BaseModel):
     s0: float
     s1: float
@@ -103,9 +111,11 @@ class Camera(BaseModel):
     # keyframe_path, addendum 1.3.1 (optional): "crop" (default) or "rotate"; hfov_deg is the
     # photo's assumed horizontal field of view for "rotate" (tour_worker/render/camera_path.py)
     projection: Optional[str] = None
-    hfov_deg: Optional[float] = None
-    # compound (addendum 1.3.2): start + segments + timing (tour_worker/render/camera_path.py)
-    segments: Optional[List[Segment]] = None
+    # keyframe_path / compound: one value; bezier_path (plan 1.6): [start, end]
+    hfov_deg: Optional[Union[float, List[float]]] = None
+    # compound (addendum 1.3.2): start + segments + timing (tour_worker/render/camera_path.py);
+    # bezier_path (plan 1.6): 1-3 BezierSegments
+    segments: Optional[List[Union[Segment, BezierSegment]]] = None
     timing: Optional[Timing] = None
     # beat sync (plan 1.5): [output t, move t] points, monotone, (0,0) .. (1,1): the move planned
     # for the shot's normal length, retimed to its synced length (tour_worker/render/camera_path.time_warp_at)
@@ -155,8 +165,8 @@ class Shot(BaseModel):
     shot_id: str
     order: int
     asset_id: str
-    image_uri: str
-    source: Size
+    image_uri: Optional[str] = None   # every photo shot has one; a 3D shot (plan 1.6) has none
+    source: Optional[Size] = None     # likewise
     room_key: str
     room_type: Optional[str] = None   # the backend allows untagged rooms
     narrative_stage: str
@@ -212,6 +222,22 @@ class Voiceover(BaseModel):
     balance: float = 0.5
     model_config = ConfigDict(extra='ignore')
 
+# plan 1.6: a tour built from a Gaussian splat scene (mode cinematic_3d, bezier_path cameras). The
+# backend passes the scene file's link; scene.json (rooms and anchors) is optional.
+SCENE_FORMATS = ("ply", "splat")
+MODES = ("cinematic", "slideshow", "cinematic_3d")
+FALLBACK_REASONS_3D = ("no_scene_model", "scene_invalid", "scene_render_failed")
+MAX_BEZIER_SEGMENTS = 3
+
+class Scene(BaseModel):
+    uri: str
+    sha256: str
+    format: str                        # "ply" | "splat"
+    json_uri: Optional[str] = None     # scene.json, when an operator authored one
+    json_sha256: Optional[str] = None
+    up_axis: Optional[List[float]] = None   # the scene's up in its own axes; None: +z
+    model_config = ConfigDict(extra='ignore')
+
 class Plan(BaseModel):
     plan_version: str
     listing_id: str
@@ -225,6 +251,7 @@ class Plan(BaseModel):
     provenance: Provenance
     music: Optional[Music] = None
     voiceover: Optional[Voiceover] = None
+    scene: Optional[Scene] = None      # plan 1.6
     model_config = ConfigDict(extra='ignore')
 
 def compute_plan_hash(plan_dict: dict) -> str:
@@ -246,7 +273,9 @@ def validate_plan_hash(original_dict: dict):
 CAMERA_TYPES = {"1.0": {"ken_burns"}, "1.1": {"ken_burns"}, "1.2": {"ken_burns"},
                 "1.3": {"ken_burns", "keyframe_path", "compound"},
                 "1.4": {"ken_burns", "keyframe_path", "compound"},
-                "1.5": {"ken_burns", "keyframe_path", "compound"}}   # 1.5 = 1.4 + a music block
+                "1.5": {"ken_burns", "keyframe_path", "compound"},   # 1.5 = 1.4 + a music block
+                "1.6": {"bezier_path"}}                              # 1.6 = a 3D scene tour
+PLAN_VERSIONS = tuple(CAMERA_TYPES)
 
 def check_camera_type(plan: Plan):
     allowed = CAMERA_TYPES.get(plan.plan_version, {"ken_burns"})
@@ -265,7 +294,13 @@ def check_camera_type(plan: Plan):
             validate_compound(shot.camera.start.model_dump() if shot.camera.start else None,
                               [s.model_dump() for s in (shot.camera.segments or [])],
                               shot.camera.timing.model_dump() if shot.camera.timing else None)
+        if shot.camera.type == "compound" and not all(isinstance(s, Segment) for s in shot.camera.segments or []):
+            raise ValueError(f"invalid_plan: compound camera in shot {shot.shot_id} has bezier segments")
+        if shot.camera.type == "bezier_path":
+            check_bezier_camera(shot)
         if shot.camera.type in ("keyframe_path", "compound"):
+            if shot.camera.hfov_deg is not None and not isinstance(shot.camera.hfov_deg, (int, float)):
+                raise ValueError(f"invalid_plan: hfov_deg in shot {shot.shot_id} must be one number")
             if shot.camera.projection is not None and shot.camera.projection not in PROJECTIONS:
                 raise ValueError(f"unsupported_projection: {shot.camera.projection}")
             if (shot.camera.type == "keyframe_path" and shot.camera.projection == "rotate"
@@ -273,6 +308,59 @@ def check_camera_type(plan: Plan):
                 raise ValueError(f"invalid_plan: roll_deg in shot {shot.shot_id} is crop-only")
             if shot.camera.hfov_deg is not None and not 20 <= shot.camera.hfov_deg <= 120:
                 raise ValueError(f"invalid_plan: hfov_deg in shot {shot.shot_id} must be 20-120")
+
+def _finite_points(points, n: int) -> bool:
+    return (isinstance(points, list) and len(points) == n
+            and all(isinstance(p, list) and len(p) == 3 and all(math.isfinite(v) for v in p) for p in points))
+
+def check_bezier_camera(shot):
+    """bezier_path (plan 1.6): 1-3 segments of 4 finite 3D control points for the eye and for the
+    target, joined end to start; hfov_deg [start, end] within 20-120; no projection, no punches."""
+    c, sid = shot.camera, shot.shot_id
+    segs = c.segments or []
+    if not 1 <= len(segs) <= MAX_BEZIER_SEGMENTS or not all(isinstance(s, BezierSegment) for s in segs):
+        raise ValueError(f"invalid_plan: bezier_path in shot {sid} needs 1-{MAX_BEZIER_SEGMENTS} eye/target segments")
+    for s in segs:
+        if not (_finite_points(s.eye, 4) and _finite_points(s.target, 4)):
+            raise ValueError(f"invalid_plan: bezier_path in shot {sid} needs 4 finite 3D points per curve")
+    for a, b in zip(segs, segs[1:]):
+        if any(abs(u - v) > 1e-6 for p, q in ((a.eye[3], b.eye[0]), (a.target[3], b.target[0])) for u, v in zip(p, q)):
+            raise ValueError(f"invalid_plan: bezier_path segments in shot {sid} must join end to start")
+    h = c.hfov_deg
+    if not (isinstance(h, list) and len(h) == 2 and all(isinstance(v, (int, float)) and 20 <= v <= 120 for v in h)):
+        raise ValueError(f"invalid_plan: bezier_path hfov_deg in shot {sid} must be [start, end] within 20-120")
+    if c.projection is not None or c.punches:
+        raise ValueError(f"invalid_plan: bezier_path in shot {sid} takes no projection or punches")
+
+def check_scene(plan: Plan):
+    """Plan 1.6 is a 3D scene tour: a scene block, mode cinematic_3d, every shot a bezier_path with
+    no photo, source size or motion regions. Earlier versions have photo shots and no scene."""
+    if plan.plan_version == "1.6":
+        sc = plan.scene
+        if sc is None or plan.mode != "cinematic_3d":
+            raise ValueError("invalid_plan: plan_version 1.6 needs a scene and mode cinematic_3d")
+        if sc.format not in SCENE_FORMATS:
+            raise ValueError(f"invalid_plan: scene.format must be one of {', '.join(SCENE_FORMATS)}")
+        for u in (sc.uri, sc.json_uri):
+            if u is not None and not u.startswith(("s3://", "http://", "https://", "local://", "file://")):
+                raise ValueError(f"invalid_plan: scene uri {u!r}")
+        for h in (sc.sha256, sc.json_sha256):
+            if h is not None and (len(h) != 64 or any(ch not in "0123456789abcdef" for ch in h)):
+                raise ValueError("invalid_plan: scene sha256 must be 64 lowercase hex characters")
+        if sc.up_axis is not None and not (len(sc.up_axis) == 3 and all(math.isfinite(v) for v in sc.up_axis)
+                                           and math.hypot(*sc.up_axis) > 1e-6):
+            raise ValueError("invalid_plan: scene.up_axis must be a non-zero 3D vector")
+        if (sc.json_uri is None) != (sc.json_sha256 is None):
+            raise ValueError("invalid_plan: scene.json_uri and scene.json_sha256 go together")
+        for shot in plan.shots:
+            if shot.image_uri is not None or shot.source is not None or shot.motion_regions:
+                raise ValueError(f"invalid_plan: 3D shot {shot.shot_id} has no image_uri, source or motion_regions")
+    else:
+        if plan.scene is not None or plan.mode == "cinematic_3d":
+            raise ValueError(f"invalid_plan: a scene and mode cinematic_3d need plan_version 1.6")
+        for shot in plan.shots:
+            if shot.image_uri is None or shot.source is None:
+                raise ValueError(f"invalid_plan: shot {shot.shot_id} needs image_uri and source")
 
 def _projection_kwargs(camera) -> dict:
     kw = {"projection": camera.projection or "crop"}
@@ -312,6 +400,8 @@ def check_path_bounds(plan: Plan):
     from tour_worker.render.timeline import compute_timeline
     timeline = compute_timeline(plan)
     for shot, tl in zip(plan.shots, timeline):
+        if shot.source is None:            # a 3D shot: no photo to stay inside
+            continue
         if shot.camera.type == "compound":
             path = compound_path(shot, plan.output.width, plan.output.height)
         elif shot.camera.type == "keyframe_path":
@@ -327,6 +417,8 @@ def check_path_bounds(plan: Plan):
 def check_bounds(plan: Plan):
     out_ratio = plan.output.width / plan.output.height
     for shot in plan.shots:
+        if shot.source is None:            # a 3D shot: no photo to stay inside
+            continue
         src_ratio = shot.source.width / shot.source.height
         if src_ratio > out_ratio:
             rect_w = out_ratio / src_ratio
@@ -375,7 +467,7 @@ def check_easing(plan: Plan):
             raise ValueError(f"invalid_plan: non-default easing '{shot.camera.easing}' not allowed in plan_version {plan.plan_version}")
 
 def check_transitions(plan: Plan):
-    if plan.plan_version not in ("1.0", "1.1", "1.2", "1.3", "1.4", "1.5"):
+    if plan.plan_version not in PLAN_VERSIONS:
         raise ValueError(f"unsupported plan version: {plan.plan_version}")
     
     if not plan.shots:
@@ -389,7 +481,7 @@ def check_transitions(plan: Plan):
         if plan.plan_version == "1.0":
             if shot.transition_in.type != "cut":
                 raise ValueError("plan_version 1.0 only supports cut transitions")
-        elif plan.plan_version in ("1.1", "1.2", "1.3", "1.4", "1.5"):
+        else:
             t = shot.transition_in
             if t.type not in TRANSITIONS:
                 raise ValueError(f"Unsupported transition type: {t.type}")
@@ -400,7 +492,7 @@ def check_motion_regions(plan: Plan):
     for shot in plan.shots:
         if not shot.motion_regions:
             continue
-        if plan.plan_version not in ("1.4", "1.5"):
+        if plan.plan_version not in ("1.4", "1.5", "1.6"):
             raise ValueError(f"invalid_plan: motion_regions in shot {shot.shot_id} need plan_version 1.4 or later")
         for r in shot.motion_regions:
             if r.effect not in MOTION_EFFECTS:
@@ -455,6 +547,7 @@ def check_branding(plan: Plan):
 def parse_plan(data: dict) -> Plan:
     validate_plan_hash(data)
     plan = Plan(**data)
+    check_scene(plan)
     check_camera_type(plan)
     check_bounds(plan)
     check_easing(plan)

@@ -88,6 +88,13 @@ class Segment(BaseModel):
     zoom: float
 
 
+class BezierSegment(BaseModel):
+    """Plan 1.6 bezier_path: one cubic Bezier for the eye and one for the point it looks at, four
+    control points each, in scene units. Consecutive segments join end to start."""
+    eye: list[list[float]]
+    target: list[list[float]]
+
+
 class Timing(BaseModel):
     s0: float
     s1: float
@@ -105,10 +112,10 @@ class CameraParams(BaseModel):
     end: CameraPoint | None = None
     move: str | None = None
     keyframes: list[Keyframe] | None = None
-    segments: list[Segment] | None = None
+    segments: list[Segment | BezierSegment] | None = None   # compound phases; bezier_path (1.6) curves
     timing: Timing | None = None
     projection: str | None = None        # "crop" (default) | "rotate"
-    hfov_deg: float | None = None
+    hfov_deg: float | list[float] | None = None   # one value; bezier_path (1.6): [start, end]
     # beat sync (plan 1.5): [output t, move t] points, monotone - the move planned for the shot's
     # normal length, retimed to its synced length (the rear speeds up / slows down to the cut)
     time_warp: list[list[float]] | None = None
@@ -153,8 +160,8 @@ class Shot(BaseModel):
     shot_id: str
     order: int
     asset_id: str
-    image_uri: str
-    source: SourceImage
+    image_uri: str | None = None     # every photo shot has one; a 3D shot (plan 1.6) has none
+    source: SourceImage | None = None
     room_key: str
     room_type: str | None = None
     narrative_stage: str
@@ -168,7 +175,7 @@ class Shot(BaseModel):
 
     @model_serializer(mode="wrap")
     def _omit_unset_additions(self, handler):
-        return _omit_none(handler(self), ("caption", "staged"))
+        return _omit_none(handler(self), ("image_uri", "source", "caption", "staged"))
 
 
 class MusicTrack(BaseModel):
@@ -223,6 +230,20 @@ class MusicHook(BaseModel):
         return _omit_none(handler(self), ("tier", "hero"))
 
 
+class Scene(BaseModel):
+    """Plan 1.6: the Gaussian splat scene the tour is rendered from (tour_worker/scene)."""
+    uri: str
+    sha256: str
+    format: str                      # "ply" | "splat"
+    json_uri: str | None = None      # scene.json, when an operator authored one
+    json_sha256: str | None = None
+    up_axis: list[float] | None = None   # the scene's up in its own axes; None: +z
+
+    @model_serializer(mode="wrap")
+    def _omit_unset_additions(self, handler):
+        return _omit_none(handler(self), ("json_uri", "json_sha256", "up_axis"))
+
+
 class PlanProvenance(BaseModel):
     scoring_config_version: str
     planner_config_version: str
@@ -247,10 +268,11 @@ class ShotPlan(BaseModel):
     provenance: PlanProvenance
     music: MusicTrack | None = None
     voiceover: Voiceover | None = None   # narration over the tour; None: none (left out of the JSON)
+    scene: Scene | None = None           # plan 1.6: the 3D scene; None: a photo tour (left out)
 
     @model_serializer(mode="wrap")
     def _omit_unset_additions(self, handler):
-        return _omit_none(handler(self), ("voiceover",))
+        return _omit_none(handler(self), ("voiceover", "scene"))
 
 def build_tour_render_request(
     plan: ShotPlan, 
