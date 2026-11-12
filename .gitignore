@@ -10,3 +10,4 @@ out/
 # local reference renders for the refactor (not part of the repo)
 .ref/
 .venv-pod/
+.pip-cache/
