@@ -6,26 +6,21 @@
 #   tools/runpod/start.sh status     is it running; /health
 #   tools/runpod/start.sh logs       follow the log
 #
-# Settings come from an env file (default ~/.config/tour-worker/worker.env; ENV_FILE=... for
-# another). tools/runpod/worker.env.example lists them. Keep the real file OUT of the repo: it
-# holds WORKER_API_KEY and the AWS keys.
+# Settings come from <repo>/.pod/worker.env (gitignored; ENV_FILE=... for another), loaded by
+# tools/runpod/env.sh with the pod defaults. tools/runpod/worker.env.example lists them. The pid,
+# log and job records go to <repo>/.pod/run.
 set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-ENV_FILE="${ENV_FILE:-$HOME/.config/tour-worker/worker.env}"
 VENV="${VENV:-$REPO/.venv-pod}"
-RUN_DIR="${RUN_DIR:-$HOME/.local/state/tour-worker}"
+RUN_DIR="${RUN_DIR:-${POD_DIR:-$REPO/.pod}/run}"
 PID_FILE="$RUN_DIR/service.pid"
 LOG_FILE="$RUN_DIR/service.log"
 mkdir -p "$RUN_DIR"
 
 load_env() {
-    [ -f "$ENV_FILE" ] || { echo "no env file at $ENV_FILE (copy tools/runpod/worker.env.example)"; exit 1; }
-    set -a; . "$ENV_FILE"; set +a
+    . "$REPO/tools/runpod/env.sh" || exit 1
     : "${WORKER_API_KEY:?WORKER_API_KEY must be set in $ENV_FILE}"
-    export HOST="${HOST:-0.0.0.0}" PORT="${PORT:-8000}"
-    export JOBS_DIR="${JOBS_DIR:-$RUN_DIR/jobs}" SPLAT_BACKEND="${SPLAT_BACKEND:-gsplat}"
-    mkdir -p "$JOBS_DIR"
 }
 running() { [ -f "$PID_FILE" ] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null; }
 health() { curl -fsS "http://127.0.0.1:${PORT:-8000}/health" && echo; }
@@ -47,7 +42,7 @@ start)
 stop)
     if running; then kill "$(cat "$PID_FILE")"; rm -f "$PID_FILE"; echo "stopped"; else echo "not running"; fi ;;
 status)
-    if running; then echo "running (pid $(cat "$PID_FILE"))"; PORT="$(grep -E '^PORT=' "$ENV_FILE" 2>/dev/null | cut -d= -f2)"; health || true
+    if running; then echo "running (pid $(cat "$PID_FILE"))"; load_env >/dev/null; health || true
     else echo "not running"; exit 1; fi ;;
 logs)
     tail -f "$LOG_FILE" ;;

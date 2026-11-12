@@ -10,9 +10,9 @@ room while the camera drifts 0.9 m (parallax). Same job, storage and checks as a
       [--write-plan plan.json]         also save the request (e.g. to post it to the service)
       [--plan-only]                    build and check the request, do not render
 
-Settings as for the service: SPLAT_BACKEND, SPLAT_SUPERSAMPLE, SPLAT_SH_DEGREE, SCENE_CACHE_DIR.
+Settings as for the service: SPLAT_BACKEND, SPLAT_SUPERSAMPLE, SPLAT_SH_DEGREE, SCENE_CACHE_DIR (unset:
+the scene is downloaded into the job's folder and deleted after loading).
 Prints the job result (incl. `timings`: scene_fetch, scene_load, rasterise, encode, upload) as JSON.
-Run twice to see a warm scene cache (the second run skips the download).
 """
 from __future__ import annotations
 

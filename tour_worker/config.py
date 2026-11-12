@@ -18,7 +18,9 @@ Every setting, its environment variable and default (also in README.md):
                                   (gsplat when CUDA is available, else the render fails)
   SPLAT_SUPERSAMPLE    1.5        3D frames are rasterised at this x the output size, then reduced
   SPLAT_SH_DEGREE      3          view-dependent colour detail kept from the scene (0-3)
-  SCENE_CACHE_DIR      ~/.cache/tour-worker/scenes   scene files by sha256 (fetched once)
+  SCENE_CACHE_DIR      (unset)    keep scene files here by sha256 (fetched once). Unset: no disk
+                                  cache - a scene is fetched into the job's folder and deleted once
+                                  loaded (the last scene stays in memory for the next render)
 
 The HTTP service (python -m tour_worker.service; handler.py, the RunPod entry, ignores these):
 
@@ -71,7 +73,7 @@ class Settings:
     splat_backend: str = "auto"
     splat_supersample: float = 1.5
     splat_sh_degree: int = 3
-    scene_cache_dir: str = os.path.join(os.path.expanduser("~"), ".cache", "tour-worker", "scenes")
+    scene_cache_dir: str | None = None      # None: no disk cache (fetched per job, deleted after loading)
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> "Settings":
@@ -97,8 +99,7 @@ class Settings:
             splat_backend=(env.get("SPLAT_BACKEND") or "auto").strip().lower(),
             splat_supersample=min(3.0, max(1.0, float(env.get("SPLAT_SUPERSAMPLE") or 1.5))),
             splat_sh_degree=min(3, max(0, int(env.get("SPLAT_SH_DEGREE") or 3))),
-            scene_cache_dir=env.get("SCENE_CACHE_DIR") or os.path.join(os.path.expanduser("~"), ".cache",
-                                                                         "tour-worker", "scenes"),
+            scene_cache_dir=(env.get("SCENE_CACHE_DIR") or "").strip() or None,
         )
 
     def segment_path(self) -> str:

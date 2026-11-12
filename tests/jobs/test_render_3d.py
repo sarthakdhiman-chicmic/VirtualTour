@@ -111,3 +111,21 @@ def test_without_a_gpu_the_default_backend_fails_cleanly(monkeypatch, tmp_path):
     work.mkdir()
     out = render_job.run_tour({"plan": _plan(scene, sha256_file(str(scene))), "output_prefix": "s3://o/"}, storage, str(work))
     assert out["status"] == "failed" and out["error"]["code"] == "scene_render_failed"
+
+
+def test_without_scene_cache_dir_the_scene_is_not_kept_on_disk(cpu_backend, monkeypatch, tmp_path):
+    """The default (SCENE_CACHE_DIR unset): the scene is fetched into the job's folder and deleted
+    once loaded; the loaded scene stays in memory, so a second render does not fetch it again."""
+    monkeypatch.delenv("SCENE_CACHE_DIR")
+    scene = tmp_path / "box_room.splat"
+    write_splat(scene, box_room())
+    sha = sha256_file(str(scene))
+    storage = DiskStorage({"s3://scenes/box_room.splat": str(scene)})
+    for i in range(2):
+        work = tmp_path / f"job{i}"
+        work.mkdir()
+        out = render_job.run_tour({"plan": _plan(scene, sha), "output_prefix": "s3://o/"}, storage, str(work))
+        assert out["status"] == "completed", out
+        assert not [p for p in work.rglob("*") if p.suffix in (".splat", ".ply")]
+    assert storage.gets == ["s3://scenes/box_room.splat"]
+    assert not (tmp_path / "cache").exists()

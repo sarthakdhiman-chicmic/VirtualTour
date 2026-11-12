@@ -357,7 +357,7 @@ tests/                    mirrors tour_worker/
 | `SPLAT_BACKEND` | `auto` | 3D tours (plan 1.6): `gsplat` (CUDA), `cpu` (the reference rasteriser: seconds a frame, for checking a scene without a GPU) or `auto` (gsplat when CUDA is available, else the render fails with `scene_render_failed`). |
 | `SPLAT_SUPERSAMPLE` | `1.5` | 3D frames are rasterised at this x the output size and reduced (INTER_AREA): less shimmer. 1.0-3.0. |
 | `SPLAT_SH_DEGREE` | `3` | View-dependent colour detail kept from the scene (0-3); lower saves memory. |
-| `SCENE_CACHE_DIR` | `~/.cache/tour-worker/scenes` | Scene files by sha256: fetched and checked once, reused by later renders. |
+| `SCENE_CACHE_DIR` | (unset) | Keep scene files here by sha256 (fetched and checked once). Unset: no disk cache: each job fetches its scene into its own folder and deletes it once loaded; the last scene stays in memory, so a repeat render of it does not fetch again. |
 
 The HTTP service (`python -m tour_worker.service`) adds these; `handler.py` ignores them:
 
@@ -496,23 +496,25 @@ pod's own pinned GPU stack (torch, CUDA, gsplat), and runs as a plain process. `
 |---|---|
 | `setup.sh` | ffmpeg if missing; a virtualenv (`.venv-pod`) that reads the packages of the environment `PYTHON` belongs to (system, conda or another venv), pins its GPU stack (torch, CUDA libraries, gsplat, numpy, transformers) and installs the worker and its `http` extra into the venv only; the other environment is never changed. `WITH_GSPLAT=1` installs gsplat into the venv if that environment has none. `WITH_SEGMENT=1` adds transformers etc. for `tour_segment` if the pod lacks them. Ends by checking torch / torchvision / gsplat / numpy are unchanged. |
 | `preflight.py` | one report: ffmpeg + libx264; GPU, VRAM, CUDA, driver, torch; a gsplat render (its first call, which may build the CUDA kernels, and ms per 1080p frame); optional S3 write/read (`--s3-prefix`), scene HEAD (`--scene`), segmentation weights (`--segment`), and the GPU / 3D test suites (`--tests`). Exit 1 when anything failed. |
-| `start.sh` | `start` / `stop` / `status` / `logs` of the service; settings from `~/.config/tour-worker/worker.env` (`worker.env.example` lists them; keep the real file out of the repo). Waits for `/ping`, prints `/health`. |
+| `env.sh` | `. tools/runpod/env.sh` loads the settings into the shell: `<repo>/.pod/worker.env` (gitignored; `worker.env.example` lists them) plus the pod defaults. Everything the worker keeps on the pod is under `<repo>/.pod/` (models, the service's log and job records); scene files are not kept. |
+| `start.sh` | `start` / `stop` / `status` / `logs` of the service (sources `env.sh`). Waits for `/ping`, prints `/health`. |
 | `bench.py` | times a 3D tour through the real `tour_render` job: the sample apartment, a push-in and a 180-degree pan (`examples/tour_render_3d.json` is its request). |
 
 ```bash
 git clone <worker repo> && cd tour-worker && git checkout <branch>
-tools/runpod/setup.sh                                  # WITH_SEGMENT=1 for tour_segment as well
+PYTHON=<python of the env that has torch + gsplat> tools/runpod/setup.sh   # WITH_SEGMENT=1 for tour_segment
+mkdir -p .pod && cp tools/runpod/worker.env.example .pod/worker.env
+$EDITOR .pod/worker.env                                # WORKER_API_KEY, AWS keys
+. tools/runpod/env.sh                                  # load the settings into this shell
 .venv-pod/bin/python -m tools.runpod.preflight --tests \
     --s3-prefix s3://<bucket>/virtual_tour/splat_demo/preflight/ \
     --scene s3://<bucket>/virtual_tour/splat_demo/scenes/green_model_house_3dgs.ply
-mkdir -p ~/.config/tour-worker && cp tools/runpod/worker.env.example ~/.config/tour-worker/worker.env
-$EDITOR ~/.config/tour-worker/worker.env               # WORKER_API_KEY, AWS keys, cache dirs
 tools/runpod/start.sh                                  # then: status | logs | stop
 ```
 
 `/health` reports `splat`: the 3D backend and the installed gsplat / torch versions.
 
-**Timing a 3D tour on the pod** (the AWS keys exported, or the env file sourced):
+**Timing a 3D tour on the pod** (after `. tools/runpod/env.sh`):
 
 ```bash
 .venv-pod/bin/python -m tools.runpod.bench \
@@ -521,7 +523,7 @@ tools/runpod/start.sh                                  # then: status | logs | s
     --output-prefix s3://<bucket>/virtual_tour/splat_demo/renders/<run>/   # --width 3840 --height 2160 for 4K
 ```
 
-The first run downloads the scene to `SCENE_CACHE_DIR`; a second run shows the warm-cache time.
+Each bench run is a new process, so it downloads the scene again (nothing is kept on disk unless `SCENE_CACHE_DIR` is set). In the running service the last scene stays in memory: a second render of it skips the download and the load.
 
 - **Backend settings:**
   - `TOUR_WORKER_TRANSPORT="http"`: the backend calls `TOUR_RENDER_WORKER_URL` /

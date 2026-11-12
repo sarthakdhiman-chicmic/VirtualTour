@@ -21,9 +21,13 @@ from tour_worker.timing import Stopwatch
 _SCENE: dict = {}          # the last scene's renderer, kept for the next render of the same scene
 
 
-def scene_renderer(plan, storage, settings, image_urls: dict, sw):
-    """The plan's scene, fetched through the sha256 cache, loaded and on its renderer. The last one
-    is kept in this process (a 6 M-splat scene takes ~4 s to load and 1-2 GB to hold)."""
+def scene_renderer(plan, storage, settings, image_urls: dict, sw, workdir: str):
+    """The plan's scene, fetched, checked, loaded and on its renderer. The last one is kept in this
+    process's memory (a 6 M-splat scene takes ~4 s to load and 1-2 GB to hold), so the next render
+    of the same scene neither downloads nor loads it again.
+
+    On disk: with SCENE_CACHE_DIR set, the file is kept there by sha256 (fetched once). Unset (the
+    default), it is fetched into this job's workdir and deleted as soon as it is loaded."""
     from tour_worker.render.splat_shot import make_renderer
     from tour_worker.scene.cache import ensure_scene
     from tour_worker.scene.splat_io import load_scene
@@ -33,11 +37,18 @@ def scene_renderer(plan, storage, settings, image_urls: dict, sw):
         sw.info.update(scene_cached=True)
         return _SCENE["renderer"]
     _SCENE.clear()
+    keep = bool(settings.scene_cache_dir)
     with sw.stage("scene_fetch"):
-        path = ensure_scene(sc.uri, sc.sha256, sc.format, storage, settings.scene_cache_dir, image_urls.get(sc.uri))
-    with sw.stage("scene_load"):
-        model = load_scene(path, sc.format, max_sh_degree=settings.splat_sh_degree)
-        renderer = make_renderer(model, settings.splat_backend, settings.splat_sh_degree)
+        path = ensure_scene(sc.uri, sc.sha256, sc.format, storage,
+                            settings.scene_cache_dir if keep else os.path.join(workdir, "scene"),
+                            image_urls.get(sc.uri))
+    try:
+        with sw.stage("scene_load"):
+            model = load_scene(path, sc.format, max_sh_degree=settings.splat_sh_degree)
+            renderer = make_renderer(model, settings.splat_backend, settings.splat_sh_degree)
+    finally:
+        if not keep and os.path.exists(path):
+            os.remove(path)                       # no disk cache: the scene lives in memory only
     sw.info.update(scene_splats=len(model), scene_sh_degree=model.sh_degree, scene_cached=False)
     _SCENE.update(key=key, renderer=renderer)
     return renderer
@@ -89,7 +100,7 @@ def run_tour(request: dict, storage, workdir: str, settings: Settings | None = N
         splat = None
         if plan.scene is not None:                 # plan 1.6: the 3D scene and its renderer
             try:
-                splat = scene_renderer(plan, storage, settings, image_urls, sw)
+                splat = scene_renderer(plan, storage, settings, image_urls, sw, workdir)
             except SceneInvalid as e:
                 return failure("scene_invalid", str(e))
         three_d = {"splat": splat, "splat_supersample": settings.splat_supersample} if splat is not None else {}

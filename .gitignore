@@ -11,3 +11,4 @@ out/
 .ref/
 .venv-pod/
 .pip-cache/
+.pod/
