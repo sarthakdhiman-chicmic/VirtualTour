@@ -15,10 +15,12 @@ raises SceneInvalid. Splats too faint to ever show (opacity < 1/255) are dropped
 from __future__ import annotations
 
 import os
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 
 import numpy as np
 
+from tour_worker.cpus import usable_cpus
 from tour_worker.scene import SceneInvalid
 
 SH_C0 = 0.28209479177387814          # the degree-0 spherical-harmonic constant
@@ -26,6 +28,7 @@ MAX_SPLATS = 20_000_000              # ~5 GB of float32 at degree 3; a house sca
 MAX_BAD_FRACTION = 0.01
 MIN_OPACITY = 1.0 / 255.0
 CHUNK_ROWS = 400_000
+LOAD_THREADS = 8                     # PLY chunks parsed at once
 SPLAT_RECORD = 32
 _SH_REST = {0: 0, 9: 1, 24: 2, 45: 3}      # f_rest count -> SH degree (3 colour channels)
 
@@ -124,17 +127,23 @@ def load_ply(path: str, max_sh_degree: int = 3, max_splats: int = MAX_SPLATS) ->
         quats = np.empty((count, 4), np.float32)
         opac = np.empty(count, np.float32)
         sh = np.empty((count, k, 3), np.float32)
-        f.seek(header)
-        for a in range(0, count, CHUNK_ROWS):
-            n = min(CHUNK_ROWS, count - a)
-            rows = np.fromfile(f, dtype="<f4", count=n * stride).reshape(n, stride)
-            means[a:a + n] = rows[:, [col["x"], col["y"], col["z"]]]
-            scales[a:a + n] = np.exp(rows[:, [col["scale_0"], col["scale_1"], col["scale_2"]]])
-            quats[a:a + n] = rows[:, [col["rot_0"], col["rot_1"], col["rot_2"], col["rot_3"]]]
-            opac[a:a + n] = 1.0 / (1.0 + np.exp(-rows[:, col["opacity"]]))
-            sh[a:a + n, 0] = rows[:, [col["f_dc_0"], col["f_dc_1"], col["f_dc_2"]]]
-            for j, idx in enumerate(rest_idx):
-                sh[a:a + n, j + 1] = rows[:, idx]
+
+    def chunk(a: int) -> None:
+        """Rows a .. a+CHUNK_ROWS into their own slices (threads: numpy releases the GIL here)."""
+        n = min(CHUNK_ROWS, count - a)
+        rows = np.fromfile(path, dtype="<f4", count=n * stride, offset=header + a * stride * 4).reshape(n, stride)
+        means[a:a + n] = rows[:, [col["x"], col["y"], col["z"]]]
+        scales[a:a + n] = np.exp(rows[:, [col["scale_0"], col["scale_1"], col["scale_2"]]])
+        quats[a:a + n] = rows[:, [col["rot_0"], col["rot_1"], col["rot_2"], col["rot_3"]]]
+        opac[a:a + n] = 1.0 / (1.0 + np.exp(-rows[:, col["opacity"]]))
+        sh[a:a + n, 0] = rows[:, [col["f_dc_0"], col["f_dc_1"], col["f_dc_2"]]]
+        for j, idx in enumerate(rest_idx):
+            sh[a:a + n, j + 1] = rows[:, idx]
+
+    # each chunk writes only its own rows, so the result is the same however many threads read
+    starts = range(0, count, CHUNK_ROWS)
+    with ThreadPoolExecutor(max_workers=max(1, min(LOAD_THREADS, usable_cpus(), len(starts)))) as pool:
+        list(pool.map(chunk, starts))
     return _finish(means, scales, quats, opac, sh, deg, "ply", {"file_sh_degree": file_deg})
 
 

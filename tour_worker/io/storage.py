@@ -50,7 +50,10 @@ class S3Storage(Storage):
         if not uri.startswith("s3://"):
             raise ValueError("Not an S3 URI")
         parts = uri[5:].split("/", 1)
-        self._get_client().download_file(parts[0], parts[1], dest)
+        from boto3.s3.transfer import TransferConfig
+        # big objects (a 3D scene is 1-5 GB) in 32 MB parts, 16 at once; small ones are one GET as before
+        self._get_client().download_file(parts[0], parts[1], dest, Config=TransferConfig(
+            multipart_threshold=64 * 2**20, multipart_chunksize=32 * 2**20, max_concurrency=16))
 
     def put(self, path: str, uri: str) -> None:
         if not uri.startswith("s3://"):
