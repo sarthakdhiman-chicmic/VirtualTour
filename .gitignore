@@ -12,3 +12,4 @@ out/
 .venv-pod/
 .pip-cache/
 .pod/
+/worker.env

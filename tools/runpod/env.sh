@@ -1,7 +1,7 @@
 # Source this (". tools/runpod/env.sh") to load the worker's settings into the current shell:
 # the env file plus the pod defaults. Everything the worker keeps on the pod lives under the
 # repo's .pod/ folder (gitignored), so nothing is created anywhere else on the volume:
-#   .pod/worker.env   settings + keys (copy tools/runpod/worker.env.example)
+#   worker.env        settings + keys, in the repo folder itself (copy tools/runpod/worker.env.example)
 #   .pod/models       segmentation weights (MODELS_DIR)
 #   .pod/run          the service's pid, log and job records (JOBS_DIR)
 #   .pod/torch_extensions  gsplat's compiled CUDA kernels (built once, on first use)
@@ -9,7 +9,7 @@
 # is set in the env file. start.sh sources this too. A setting already in the env file wins over these defaults.
 _TW_REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 POD_DIR="${POD_DIR:-$_TW_REPO/.pod}"
-ENV_FILE="${ENV_FILE:-$POD_DIR/worker.env}"
+ENV_FILE="${ENV_FILE:-$_TW_REPO/worker.env}"
 if [ ! -f "$ENV_FILE" ]; then
     echo "no env file at $ENV_FILE: cp tools/runpod/worker.env.example $ENV_FILE and fill it in" >&2
     return 1 2>/dev/null || exit 1

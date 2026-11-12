@@ -6,7 +6,7 @@
 #   tools/runpod/start.sh status     is it running; /health
 #   tools/runpod/start.sh logs       follow the log
 #
-# Settings come from <repo>/.pod/worker.env (gitignored; ENV_FILE=... for another), loaded by
+# Settings come from <repo>/worker.env (gitignored; ENV_FILE=... for another), loaded by
 # tools/runpod/env.sh with the pod defaults. tools/runpod/worker.env.example lists them. The pid,
 # log and job records go to <repo>/.pod/run.
 set -euo pipefail

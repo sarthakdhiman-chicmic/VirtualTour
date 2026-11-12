@@ -496,15 +496,15 @@ pod's own pinned GPU stack (torch, CUDA, gsplat), and runs as a plain process. `
 |---|---|
 | `setup.sh` | ffmpeg if missing; a virtualenv (`.venv-pod`) that reads the packages of the environment `PYTHON` belongs to (system, conda or another venv), pins its GPU stack (torch, CUDA libraries, gsplat, numpy, transformers) and installs the worker and its `http` extra into the venv only; the other environment is never changed. `WITH_GSPLAT=1` installs gsplat into the venv if that environment has none. `WITH_SEGMENT=1` adds transformers etc. for `tour_segment` if the pod lacks them. Ends by checking torch / torchvision / gsplat / numpy are unchanged. |
 | `preflight.py` | one report: ffmpeg + libx264; GPU, VRAM, CUDA, driver, torch; a gsplat render (its first call, which may build the CUDA kernels, and ms per 1080p frame); optional S3 write/read (`--s3-prefix`), scene HEAD (`--scene`), segmentation weights (`--segment`), and the GPU / 3D test suites (`--tests`). Exit 1 when anything failed. |
-| `env.sh` | `. tools/runpod/env.sh` loads the settings into the shell: `<repo>/.pod/worker.env` (gitignored; `worker.env.example` lists them) plus the pod defaults. Everything the worker keeps on the pod is under `<repo>/.pod/` (models, the service's log and job records); scene files are not kept. |
+| `env.sh` | `. tools/runpod/env.sh` loads the settings into the shell: `<repo>/worker.env` (gitignored; `worker.env.example` lists them) plus the pod defaults. Everything the worker keeps on the pod is under `<repo>/.pod/` (models, the service's log and job records); scene files are not kept. |
 | `start.sh` | `start` / `stop` / `status` / `logs` of the service (sources `env.sh`). Waits for `/ping`, prints `/health`. |
 | `bench.py` | times a 3D tour through the real `tour_render` job: the sample apartment, a push-in and a 180-degree pan (`examples/tour_render_3d.json` is its request). |
 
 ```bash
 git clone <worker repo> && cd tour-worker && git checkout <branch>
 PYTHON=<python of the env that has torch + gsplat> tools/runpod/setup.sh   # WITH_SEGMENT=1 for tour_segment
-mkdir -p .pod && cp tools/runpod/worker.env.example .pod/worker.env
-$EDITOR .pod/worker.env                                # WORKER_API_KEY, AWS keys
+cp tools/runpod/worker.env.example worker.env
+$EDITOR worker.env                                     # WORKER_API_KEY, AWS keys
 . tools/runpod/env.sh                                  # load the settings into this shell
 .venv-pod/bin/python -m tools.runpod.preflight --tests \
     --s3-prefix s3://<bucket>/virtual_tour/splat_demo/preflight/ \
