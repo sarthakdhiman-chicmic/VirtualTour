@@ -25,5 +25,11 @@ SPLAT_BACKEND="${SPLAT_BACKEND:-gsplat}"
 # keeps the build in TORCH_EXTENSIONS_DIR - on the volume, so a pod restart does not rebuild it
 PATH="${VENV:-$_TW_REPO/.venv-pod}/bin:$PATH"
 TORCH_EXTENSIONS_DIR="${TORCH_EXTENSIONS_DIR:-$POD_DIR/torch_extensions}"
+# the container's CPU quota (a pod sees all host CPUs but may use ~16): thread pools sized to it,
+# not to the host's count, or torch / BLAS oversubscribe the quota and crawl
+_TW_CPUS="$("${VENV:-$_TW_REPO/.venv-pod}/bin/python" -c 'import sys; sys.path.insert(0, sys.argv[1]); from tour_worker.cpus import usable_cpus; print(usable_cpus())' "$_TW_REPO" 2>/dev/null || nproc)"
+OMP_NUM_THREADS="${OMP_NUM_THREADS:-$_TW_CPUS}"
+MKL_NUM_THREADS="${MKL_NUM_THREADS:-$_TW_CPUS}"
 set +a
 mkdir -p "$MODELS_DIR" "$JOBS_DIR"
+echo "tour worker settings: $ENV_FILE ($_TW_CPUS CPUs usable)"

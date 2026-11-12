@@ -71,6 +71,9 @@ class CpuSplatRenderer:
     """Holds a scene's tensors (and each Gaussian's 3D covariance, computed once) and renders views."""
 
     def __init__(self, model: SplatModel, sh_degree: int | None = None, background=(0.0, 0.0, 0.0)):
+        from tour_worker.cpus import usable_cpus
+        if torch.get_num_threads() > usable_cpus():      # a container's CPU quota, not the host's count
+            torch.set_num_threads(usable_cpus())
         self.means = torch.from_numpy(model.means)
         self.opac = torch.from_numpy(model.opacities)
         self.sh = torch.from_numpy(model.sh)

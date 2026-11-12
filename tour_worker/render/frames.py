@@ -20,6 +20,7 @@ from tour_worker.render.camera_path import (KeyframePath, base_window, roll_fit_
                                  time_warp_at)
 from tour_worker.motion.loader import load_regions
 from tour_worker.motion.region import ROI_PROBE, apply_regions, field_align, probe_box
+from tour_worker.cpus import usable_cpus
 
 def crop_roll_homography(cx, cy, zoom, roll_deg, src_w, src_h, out_w, out_h):
     """OUTPUT px -> SOURCE px for a crop window rolled by roll_deg about the frame centre and scaled
@@ -326,7 +327,7 @@ def render_workers(configured: int | None = None, width: int = 1920, height: int
     """Processes for drawing + encoding: `configured` (the PREWARP_WORKERS setting) or min(8, CPUs
     this job may use - 1), never more than MEM_SHARE of the memory budget holds at this output
     size - a configured count is capped too, so no setting can take the machine down."""
-    n = max(1, int(configured)) if configured else min(8, len(os.sched_getaffinity(0)) - 1)
+    n = max(1, int(configured)) if configured else min(8, usable_cpus() - 1)
     mem = memory_budget()
     if mem is not None:
         n = min(n, int(mem * MEM_SHARE // worker_mem_bytes(width, height, hevc, mls)))

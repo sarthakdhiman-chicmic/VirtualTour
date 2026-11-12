@@ -24,6 +24,7 @@ import subprocess
 from dataclasses import dataclass
 
 from tour_worker.errors import WorkerError
+from tour_worker.cpus import usable_cpus
 
 CRF = 20
 MAXRATE = "10M"
@@ -154,7 +155,7 @@ def deliver(master_path: str, out_path: str, fps: int, profile: VideoProfile | N
             return part
         # the CPUs this process may use (taskset / container limits), not the machine's count:
         # each x264 process holds ~0.5 GB, so 20 of them on a 4-CPU job overran its memory
-        workers = max(1, min(len(ranges), len(os.sched_getaffinity(0))))
+        workers = max(1, min(len(ranges), usable_cpus()))
         with concurrent.futures.ThreadPoolExecutor(workers) as ex:
             parts = list(ex.map(encode, enumerate(ranges)))
         listing = os.path.join(td, "parts.txt")

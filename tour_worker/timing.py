@@ -9,6 +9,7 @@ import shutil
 import subprocess
 import time
 from contextlib import contextmanager
+from tour_worker.cpus import usable_cpus
 
 
 class Stopwatch:
@@ -43,7 +44,7 @@ class Stopwatch:
 
 def host_info() -> dict:
     """The machine as this job sees it: CPUs it may use, memory, GPU (nvidia-smi, if any)."""
-    info = {"cpus": len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else os.cpu_count()}
+    info = {"cpus": usable_cpus()}
     try:
         for line in open("/proc/meminfo"):
             if line.startswith("MemTotal:"):
