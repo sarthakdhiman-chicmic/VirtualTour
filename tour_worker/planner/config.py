@@ -208,7 +208,9 @@ class PlannerConfig(BaseModel):
     }
 
     # Beat sync (plan 1.5, planner/music_sync.py; rules from find_transitions.py `sync`)
-    music_max_drift: float = 2.5        # s any boundary may move from its planned position
+    music_max_drift: float = 2.5        # s any boundary may move from its planned position ...
+    music_late_growth: float = 0.15     # ... and later by this x the planned time before it: room
+                                        # shots only grow (planner/lengths.py), so cuts creep later
     music_length_weight: float = 4.0    # cost of changing a shot's planned length
     music_bar_weight: float = 0.3       # preference for cuts on a bar start
     music_offbeat_penalty: float = 0.1

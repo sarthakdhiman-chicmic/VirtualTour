@@ -133,6 +133,8 @@ class V2Plan:
 # a queued copy restarts this far into the track, not at 0.0: a join's centred crossfade needs half
 # of it (music_v2_crossfade_s / 2) of audio before the join point (contract.plan checks it)
 RESTART_S = 0.015
+# the first drop on an early cut (the first four - room shots run 3.5-8 s and never shrink)
+EARLY_DROP_CUT = 3
 def base_segments(an: dict, start: float, needed_s: float) -> tuple[list[tuple[float, float]], float]:
     """The track from `start`, queued again after itself (each copy cut at the loop point, as v3)
     until it covers needed_s; the last copy plays to the file's end (fade tail)."""
@@ -340,10 +342,10 @@ def energy_targets(targets, an: dict, segments, cfg: PlannerConfig, roles=None) 
     review 2026-11-05: "hold longer through breakdowns, cut faster into the drops"; _energy_level).
     Tour time maps to track time through the segments; the opening and closing shots never get
     shorter (they are the long establishing / final shots). No energy data: the targets as they are."""
+    from .lengths import ceiling_s, floor_s, sync_kind
     level = _energy_level(an)
     if level is None:
         return [float(d) for d in targets]
-    lo, hi = cfg.music_shot_abs_min_s, cfg.music_shot_abs_max_s
 
     def track_t(t: float) -> float:
         for a, b in segments:
@@ -355,9 +357,10 @@ def energy_targets(targets, an: dict, segments, cfg: PlannerConfig, roles=None) 
     out, t = [], 0.0
     for k, d in enumerate(targets):
         f = cfg.music_energy_pace.get(level(track_t(t), track_t(t + d)), 1.0)
-        keep = k in (0, len(targets) - 1) or (roles is not None and roles[k] == "hero")
+        kind = sync_kind(roles[k] if roles is not None else None)
+        keep = k in (0, len(targets) - 1) or kind == "hero"
         nd = d * max(1.0, f) if keep else d * f     # the long ends and the 2x hero rooms never shrink
-        nd = min(hi, max(lo, nd))
+        nd = min(max(ceiling_s(kind, cfg.pacing), d), max(floor_s(kind, cfg.pacing), nd))
         out.append(nd)
         t += nd
     return out
@@ -397,7 +400,7 @@ def _plan_for(segments, edits: list[dict], loop: float, targets, an: dict, cfg: 
               + np.where(tier == 1, t1b + t1s * strength, 0.0) + np.where(tier == 2, t2b + t2s * strength, 0.0))
 
     # heroes a cut may take, strongest first; one too close to a taken hero is left for a punch
-    reach = planned + 2 * cfg.music_max_drift
+    reach = planned * (1 + cfg.music_late_growth) + 2 * cfg.music_max_drift
     order = sorted((j for j in np.where(tier > 0)[0]
                     if cfg.music_shot_abs_min_s - 1e-6 <= times[j] <= min(reach, usable_end)),
                    key=lambda j: (*_rank(tier[j], kind[j], strength[j]), times[j]))
@@ -436,7 +439,7 @@ def _plan_for(segments, edits: list[dict], loop: float, targets, an: dict, cfg: 
             sols = [p for lo, hi in (role_b, wide_b)
                     if (p := snap_durations(t_u, v_u, end_mask, targets, lo, hi, cfg.final_shot_min_s,
                                             cfg.music_length_weight, dr, True,
-                                            required=req_u if req else None)) is not None]
+                                            required=req_u if req else None, late_growth=cfg.music_late_growth)) is not None]
             if sols:
                 best = max(sols, key=objective)
                 path, required_ok = [int(idx[j]) for j in best], req
@@ -453,7 +456,7 @@ def _plan_for(segments, edits: list[dict], loop: float, targets, an: dict, cfg: 
     score = sum(10.0 for j in cuts if tier[j] == 1) + sum(3.0 * strength[j] for j in cuts if tier[j] == 2)
     score -= 10.0 * sum(1 for j in in_tour if j not in cuts)
     first_drop = next((k for k, j in enumerate(cuts) if tier[j] == 1), None)
-    if first_drop is not None and first_drop <= 2:
+    if first_drop is not None and first_drop <= EARLY_DROP_CUT:
         score += cfg.music_v2_early_drop_bonus
     start = segments[0][0]
     score += opening_score(an, start, cfg) - cfg.music_v2_start_cost * start
@@ -497,7 +500,7 @@ def _edit_options(an: dict, segments, targets, cfg: PlannerConfig) -> list[tuple
         if not tt or tt[0] <= 0:
             continue
         th = tt[0]
-        if th <= planned + cfg.music_max_drift:
+        if th <= planned * (1 + cfg.music_late_growth) + cfg.music_max_drift:
             # land: the planned cut just before the drop, k bars earlier than it
             before = [g for g in grid if g < th - 0.2]
             if before:
@@ -528,7 +531,7 @@ def plan_v2(targets, an: dict, cfg: PlannerConfig, roles) -> V2Plan | None:
             best = p
 
     for s in start_options(an, cfg):
-        needed = planned + 4 * cfg.music_max_drift + cfg.music_fade_out_s
+        needed = planned * (1 + cfg.music_late_growth) + 4 * cfg.music_max_drift + cfg.music_fade_out_s
         segs, loop = base_segments(an, s, needed)
         consider(_plan_for(segs, [], loop, targets, an, cfg, roles))
         if cfg.music_v2_max_edits <= 0:

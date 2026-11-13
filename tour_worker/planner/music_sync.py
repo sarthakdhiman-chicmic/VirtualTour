@@ -53,12 +53,14 @@ class SyncResult:
 
 def snap_durations(
     times, values, bars, targets, gmin, gmax, final_min, length_weight, drift, end_on_bar,
-    required=None, end_margin=0.5,
+    required=None, end_margin=0.5, late_growth=0.0,
 ):
     """Choose exactly one candidate per planned boundary (N shots -> N-1 cuts plus the tour end)
     maximising musical value minus a cost for straying from the planned shot lengths. Hard rules:
     shot k between gmin[k]..gmax[k] s (scalars: every shot), the last shot >= final_min s, every
-    boundary within `drift` s of its planned position, the tour end on a bar start if end_on_bar.
+    boundary within `drift` s of its planned position - later by up to late_growth x the planned
+    time before it as well (room shots only grow, so their cuts creep later as the tour goes on) -
+    the tour end on a bar start if end_on_bar.
     required: hook clusters (arrays of candidate indices) that must each get a cut on one of
     their members - no two consecutive boundaries may enclose a whole cluster, and no cut may
     land inside a cluster except on a member (clusters ending within end_margin of the tour end
@@ -89,7 +91,7 @@ def snap_durations(
     for k in range(N):
         lo = max(gmins[k], final_min) if k == N - 1 else gmins[k]
         gmax = gmaxs[k]
-        js = np.where((np.abs(times - D[k]) <= drift) & allowed)[0]
+        js = np.where((times >= D[k] - drift) & (times <= D[k] + drift + late_growth * D[k]) & allowed)[0]
         if k == N - 1 and end_on_bar:
             js = js[bars[js]]
         end = k == N - 1
@@ -204,20 +206,25 @@ def hook_clusters(times, hooks, cfg: PlannerConfig) -> list[np.ndarray]:
     return [np.array(c) for c in out]
 
 
+WINDOW_MIN_S = 0.6                       # a synced length window is never narrower (~a beat at 100 bpm)
+
+
 def length_bounds(targets: list[float], roles: list[str] | None, cfg: PlannerConfig, wide=False):
-    """Per shot (min, max) synced length: hero shots keep near their planned length (they are the
-    long establishing shots), detail shots flex more; within the planner's absolute limits.
-    wide: every shot gets music_wide_bounds (the fallback that lets every hook get its cut)."""
+    """Per shot (min, max) synced length, by shot type (planner/lengths.py): room and hero shots only
+    grow - a cut that needs to land on a beat extends the shot to the next beat rather than
+    shortening a room shot (client 2026-11-13); close-ups ("close") flex both ways. Within the type's
+    floor and stretch ceiling for the pacing. wide: the wider windows of the hooks fallback."""
+    from .lengths import SYNC_BOUNDS, WIDE_BOUNDS, ceiling_s, floor_s, sync_kind
     lo, hi = [], []
     for k, t in enumerate(targets):
-        role = (roles[k] if roles else None) or "detail"
-        f_lo, f_hi = (cfg.music_wide_bounds if wide
-                      else cfg.music_role_bounds.get(role, cfg.music_role_bounds["detail"]))
-        if role == "hero":                     # a hero room's 2x time is never given away to the music
-            f_lo = max(f_lo, cfg.music_hero_min_factor)
-        h = min(cfg.music_shot_abs_max_s, f_hi * t)
-        lo.append(min(h, max(cfg.music_shot_abs_min_s, f_lo * t)))   # never an empty window
-        hi.append(h)
+        kind = sync_kind(roles[k] if roles else None)
+        f_lo, f_hi = (WIDE_BOUNDS if wide else SYNC_BOUNDS)[kind]
+        # up to the type's ceiling (a shot already past it, like a stretched closing shot, may
+        # still reach the next beat: a second more)
+        h = max(min(max(ceiling_s(kind, cfg.pacing), t), f_hi * t), min(f_hi * t, t + 1.0))
+        low = max(floor_s(kind, cfg.pacing), f_lo * t)
+        lo.append(low)
+        hi.append(max(h, low + WINDOW_MIN_S))   # a window always spans about a beat: never empty
     return np.array(lo), np.array(hi)
 
 
@@ -317,7 +324,7 @@ def _sync_v3(
     planned = float(sum(targets))
     fps = cfg.fps
     lead = cfg.music_cut_lead_frames
-    needed = planned + 4 * cfg.music_max_drift + cfg.music_fade_out_s
+    needed = planned * (1 + cfg.music_late_growth) + 4 * cfg.music_max_drift + cfg.music_fade_out_s
     times, vals, bars, kinds, usable_end, copies, loop, changes, local_t, hits = queued_candidates(
         an, needed
     )
@@ -355,7 +362,7 @@ def _sync_v3(
         for req, (lo, hi), dr, end_bar in attempts:
             p = snap_durations(t_u, v_u, b_u, targets, lo, hi, cfg.final_shot_min_s,
                                cfg.music_length_weight, dr, end_bar,
-                               required=clusters if req else None)
+                               required=clusters if req else None, late_growth=cfg.music_late_growth)
             if p is not None:
                 path, required_ok = [int(idx[j]) for j in p], req
                 break

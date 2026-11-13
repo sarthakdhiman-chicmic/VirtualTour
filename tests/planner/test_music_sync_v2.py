@@ -57,11 +57,18 @@ def test_without_heroes_v3_syncs_exactly_as_before():
 
 
 def test_a_drop_gets_its_cut():
-    r = sync_to_music(TARGETS, track([hero(10.0, 1, "drop", 0.9)], phrases_every=100.0), CFG)
+    r = sync_to_music(TARGETS, track([hero(11.0, 1, "drop", 0.9)], phrases_every=100.0), CFG)
     assert r.music.sync_version == 2
     start = r.music.start_s
-    assert np.min(np.abs(cuts_of(r) - (10.0 - start))) <= TOL
+    assert np.min(np.abs(cuts_of(r) - (11.0 - start))) <= TOL
     assert any(h.kind == "cut" and h.tier == 1 for h in r.music.hooks)
+
+
+def test_a_drop_only_shortening_could_reach_is_missed_not_forced():
+    """Client 2026-11-13: extend to the next beat rather than shortening a room shot. A drop at
+    10.0 s after 3.5 s room shots (two reach at most 8.75 s, three at least 10.5 s) gets no cut."""
+    r = sync_to_music(TARGETS, track([hero(10.0, 1, "drop", 0.9)], phrases_every=100.0), CFG)
+    assert all(d >= t - 0.04 for d, t in zip(r.durations, TARGETS))
 
 
 PUNCHY = CFG.model_copy(update={"music_punches": True})   # punches are off by default (user 2026-10-23)
@@ -140,7 +147,7 @@ def test_the_music_may_start_late_so_the_first_drop_opens_an_early_shot():
     r = sync_to_music(TARGETS, track([hero(34.0, 1, "drop", 1.0)], duration=90.0, phrases_every=4.0), CFG)
     assert r.music.start_s > 0
     k = int(np.argmin(np.abs(cuts_of(r) - (34.0 - r.music.start_s))))
-    assert abs(cuts_of(r)[k] - (34.0 - r.music.start_s)) <= TOL and k <= 2   # opens shot 2-4
+    assert abs(cuts_of(r)[k] - (34.0 - r.music.start_s)) <= TOL and k <= 3   # opens shot 2-5
 
 
 def test_punch_sizes_follow_the_hero_and_reach_apply_sync():

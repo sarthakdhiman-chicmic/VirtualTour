@@ -19,6 +19,7 @@ class SelectedShot:
     importance_rank: int = 0
     is_low_score: bool = False
     is_lead: bool = False           # the room's first shot (hero or not): trimming drops the room
+    kind: str = "room"              # planner/lengths.py type: room | hero | detail (a close-up)
 
 
 def natural_length(role: str, ctx: SceneContext | None, cfg: PlannerConfig) -> float:
@@ -48,69 +49,117 @@ def room_shots(budget: float, n_photos: int, cfg: PlannerConfig, pace: float, ri
     return [max(cfg.shot_min_s, min(cfg.shot_max_s, d)) for d in lengths]
 
 
+def _is_close(report: ScoringReport, photo_id: str) -> bool:
+    """A close-up (fixtures, hardware, finishes): the scoring's coverage_class "tight"."""
+    p = next((x for x in report.photos if x.photo_id == photo_id), None)
+    return bool(p is not None and p.motion is not None and p.motion.coverage_class == "tight")
+
+
 def allocate_content(
     report: ScoringReport, cfg: PlannerConfig, contexts: dict[str, SceneContext]
 ) -> tuple[list[SelectedShot], list[str]]:
-    """Room budgets (client review 2026-11-05): each room gets room_base_s x its screen-time
-    multiplier (hero rooms - the best living room, kitchen and primary bedroom - 2x, exteriors
-    1.5x; scoring/selector.py) x the pacing (Slow / Normal / Fast), split into 3-8 s shots: its
-    best photo first, then its other good photos. The opening shot gets at least
-    establishing_min_s and the last final_shot_min_s (paced). Under min_total_s (x the pace for
-    Fast) the shots are stretched (never past shot_max_s, never padded with extra photos); over max_total_s, details
-    of the least important rooms go first, then whole rooms."""
+    """Shots and their lengths by shot type (planner/lengths.py, client standards 2026-11-13):
+      - every room in narrative order; how many room shots it gets comes from its time budget
+        (room_base_s x its screen-time multiplier - hero rooms 2x, exteriors 1.5x - x the pacing),
+        as many as it has photos and max_detail_shots_per_room allow;
+      - a hero room's shots are hero shots (5-8 s at Normal), others room shots (3.5-5 s); a
+        room's first shot sits where its richness puts it in the range, later angles a little lower;
+      - a close-up photo (scoring coverage "tight") is a detail shot (1.5-2.5 s) right after the
+        room's first shot - at most one per room, never a room's only shot;
+      - the opening and closing shots are hero length (the closing one at least final_shot_min_s);
+      - under min_total_s room and hero shots are stretched (up to their range's ceiling), never
+        padded; over max_total_s detail shots go first, then other angles, then whole rooms."""
+    from .lengths import ceiling_s, length_range, shot_length
     warnings: list[str] = []
     pace = pace_factor(cfg)
     rooms_in_sequence = [r for k in report.sequence for r in report.rooms if r.room_key == k]
     low = {p.photo_id for p in report.photos if "low_score" in p.flags}
+    exterior = {r.room_key for r in rooms_in_sequence if r.tier == "exterior"}
     shots: list[SelectedShot] = []
     for room in rooms_in_sequence:
         hero = room.screen_time_multiplier >= 2.0
-        others = [p.photo_id for p in room.photos if p.photo_id != room.hero_photo_id and p.photo_id not in low]
         ctx = contexts.get(room.hero_photo_id)
+        rich = ctx.richness if ctx is not None else 0.5
         boost = cfg.outdoor_boost if room.tier == "exterior" else 1.0
         budget = cfg.room_base_s * room.screen_time_multiplier * pace * boost
-        lengths = room_shots(budget, 1 + len(others), cfg, pace, ctx.richness if ctx is not None else 0.5)
-        for k, (pid, d) in enumerate(zip([room.hero_photo_id] + others, lengths)):
-            shots.append(SelectedShot(
+        photos = [room.hero_photo_id] + [p.photo_id for p in room.photos
+                                         if p.photo_id != room.hero_photo_id and p.photo_id not in low]
+        views = [pid for pid in photos if not _is_close(report, pid)] or photos[:1]
+        closes = [pid for pid in photos if pid not in views][:1]
+        n = max(1, min(len(views), 1 + cfg.max_detail_shots_per_room, int(budget // (cfg.room_shot_s * pace))))
+        kind = "hero" if hero else "room"
+        room_shots = []
+        lead_s = 0.0
+        for k, pid in enumerate(views[:n]):
+            # a hero room filmed in one shot gets the top of the hero range: still clearly longer;
+            # a room's later angles run 85% of its first (a room's shots never all match)
+            if k == 0:
+                r = max(rich, 0.85) if (hero and n == 1) else rich
+                d = lead_s = shot_length(kind, cfg.pacing, r) * boost
+            else:
+                d = max(length_range("room", cfg.pacing)[0], 0.85 * lead_s / boost)
+            room_shots.append(SelectedShot(
                 photo_id=pid, room_key=room.room_key, role="hero" if (hero and k == 0) else "detail",
-                raw_duration=d, is_hero=hero and k == 0, is_lead=k == 0,
-                narrative_order=room.narrative_order, importance_rank=room.importance_rank,
-            ))
+                raw_duration=d, is_hero=hero and k == 0,
+                is_lead=k == 0, narrative_order=room.narrative_order, importance_rank=room.importance_rank,
+                kind=kind))
+        for pid in closes:
+            room_shots.insert(1, SelectedShot(
+                photo_id=pid, room_key=room.room_key, role="close",
+                raw_duration=shot_length("detail", cfg.pacing, rich), narrative_order=room.narrative_order,
+                importance_rank=room.importance_rank, kind="detail"))
+        shots += room_shots
     if shots:                                     # the long establishing and closing shots
-        shots[0].raw_duration = max(shots[0].raw_duration, min(cfg.shot_max_s, cfg.establishing_min_s * pace))
-        shots[0].role = "hero"
-        last = max(3.5, min(cfg.shot_max_s, cfg.final_shot_min_s * pace))
-        shots[-1].raw_duration = max(shots[-1].raw_duration, last)
+        shots[0].raw_duration = max(shots[0].raw_duration, shot_length("hero", cfg.pacing, rich_of(contexts, shots[0])))
+        shots[0].role, shots[0].kind = "hero", "hero"
+        if shots[-1].kind == "detail" and len(shots) > 1:     # a tour does not close on a close-up
+            shots.pop()
+        shots[-1].raw_duration = max(shots[-1].raw_duration, shot_length("hero", cfg.pacing, 0.5),
+                                     cfg.final_shot_min_s * pace)
+        if shots[-1].kind == "room":
+            shots[-1].kind = "hero"
+        shots[-1].role = "hero" if shots[-1].kind == "hero" else shots[-1].role   # it holds like one
 
     def total():
         return sum(s.raw_duration for s in shots)
 
     while total() > cfg.max_total_s and shots:
-        details = [s for s in shots if not s.is_lead]
-        if details:
-            shots.remove(max(details, key=lambda s: s.importance_rank))
+        drop = ([s for s in shots if s.kind == "detail"] or [s for s in shots if not s.is_lead])
+        if drop:
+            shots.remove(max(drop, key=lambda s: s.importance_rank))
         else:
             worst = max(shots, key=lambda s: s.importance_rank).room_key
             shots = [s for s in shots if s.room_key != worst]
         if "trimmed" not in warnings:
             warnings.append("trimmed")
 
-    # a standard listing lands at 60 s or more; Fast pacing keeps its pace (its floor is 0.75 x 60)
+    # a standard listing lands at 60 s or more; Fast pacing keeps its pace (its floor is 0.75 x 60):
+    # room and hero shots stretch, up to their range's ceiling; detail shots stay short
     floor = cfg.min_total_s * min(1.0, pace)
     if shots and total() < floor:
-        for _ in range(3):
-            room_left = sum(cfg.shot_max_s - s.raw_duration for s in shots)
+        # every room / hero shot grows by the same factor (up to its range's ceiling, a boosted
+        # exterior's x its boost): heroes stay longer than rooms, the tour does not even out
+        caps = {id(s): ceiling_s(s.kind, cfg.pacing) * (cfg.outdoor_boost if s.room_key in exterior else 1.0)
+                for s in shots if s.kind != "detail"}
+        for _ in range(8):
+            free = [s for s in shots if id(s) in caps and s.raw_duration < caps[id(s)] - 1e-6]
             short = floor - total()
-            if short <= 1e-6 or room_left <= 1e-6:
+            if short <= 1e-6 or not free:
                 break
-            k = min(1.0, short / room_left)
-            for s in shots:
-                s.raw_duration += k * (cfg.shot_max_s - s.raw_duration)
+            f = 1.0 + short / sum(s.raw_duration for s in free)
+            for s in free:
+                s.raw_duration = min(caps[id(s)], s.raw_duration * f)
 
     for i, s in enumerate(shots):
         s.order_idx = i + 1
-        s.final_duration = round(max(cfg.shot_min_s, min(cfg.shot_max_s, s.raw_duration)), 2)
+        cap = ceiling_s(s.kind, cfg.pacing) * (cfg.outdoor_boost if s.room_key in exterior else 1.0)
+        s.final_duration = round(min(cap * (1.5 if i == len(shots) - 1 else 1.0), s.raw_duration), 2)
     return shots, warnings
+
+
+def rich_of(contexts: dict, shot: SelectedShot) -> float:
+    ctx = contexts.get(shot.photo_id)
+    return ctx.richness if ctx is not None else 0.5
 
 
 def allocate_shots(

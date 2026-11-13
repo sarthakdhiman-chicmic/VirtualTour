@@ -70,7 +70,8 @@ def test_presets_engine_still_available(report):
 def test_infeasible_target_never_breaks_the_shot_cap(report):
     cfg = PlannerConfig(target_total_s=200.0, max_total_s=300.0)
     plan = build_shot_plan(report, "t", _assets(), cfg=cfg)
-    assert max(s.duration_s for s in plan.shots) <= max(cfg.shot_max_s, cfg.final_shot_min_s) + 1e-6
+    from tour_worker.planner.lengths import ceiling_s
+    assert max(s.duration_s for s in plan.shots) <= ceiling_s("hero", cfg.pacing) * 1.5 + 1e-6
 
 
 def test_perceptual_regions_make_plan_14(report):

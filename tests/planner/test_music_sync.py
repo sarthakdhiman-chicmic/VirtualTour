@@ -152,12 +152,13 @@ def test_time_warp_lands_the_move_on_the_cut_and_ramps_the_rear():
     assert time_warp(4.0, 4.01, CFG) is None                # within a frame: unchanged
 
 
-def test_hooks_get_cuts_and_heroes_stay_long():
-    """A drop (big musical change) 0.4 s before a planned cut gets the cut; hero shots keep
-    85-125% of their length, details 75-125%."""
+def test_hooks_get_cuts_and_room_shots_only_grow():
+    """A drop (big musical change) 0.4 s after a planned cut gets the cut, by extending the shot to
+    it; no room or hero shot gets shorter than planned (client 2026-11-13: extend to the next beat
+    rather than shortening a room shot)."""
     tr = track(duration=60.0, version="2")
     an = tr["analysis"]
-    drop = 9.0 - 0.4 + 0.25                                  # off the planned 9.2 s boundary
+    drop = 9.2 + 0.45                                        # after the planned 9.2 s boundary
     an["candidates"].append({"time": drop, "bar_start": False, "kind": "beat", "value": 0.3,
                              "change": 0.9, "what_happens": "drop"})
     an["candidates"].sort(key=lambda c: c["time"])
@@ -169,8 +170,7 @@ def test_hooks_get_cuts_and_heroes_stay_long():
     lo, hi = length_bounds(TARGETS, roles, CFG)
     for k, d in enumerate(r.durations[:-1]):
         assert lo[k] - 0.02 <= d <= hi[k] + 0.02
-        if roles[k] == "hero":
-            assert d >= 0.85 * TARGETS[k] - 0.02
+        assert d >= TARGETS[k] - 0.02 - TOL                  # never shorter than planned
 
 
 def test_no_music_leaves_the_plan_as_before(report):  # noqa: F811
@@ -220,15 +220,15 @@ def test_every_hook_moment_gets_a_cut_and_close_pairs_become_cut_plus_accent():
     """Hooks first (review 2026-10-19: 3 of 7 hooks hit). A riser/drop pair 2.4 s apart is one
     moment: one cut, the other hook an accent. All shots heroes: the role bounds alone cannot
     reach every hook, the wide bounds can."""
-    hooks = [5.85, 15.35, 17.75, 25.25]
+    hooks = [5.35, 17.75, 20.15, 29.35]           # reachable by growing shots (they never shrink)
     tr = with_hooks(track(duration=60.0), hooks)
     roles = ["hero"] * len(TARGETS)
     punchy = CFG.model_copy(update={"music_punches": True})   # accents exist only with punches on
     r = sync_to_music(TARGETS, tr, punchy, roles)
     assert r.music.synced and r.music.hooks_required and r.warning is None
     kinds = {h.t: h.kind for h in r.music.hooks}
-    assert kinds[5.85] == kinds[25.25] == "cut"
-    assert sorted([kinds[15.35], kinds[17.75]]) == ["accent", "cut"]
+    assert kinds[5.35] == kinds[29.35] == "cut"
+    assert sorted([kinds[17.75], kinds[20.15]]) == ["accent", "cut"]
     acc = next(h for h in r.music.hooks if h.kind == "accent")
     assert acc.reason == "merged"
     cuts = boundaries(r.durations)[:-1]
@@ -291,7 +291,9 @@ def test_cuts_follow_the_hardest_drum_hits_not_the_guessed_bar_line():
     tr = track(duration=60.0, version="3")
     for i, c in enumerate(tr["analysis"]["candidates"]):
         c["hit"] = 1.6 if i % 4 == 2 else 0.9
-    r = sync_to_music(TARGETS, tr, CFG)
+        c["value"] = 0.0                       # the hits alone: no phrase marks competing
+    # shots that reach a hard hit (every 2 s) by growing - room shots never shrink to one
+    r = sync_to_music([5.0, 4.0, 6.0, 4.0, 4.0, 7.0], tr, CFG)
     strong = np.array([c["time"] for c in tr["analysis"]["candidates"] if c["hit"] > 1.5])
     cuts = boundaries(r.durations)[:-1]
     on = [np.abs(strong - c).min() <= TOL for c in cuts]
