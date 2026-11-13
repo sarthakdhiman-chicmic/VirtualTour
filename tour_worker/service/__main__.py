@@ -13,7 +13,9 @@ def main() -> None:
     from tour_worker.config import get_settings
     from tour_worker.service.http import create_app
 
+    from tour_worker.progress import setup_logging
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    setup_logging()                            # job progress as readable blocks; no status-poll lines
     # HTTP client libraries log every request URL at INFO, query string (signature) included
     for name in ("httpx", "httpx2", "httpcore", "urllib3", "botocore", "boto3", "huggingface_hub"):
         logging.getLogger(name).setLevel(logging.WARNING)

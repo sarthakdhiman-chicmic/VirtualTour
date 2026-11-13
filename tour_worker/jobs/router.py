@@ -12,6 +12,7 @@ import tempfile
 
 from pydantic import ValidationError
 
+from tour_worker import progress
 from tour_worker.config import Settings, get_settings
 from tour_worker.contract.jobs import (
     JOB_TYPES,
@@ -64,6 +65,10 @@ def run_job(job: dict, settings: Settings | None = None, storage=None) -> dict:
     if bad is not None:
         return bad
     job_type = job["job_type"]
+    return progress.run(str(job.get("job_id") or "-"), job_type, lambda: _run(job, job_type, settings, storage))
+
+
+def _run(job: dict, job_type: str, settings: Settings, storage) -> dict:
     storage = storage or build_storage(settings, job_type)
     try:
         with tempfile.TemporaryDirectory() as workdir:

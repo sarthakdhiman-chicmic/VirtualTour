@@ -9,6 +9,8 @@ import shutil
 import subprocess
 import time
 from contextlib import contextmanager
+
+from tour_worker import progress
 from tour_worker.cpus import usable_cpus
 
 
@@ -18,21 +20,32 @@ class Stopwatch:
         self.stages: dict[str, float] = {}
         self.info: dict = {}
 
-    def lap(self, name: str | None = None) -> None:
-        """Close a stage that ran since the previous lap (name None: start a new lap, timing nothing)."""
+    def lap(self, name: str | None = None, report: bool = True) -> None:
+        """Close a stage that ran since the previous lap (name None: start a new lap, timing nothing).
+        report: log it as done (tour_worker.progress); a loop's per-item laps pass False."""
         now = time.perf_counter()
         if name:
             self.add(name, now - self._lap)
+            rep = progress.current()
+            if report and rep is not None:
+                rep.stage_end(name, now - self._lap)
         self._lap = now
 
     @contextmanager
-    def stage(self, name: str):
-        """Time a stage; a stage entered again adds to its total."""
+    def stage(self, name: str, detail: str = ""):
+        """Time a stage; a stage entered again adds to its total. Logged as it starts and ends."""
+        rep = progress.current()
+        if rep is not None:
+            rep.stage_start(name, detail)
         t = time.perf_counter()
+        failed = True
         try:
             yield
+            failed = False
         finally:
             self.add(name, time.perf_counter() - t)
+            if rep is not None:
+                rep.stage_end(name, time.perf_counter() - t, failed=failed)
 
     def add(self, name: str, seconds: float) -> None:
         self.stages[name] = round(self.stages.get(name, 0.0) + seconds, 3)

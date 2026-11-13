@@ -8,6 +8,7 @@ from __future__ import annotations
 import os
 import time
 
+from tour_worker import progress as report
 from tour_worker.config import Settings, get_settings
 from tour_worker.contract.plan import parse_plan, plan_failure
 from tour_worker.errors import failure, from_exception
@@ -35,6 +36,7 @@ def scene_renderer(plan, storage, settings, image_urls: dict, sw, workdir: str):
     key = (sc.sha256, settings.splat_sh_degree, settings.splat_backend)
     if _SCENE.get("key") == key:
         sw.info.update(scene_cached=True)
+        report.note("scene: already loaded (same scene as the last render)")
         return _SCENE["renderer"]
     _SCENE.clear()
     keep = bool(settings.scene_cache_dir)
@@ -50,6 +52,7 @@ def scene_renderer(plan, storage, settings, image_urls: dict, sw, workdir: str):
         if not keep and os.path.exists(path):
             os.remove(path)                       # no disk cache: the scene lives in memory only
     sw.info.update(scene_splats=len(model), scene_sh_degree=model.sh_degree, scene_cached=False)
+    report.note(f"scene: {len(model):,} splats, SH degree {model.sh_degree}")
     _SCENE.update(key=key, renderer=renderer)
     return renderer
 
@@ -82,12 +85,15 @@ def scene_motion(plan, renderer, storage, image_urls: dict, sw, workdir: str, wa
     except Exception as e:                       # noqa: BLE001 - motion never fails the tour
         warnings.append("scene_motion_skipped")
         sw.info.update(motion_skipped=str(e)[:300])
+        report.note(f"motion skipped: {type(e).__name__}")
         with GPU_LOCK:
             renderer.attach_motion(None)
         return
     with GPU_LOCK:
         renderer.attach_motion(field, sc.motion_sha256)
     sw.info.update(motion_splats=len(field), motion_classes=field.classes, motion_cached=False)
+    report.note(f"motion: {len(field):,} moving splats ("
+                + ", ".join(f"{k} {v:,}" for k, v in field.classes.items()) + ")")
 
 
 def run_tour(request: dict, storage, workdir: str, settings: Settings | None = None, progress=None) -> dict:
@@ -109,6 +115,9 @@ def run_tour(request: dict, storage, workdir: str, settings: Settings | None = N
             return failure("invalid_request", "output_prefix is required")
 
         image_urls = request.get("image_urls", {})
+        o = plan.output
+        report.note(f"{o.width}×{o.height} · {plan.total_duration_s:.1f} s tour · {len(plan.shots)} shots"
+                    + (" · 3D scene" if plan.scene is not None else "") + (" · music" if plan.music else ""))
         sw.lap()
         warnings = fetch_and_prepare(plan, storage, workdir, image_urls)
 
@@ -141,8 +150,12 @@ def run_tour(request: dict, storage, workdir: str, settings: Settings | None = N
                 return failure("scene_invalid", str(e))
             scene_motion(plan, splat, storage, image_urls, sw, workdir, warnings)
         three_d = {"splat": splat, "splat_supersample": settings.splat_supersample} if splat is not None else {}
+        def chunks_done(done: int, total: int) -> None:       # the log's bar, and the caller's callback
+            report.progress(done, total, "chunks")
+            if progress:
+                progress(done, total)
         out_path = render_direct(plan, workdir, warnings=warnings, music_path=music_path, voice_path=voice_path,
-                                 workers=settings.render_workers, timings=sw, progress=progress, **three_d)
+                                 workers=settings.render_workers, timings=sw, progress=chunks_done, **three_d)
 
         sw.lap()
         verify(out_path, plan)
@@ -164,6 +177,8 @@ def run_tour(request: dict, storage, workdir: str, settings: Settings | None = N
             mls_uri = output_prefix + "master_mls.mp4"
             storage.put(mls_path, mls_uri)
         sw.lap("upload")
+        if warnings:
+            report.note("warnings: " + ", ".join(sorted(set(map(str, warnings))))[:300])
         sw.info.update(width=plan.output.width, height=plan.output.height, video_s=plan.total_duration_s)
 
         return {

@@ -23,6 +23,7 @@ import time
 
 import cv2
 
+from tour_worker import progress as report
 from tour_worker.timing import Stopwatch
 
 from tour_worker.config import Settings, get_settings
@@ -75,13 +76,17 @@ def run_segment(request: dict, storage, workdir: str, segmenter=None, settings: 
         seg = segmenter or get_segmenter(settings)
     sw.lap("model_load")                  # ~0 on a warm worker: the model is cached per process
     results, scenes, warnings = {}, {}, []
+    report.note(f"{len(todo)} photo(s) to segment, {len(cached)} already done")
+    if todo:
+        report.progress(0, len(todo), "photos")
     for item in todo:
+        report.progress(len(results), len(todo), "photos")
         pid, uri = str(item.get("photo_id")), item.get("uri")
         local = os.path.join(workdir, f"in_{len(results):03d}")
         try:
             sw.lap()
             storage.get(uri, local)
-            sw.lap("fetch")
+            sw.lap("fetch", report=False)
             img = cv2.imread(local, cv2.IMREAD_COLOR)
             if img is None:
                 raise ValueError("unreadable image")
@@ -94,7 +99,7 @@ def run_segment(request: dict, storage, workdir: str, segmenter=None, settings: 
             scenes[pid] = None
             warnings.append(f"segment_failed:{pid}:{type(e).__name__}")
             continue
-        sw.lap("inference")
+        sw.lap("inference", report=False)
         out = []
         for r in regions:
             path = os.path.join(workdir, f"{pid}_{r['object_id']}.png")
@@ -108,7 +113,9 @@ def run_segment(request: dict, storage, workdir: str, segmenter=None, settings: 
             r["mask_url"] = dest
             out.append(r)
         results[pid] = out
-        sw.lap("mask_upload")
+        sw.lap("mask_upload", report=False)
+    if todo:
+        report.progress(len(todo), len(todo), "photos")
     sw.info.update(photos=len(todo), cached=len(cached))
     return {"status": "completed", "results": results, "scenes": scenes, "warnings": warnings,
             "cached": cached, "segment_version": version,

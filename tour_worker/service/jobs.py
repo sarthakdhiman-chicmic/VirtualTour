@@ -26,6 +26,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
+from tour_worker import progress
 from tour_worker.errors import failure, from_exception
 from tour_worker.service.redact import redact_text, redact_url
 
@@ -258,11 +259,12 @@ class JobStore:
             job_input = job.input
             self._persist(job)
             self._cond.notify_all()
-        log.info("job %s started", job_id)
-        try:
-            result = self.runner(job_input)
-        except BaseException as e:      # the router returns failures; this is a bug or an abort
-            result = from_exception(e)
+        with progress.job(job_id, job.job_type) as rep:      # the job's lines in the log (start.sh logs)
+            try:
+                result = self.runner(job_input)
+            except BaseException as e:  # the router returns failures; this is a bug or an abort
+                result = from_exception(e)
+            rep.end(result)
         status, output, error = split_result(result)
         with self._cond:
             job.status, job.output, job.error = status, output, error
@@ -270,11 +272,6 @@ class JobStore:
             self._persist(job)
             self._cond.notify_all()
             body, webhook = job.status_body(), job.webhook
-        if error:
-            log.warning("job %s failed: %s: %s", job_id, error.get("code"),
-                        redact_text(error.get("message", "")))
-        else:
-            log.info("job %s completed in %.1fs", job_id, job.finished_at - job.started_at)
         if webhook:
             self._notify(webhook, body)
 

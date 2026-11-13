@@ -391,7 +391,8 @@ def render_direct(plan, workdir: str, warnings: list | None = None, music_path: 
         if timings is not None:
             timings.info.update(render_workers=workers, chunks=len(tasks), frames=n)
         parts = []
-        with stage("draw_encode"):
+        with (timings.stage("draw_encode", f"{workers} workers, {len(tasks)} chunks, {n} frames")
+              if timings is not None else nullcontext()):
             if three_d or workers <= 1 or len(tasks) <= 1:
                 _init(plan, images, splat, splat_supersample)
                 if three_d and workers > 1 and len(tasks) > 1:
