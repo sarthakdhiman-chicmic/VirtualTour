@@ -36,7 +36,12 @@ from tour_worker.scoring.schemas import CriterionResult, PhotoScore
 from tour_worker.scoring.selector import build_report
 
 FADE_S = 0.5
-PLANNER3D_VERSION = "3d-1"
+# rooms one passes through, not stops (user 2026-11-13: "start in living, then kitchen, dining, then
+# from dining pan onto the hallway then move into bedroom"): shown by a link shot where the tour's
+# walking route first crosses them
+CONNECTORS = {"hallway", "corridor", "landing", "staircase", "stairs", "stairway"}
+MAX_DETAILS = 2                # close-ups a tour (client: details on the drops; user: option A)
+PLANNER3D_VERSION = "3d-2"
 
 
 def room_keys(rooms: list[dict]) -> list[str]:
@@ -61,13 +66,15 @@ def _signals(coverage: str):
                          room_size="medium", coverage_class=coverage)
 
 
-def _report(toured: list[tuple[str, str]], details: dict[str, int]):
-    """The rooms as the photo planner's scoring report: each room two equal "views" (the allocation
-    decides how many it plays) and, when its labels show a detail, a close-up "view" (coverage
-    tight -> a detail shot), so the selector ranks, multiplies and orders them as photo rooms."""
+def _report(toured: list[tuple[str, str]], details: dict[str, int], second: set[str] = frozenset()):
+    """The rooms as the photo planner's scoring report: each room one "view" - a second angle for
+    the rooms in `second` - and, when it gets a close-up, a close-up "view" (coverage tight -> a
+    detail shot), so the selector ranks, multiplies and orders them as photo rooms. A room's extra
+    time makes its shot longer, never another shot (the v3 standard, user 2026-11-13)."""
     scores = []
     for key, rtype in toured:
-        views = [(key, 1.0, "wide"), (f"{key}#2", 0.9, "wide")] + [(f"{key}#d", 0.8, "tight")] * min(1, details.get(key, 0))
+        views = ([(key, 1.0, "wide")] + [(f"{key}#2", 0.9, "wide")] * (key in second)
+                 + [(f"{key}#d", 0.8, "tight")] * min(1, details.get(key, 0)))
         for k, total, cov in views:
             crit = {c: CriterionResult(score=0.5) for c in ("coverage", "framing", "lighting", "depth_of_field")}
             scores.append(PhotoScore(photo_id=k, room_type=rtype, room_key=key, criteria=crit, weights_used={},
@@ -80,6 +87,47 @@ def _richness(space, room: str) -> float:
     from tour_worker.planner3d.moves import DETAILS, FEATURES
     kinds = {o["class"] for o in space.room_objects(room) if o["class"] in FEATURES or o["class"] in DETAILS}
     return min(1.0, len(kinds) / 5.0)
+
+
+def _route_tour(space, selected: list, connectors: set[str], cfg: PlannerConfig):
+    """Hallways (CONNECTORS) as links, not stops: the stops keep their narrative order; between two
+    consecutive rooms the walking route (Space.route) says what way the next lies and what it passes
+    through. Where it first crosses a hallway, that hallway's shot becomes a link (a pan from the room
+    being left onto the hallway); wherever a route runs through a hallway, the next room's first shot
+    walks in from it. Returns (shots, {id(link shot): (from, to, route)}, {id(entering shot): route},
+    warnings)."""
+    from tour_worker.planner.lengths import shot_length
+    stops = [s for s in selected if s.room_key not in connectors]
+    if not connectors or not stops:
+        return selected, {}, {}, []
+    hall_shot = {}
+    for s in selected:
+        if s.room_key in connectors and s.room_key not in hall_shot:
+            hall_shot[s.room_key] = s
+    seq, links, enters, used = [], {}, {}, set()
+    last_room = None
+    for s in stops:
+        if last_room is not None and s.room_key != last_room:
+            r = space.route(last_room, s.room_key)
+            on = [h for h in (r[1] if r else []) if h in connectors]
+            if on:
+                h = next((h for h in on if h not in used and h in hall_shot), None)
+                if h is not None:
+                    link = hall_shot[h]
+                    link.kind, link.role, link.is_hero = "room", "link", False
+                    link.final_duration = shot_length("room", cfg.pacing, 0.8)
+                    links[id(link)] = (last_room, s.room_key, r)
+                    used.add(h)
+                    seq.append(link)
+                enters[id(s)] = r
+        seq.append(s)
+        last_room = s.room_key
+    # the tour opens on a room, at hero length (as allocate gives a tour's first shot)
+    if seq and seq[0].final_duration < shot_length("hero", cfg.pacing, 0.5):
+        seq[0].final_duration = shot_length("hero", cfg.pacing, 0.5)
+    seq[0].role, seq[0].kind = "hero", "hero"
+    warn = [f"connector_not_on_route:{h}" for h in sorted(connectors) if h not in used and h in hall_shot]
+    return seq, links, enters, warn
 
 
 def plan_tour_3d(model, scene: dict, rooms: list[dict], listing_id: str, cfg: PlannerConfig,
@@ -103,20 +151,25 @@ def plan_tour_3d(model, scene: dict, rooms: list[dict], listing_id: str, cfg: Pl
     from types import SimpleNamespace
     from tour_worker.planner3d.moves import DETAILS
     c3 = cfg                                   # the same lengths as photo tours (planner/lengths.py)
-    # close-ups are accents: at most one per three room shots' worth of rooms, hero rooms first, then
-    # the rooms with the strongest details
+    # shots per room (the green-house v3 standard, user 2026-11-13): one room shot each; a hero room
+    # (best living room, kitchen, primary bedroom) with a piece to compose on gets a second angle of
+    # it; a hero room without one gets a close-up of its best detail instead - at most MAX_DETAILS a
+    # tour, never more than two shots a room
     from tour_worker.scoring.rooms import tier_for
-    best = {k: max((DETAILS[o["class"]] for o in space.room_objects(k, DETAILS)), default=0.0) for k, _ in toured}
     hero_tiers = {"living_room", "kitchen", "primary_bedroom"}
-    ranked = sorted((k for k, _ in toured if best[k] > 0),
-                    key=lambda k: (tier_for(dict(toured)[k]) not in hero_tiers, -best[k], k))
-    details = {k: 1 for k in ranked[:max(1, len(toured) // 3)]}
-    report = _report(toured, details)
+    heroes = [k for k, t in toured if tier_for(t) in hero_tiers]
+    second = {k for k in heroes if space.main_pieces(k)}
+    best = {k: max((DETAILS[o["class"]] for o in space.room_objects(k, DETAILS)), default=0.0) for k, _ in toured}
+    ranked = sorted((k for k in heroes if k not in second and best[k] > 0), key=lambda k: (-best[k], k))
+    details = {k: 1 for k in ranked[:MAX_DETAILS]}
+    report = _report(toured, details, second)
     contexts = {k: SimpleNamespace(richness=_richness(space, k)) for k, _ in toured} if labels is not None else {}
     selected, alloc_w = allocate_content(report, c3, contexts)
     warnings += alloc_w
     rtype = dict(toured)
     stage = {r.room_key: r.narrative_stage for r in report.rooms}
+    selected, links, enters, link_w = _route_tour(space, selected, {k for k, t in toured if canon(t) in CONNECTORS}, c3)
+    warnings += link_w
 
     mover = RoomMoves(space, Occlusion(model, space) if check_occlusion else None)
     moves, plan_rows, prev = [], [], None
@@ -127,9 +180,18 @@ def plan_tour_3d(model, scene: dict, rooms: list[dict], listing_id: str, cfg: Pl
         # are one space, and a camera in one films the other
         earlier = [p for k in sorted(space.spaces.get(sel.room_key, {sel.room_key})) for p in poses.get(k, [])]
         t_shot = time.perf_counter()
-        mv, w = mover.best(sel.room_key, sel.final_duration, earlier=earlier, prev=prev,
-                           piece_rank=len(poses.get(sel.room_key, [])), opening=i == 0,
-                           closing=i == len(selected) - 1, kind=sel.kind)
+        nxt = next((s.room_key for s in selected[i + 1:] if s.room_key != sel.room_key), None)
+        if id(sel) in links:                          # a hallway between two rooms
+            src, dst, route = links[id(sel)]
+            mv, w = mover.link(src, sel.room_key, dst, route, sel.final_duration, prev)
+        else:
+            mv, w = mover.best(sel.room_key, sel.final_duration, earlier=earlier, prev=prev,
+                               piece_rank=len(poses.get(sel.room_key, [])), opening=i == 0,
+                               closing=i == len(selected) - 1, kind=sel.kind, next_room=nxt,
+                               enter_route=enters.get(id(sel)),
+                               follows_link=i > 0 and id(selected[i - 1]) in links)
+        if mv is None and poses.get(sel.room_key) and sel.kind != "detail":
+            w = [f"second_angle_dropped:{sel.room_key}"]      # no angle with room to breathe: the first keeps the time
         if mv is not None:
             mv.why["plan_s"] = round(time.perf_counter() - t_shot, 1)
         warnings += [x for x in w if x not in warnings]
@@ -181,7 +243,8 @@ def plan_tour_3d(model, scene: dict, rooms: list[dict], listing_id: str, cfg: Pl
 
     # transitions: a fade into a new part of the home, cuts otherwise
     for a, b in zip(shots, shots[1:]):
-        if b.room_key != a.room_key and b.narrative_stage != a.narrative_stage:
+        # (a link and the shots either side of it are one walk through the home: cuts)
+        if b.room_key != a.room_key and b.narrative_stage != a.narrative_stage and "link" not in (a.role, b.role):
             b.transition_in = TransitionParams(type="fade", duration_s=round(min(FADE_S, 0.5 * min(a.duration_s, b.duration_s)), 3))
     apply_captions(shots, cfg.output_room_labels is not None)
 

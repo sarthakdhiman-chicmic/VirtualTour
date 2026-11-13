@@ -74,6 +74,9 @@ class Piece:
     top: float
     area: float
     cls: str | None = None    # what it is, from the scene's labels (bed, sofa, kitchen island ...)
+    # what a shot frames: the labelled object of its class inside it (a floor-plan piece often
+    # merges a bed with its nightstands and bench; the labels know the bed alone) - else itself
+    frame: "Piece | None" = None
 
     def local(self, p) -> np.ndarray:
         r = np.asarray(p, np.float64)[..., :2] - self.centre
@@ -98,6 +101,9 @@ class Piece:
         return {"class": self.cls, "centre": [round(float(x), 2) for x in self.centre],
                 "long_m": round(2 * self.half_long, 2), "short_m": round(2 * self.half_short, 2),
                 "top_m": round(self.top, 2), "area_m2": round(self.area, 2)}
+
+
+FRAME_MIN_AREA = 0.6           # m2: a labelled object this big is a piece a shot may frame
 
 
 class Space:
@@ -233,6 +239,7 @@ class Space:
         narrow passages, from each point, so two rooms meet where the free space pinches - at the doorway between
         them - not halfway between their points. Returns warnings (a point off the floor)."""
         warnings, keys, cells = [], [], []
+        self.room_points: dict[str, np.ndarray] = {}
         for key, p in points.items():
             s = self.snap(p, ROOM_RMIN, within=1.5)
             if s is None:
@@ -243,6 +250,7 @@ class Space:
                 continue
             keys.append(key)
             cells.append(self.cell(s))
+            self.room_points[key] = s
         self.room_keys = keys
         lab = np.full(self.shape, -1, np.int32)
         if keys:
@@ -356,13 +364,21 @@ class Space:
     def room_area(self, room: str) -> float:
         return float((self.room_of == self.room_keys.index(room)).sum() * CELL * CELL)
 
+    def _tall_at(self, p) -> bool:
+        i, j = self.cell(p)
+        return not (0 <= i < self.shape[0] and 0 <= j < self.shape[1]) or bool(self.tall[i, j])
+
     def piece_room(self, piece: Piece) -> str | None:
         """The room of the free floor right around a piece."""
         votes: dict[str, int] = {}
         for sx in np.linspace(-1, 1, 7):
             for sy in (-1, 1):
+                edge = piece.centre + sx * piece.half_long * piece.u + sy * piece.half_short * piece.v
                 for pad in (0.3, 0.5):
                     q = piece.centre + sx * piece.half_long * piece.u + sy * (piece.half_short + pad) * piece.v
+                    # only floor the piece faces: none behind the wall it stands against
+                    if any(self._tall_at(edge + f * (q - edge)) for f in (0.25, 0.5, 0.75, 1.0)):
+                        continue
                     r = self.room_at(q) if self.clearance(q) > 0 else None
                     if r:
                         votes[r] = votes.get(r, 0) + 1
@@ -423,6 +439,20 @@ class Space:
             np.add.at(cnt, (iy, ix), 1)
             self.view_block = ndi.binary_closing(cnt >= 3, iterations=1)
         self.objects = [dict(o) for o in labels.objects]
+        for p in self.pieces:                       # the labelled object a piece is about
+            inside = [o for o in self.objects if o["class"] in PIECE_CLASSES and o.get("footprint")
+                      and (p.cls is None or o["class"] == p.cls)
+                      and bool(p.contains(np.asarray(o["footprint"]["centre"]), 0.1))
+                      and o["footprint"]["long"] * o["footprint"]["short"] >= FRAME_MIN_AREA]
+            if not inside:
+                continue
+            o = max(inside, key=lambda o: o["footprint"]["long"] * o["footprint"]["short"])
+            f = o["footprint"]
+            a = math.radians(f["axis_deg"])
+            u = np.array([math.cos(a), math.sin(a)])
+            p.cls = p.cls or o["class"]
+            p.frame = Piece(np.asarray(f["centre"], np.float64), u, np.array([-u[1], u[0]]), f["long"] / 2,
+                            f["short"] / 2, float(o.get("top", o["max"][2])), f["long"] * f["short"], o["class"])
         for o in self.objects:                      # the room of the free floor nearest it (rooms set later)
             o["room"] = self.room_of_object(np.asarray(o["centre"][:2])) if self.room_keys else o.get("room")
 
@@ -469,6 +499,24 @@ class Space:
             poly[0], poly[-1] = pts[a], pts[b]
             return poly
         return path
+
+    def route(self, a: str, b: str) -> tuple[np.ndarray, list[str]] | None:
+        """How one walks from room a to room b: the shortest walking path between their points
+        (keeping off the walls) and the rooms it passes through, in order - what way b lies from a,
+        and whether a hallway joins them. None when no path exists."""
+        if a not in self.room_points or b not in self.room_points:
+            return None
+        ends = np.array([self.room_points[a], self.room_points[b]])
+        for rmin in (0.22, 0.15):
+            poly = self.paths_between(ends, (self.dt >= rmin) & (self.room_of >= 0))(0, 1)
+            if poly is not None and len(poly) >= 2:
+                rooms: list[str] = []
+                for q in poly:
+                    r = self.room_at(q)
+                    if r is not None and (not rooms or rooms[-1] != r):
+                        rooms.append(r)
+                return poly, rooms
+        return None
 
     # ---- views ----------------------------------------------------------------------------------
     def own_share(self, room: str, p, heading_rad: float, hfov_deg: float, rays: int = 9) -> float:

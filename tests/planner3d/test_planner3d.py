@@ -45,15 +45,23 @@ def _box(x0, x1, y0, y1, top):           # a low piece: its body (layers, as a s
     return np.concatenate(parts)
 
 
-def home(door=1.0) -> SplatModel:
-    """Living room x 0-6, bedroom x 6-10, y 0-5; a door `door` m wide in the wall at x = 6."""
+def home(door=1.0, bed=True, hall=False, split=False) -> SplatModel:
+    """Living room x 0-6, bedroom x 6-10, y 0-5; a door `door` m wide in the wall at x = 6.
+    hall: the living room ends at x = 4.5 and a 1.5 m hallway (x 4.5-6) joins it to the bedroom,
+    a door at each end, in line. split: the east side is a kitchen (y 0-3, its door from the living
+    room at y 0.9-1.9) and a bedroom behind it (y 3-5, its door from the kitchen at x 6.3-7.3)."""
     a, b = _grid(0, 10, 0, 5)
     parts = [np.c_[a, b, np.zeros_like(a)], np.c_[a, b, np.full_like(a, 2.6)]]          # floor, ceiling
     parts += [_wall_x(0, 0, 5), _wall_x(10, 0, 5), _wall_y(0, 0, 10), _wall_y(5, 0, 10)]
     d0 = 2.5 - door / 2
-    parts += [_wall_x(6, 0, d0), _wall_x(6, d0 + door, 5)]
+    if split:
+        parts += [_wall_x(6, 0, 0.9), _wall_x(6, 1.9, 5), _wall_y(3.0, 6, 6.3), _wall_y(3.0, 7.3, 10)]
+    else:
+        for x in ((4.5, 6) if hall else (6,)):
+            parts += [_wall_x(x, 0, d0), _wall_x(x, d0 + door, 5)]
     parts += [_box(1.0, 3.2, 0.4, 1.3, 0.8)]          # sofa against the living room's south wall
-    parts += [_box(7.6, 9.6, 3.0, 4.6, 0.6)]          # bed in the bedroom's north-east corner
+    if bed:                                           # bed in the bedroom's north-east corner
+        parts += [_box(7.6, 9.6, 3.3, 4.9, 0.6) if split else _box(7.6, 9.6, 3.0, 4.6, 0.6)]
     means = np.concatenate(parts).astype(np.float32)
     n = len(means)
     sh = np.zeros((n, 1, 3), np.float32)
@@ -135,9 +143,11 @@ def test_every_shot_keeps_the_rules(planned):
         u, v = np.asarray(t0) - e0, np.asarray(t1) - e1
         ang = math.degrees(math.acos(np.clip(u @ v / np.linalg.norm(u) / np.linalg.norm(v), -1, 1)))
         assert ang >= JUMP_ANGLE or np.linalg.norm(np.asarray(e0[:2]) - e1[:2]) >= JUMP_DIST
+    # the v3 standard: a room with a piece is filmed by walkways composed on it - a hero room's
+    # second angle on the same piece from elsewhere; never a pan inside a room
     living = [r for r in rep["shots"] if r["room_key"] == "living"]
-    assert living[0]["move"] == "glide"                                    # the tour opens moving into the home
-    assert living[1]["move"] == "walkway" and living[1]["piece"]["area_m2"] > 1.5   # then composes on the sofa
+    assert [r["move"] for r in living] == ["walkway", "walkway"] and living[0]["piece"]["area_m2"] > 1.5
+    assert all(r["move"] != "pan" for r in rep["shots"][:-1])
 
 
 def test_a_y_down_scene_plans_the_same_tour_in_its_own_axes(model, planned):
@@ -192,18 +202,80 @@ def _labels(model):
     return SceneLabels(lab, "ab" * 32, len(model), [vase])
 
 
-def test_labels_name_the_pieces_and_add_a_close_up_of_a_detail(model):
+def test_labels_name_the_pieces_and_a_hero_room_with_a_piece_gets_a_second_angle_not_a_close_up(model):
     plan, rep, _ = plan_tour_3d(model, SCENE, ROOMS, "test-home", PlannerConfig(), check_occlusion=False,
                                 labels=_labels(model))
     rooms = {r["room_key"]: r for r in rep["rooms"]}
     assert rooms["living"]["main_pieces"][0]["class"] == "sofa" and rooms["bed"]["main_pieces"][0]["class"] == "bed"
-    close = [s for s in plan.shots if s.role == "close"]
-    assert len(close) == 1 and close[0].room_key == "living" and close[0].camera.move == "detail"
-    assert 1.5 - 1e-6 <= close[0].duration_s <= 2.5 + 1e-6
-    row = next(r for r in rep["shots"] if r["move"] == "detail")
-    assert row["object"] == "vase"
-    keys = [s.room_key for s in plan.shots]
-    assert keys.index("living") < plan.shots.index(close[0]) < len(keys) - 1     # after the room's first shot
+    assert [s.camera.move for s in plan.shots if s.room_key == "living"] == ["walkway", "walkway"]
+    assert not [s for s in plan.shots if s.role == "close"]        # at most two shots a room
+
+
+def _obj(cls, lo, hi):
+    c = [(a + b) / 2 for a, b in zip(lo, hi)]
+    return {"class": cls, "centre": c, "min": list(lo), "max": list(hi), "top": hi[2], "splats": 400, "room": None,
+            "footprint": {"centre": c[:2], "long": max(hi[0] - lo[0], hi[1] - lo[1]),
+                          "short": min(hi[0] - lo[0], hi[1] - lo[1]), "axis_deg": 0.0 if hi[0] - lo[0] >= hi[1] - lo[1] else 90.0}}
+
+
+def test_a_kitchen_with_no_piece_pushes_toward_its_counter_and_gets_the_close_up():
+    """A hero room with nothing to compose on (a kitchen of units) gets one push toward its own
+    working surfaces - never an aim at its upper cabinets - and its close-up; never more than two
+    shots a room."""
+    from tour_worker.planner3d.moves import AIM_Z_MAX
+    from tour_worker.scene.semantics import INDEX, SceneLabels
+    m = home(split=True)
+    P = m.means
+    lab = np.zeros(len(m), np.uint8)
+    lab[(P[:, 0] > 0.95) & (P[:, 0] < 3.25) & (P[:, 1] > 0.35) & (P[:, 1] < 1.35) & (P[:, 2] > 0.15) & (P[:, 2] < 0.85)] = INDEX["sofa"]
+    objs = [_obj("cabinet", (7.0, 0.05, 0.0), (9.9, 0.65, 0.9)),      # the counter run along the south wall
+            _obj("sink", (8.0, 0.1, 0.75), (8.6, 0.6, 0.9)),
+            _obj("cabinet", (7.0, 0.05, 1.7), (9.9, 0.4, 2.4)),       # upper cabinets: never aimed at
+            _obj("vase", (9.55, 2.5, 0.7), (9.85, 2.8, 1.1))]
+    rooms = [{"room_key": "kit", "room_type": "Kitchen", "point": [8.0, 1.5, 1.0]},
+             {"room_key": "bed", "room_type": "Bedroom", "point": [7.0, 4.0, 1.0]},
+             {"room_key": "living", "room_type": "Living Room", "point": [3.0, 3.0, 1.0]}]
+    plan, rep, _ = plan_tour_3d(m, SCENE, rooms, "test-home", PlannerConfig(), check_occlusion=False,
+                                labels=SceneLabels(lab, "ab" * 32, len(m), objs))
+    kit = [(s, r) for s, r in zip(plan.shots, rep["shots"]) if s.room_key == "kit"]
+    assert [s.camera.move for s, _ in kit] in (["push", "detail"], ["pull", "detail"]) and kit[1][0].role == "close"
+    assert kit[1][1]["object"] == "vase"                              # not the sink the push ends on
+    anchor = kit[0][1]["anchor"]
+    assert anchor[1] <= 0.7 and anchor[2] < 1.0                        # the counter, not the upper cabinets
+    for s, _ in kit[:1]:
+        assert all(seg.target[k][2] <= AIM_Z_MAX + 0.02 for seg in s.camera.segments for k in range(4))
+
+
+def test_a_hallway_is_a_link_between_two_rooms_not_a_stop():
+    """Living room -> hallway -> bedroom: the tour opens in the living room (not the hallway), pans
+    from it onto the hallway toward the bedroom, then walks into the bedroom from the hallway - cuts
+    all along, one walk through the home."""
+    m = home(hall=True)
+    rooms = [{"room_key": "hall", "room_type": "Hallway", "point": [5.25, 2.5, 1.0]},
+             {"room_key": "living", "room_type": "Living Room", "point": [2.5, 3.0, 1.0]},
+             {"room_key": "bed", "room_type": "Bedroom", "point": [8.0, 1.5, 1.0]}]
+    plan, rep, _ = plan_tour_3d(m, SCENE, rooms, "test-home", PlannerConfig(), check_occlusion=False)
+    assert [s.room_key for s in plan.shots] == ["living", "living", "hall", "bed"]
+    assert [s.camera.move for s in plan.shots] == ["walkway", "walkway", "link", "enter"]
+    link = rep["shots"][2]
+    assert link["from"] == "living" and link["toward"] == "bed" and link["hall_share"] >= 0.3   # through it, the bedroom
+    seg = plan.shots[2].camera.segments
+    assert seg[0].eye[0][0] < 4.5 and seg[-1].target[-1][0] > 5.5     # stands in the living room, looks down the hallway
+    enter = plan.shots[3].camera.segments
+    assert enter[0].eye[0][0] < 6.0 < enter[-1].eye[-1][0]            # from the hallway, through the door
+    assert all(s.transition_in.type == "cut" for s in plan.shots[2:])
+
+
+def test_a_foyer_opening_reveals_the_next_room():
+    """A tour that opens in a room with nothing to compose on (a foyer) moves toward the next room
+    and ends with it filling the frame."""
+    m = home(door=2.4, bed=False)
+    rooms = [{"room_key": "foyer", "room_type": "Foyer", "point": [8.0, 2.5, 1.0]},
+             {"room_key": "living", "room_type": "Living Room", "point": [3.0, 3.0, 1.0]}]
+    plan, rep, _ = plan_tour_3d(m, SCENE, rooms, "test-home", PlannerConfig(), check_occlusion=False)
+    assert plan.shots[0].room_key == "foyer" and plan.shots[0].camera.move == "reveal"
+    assert rep["shots"][0]["reveals"] == "living" and rep["shots"][0]["share_next"] >= 0.35
+    assert plan.shots[0].camera.segments[-1].target[-1][0] < 6.0       # it ends looking into the living room
 
 
 def test_without_labels_there_are_no_close_ups(planned):
