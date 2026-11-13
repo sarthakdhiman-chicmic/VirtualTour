@@ -40,22 +40,32 @@ follow() {
 case "${1:-start}" in
 start)
     if running; then echo "already running (pid $(cat "$PID_FILE"))"; exit 0; fi
+    # the container disk is reset when a pod is recreated (only /workspace survives): ffmpeg goes with it
+    if ! command -v ffmpeg >/dev/null; then
+        echo "ffmpeg is missing (a new pod): apt-get update && apt-get install -y ffmpeg, then start again"; exit 1
+    fi
     load_env
     cd "$REPO"
     # its own session: a Ctrl+C on the log we follow below never reaches the worker
     setsid nohup "$VENV/bin/python" -u -m tour_worker.service >> "$LOG_FILE" 2>&1 < /dev/null &
     echo $! > "$PID_FILE"
     echo "started pid $(cat "$PID_FILE"), log $LOG_FILE"
-    for _ in $(seq 60); do
+    # a cold start on a new pod (torch and CUDA libraries read from /workspace for the first time) can
+    # take a few minutes; a warm one is ~10 s
+    printf "waiting for :%s " "$PORT"
+    for i in $(seq "${START_WAIT_S:-300}"); do
         if curl -fsS "http://127.0.0.1:$PORT/ping" >/dev/null 2>&1; then
-            health
+            echo " up after ${i} s"; health
             [ "${2:-}" = "-d" ] && exit 0
             follow; exit 0
         fi
-        running || { echo "the service exited:"; tail -20 "$LOG_FILE"; exit 1; }
+        running || { echo; echo "the service exited:"; tail -20 "$LOG_FILE"; exit 1; }
+        [ $((i % 5)) -eq 0 ] && printf "."
         sleep 1
     done
-    echo "no answer on :$PORT after 60 s"; tail -20 "$LOG_FILE"; exit 1 ;;
+    echo; echo "no answer on :$PORT after ${START_WAIT_S:-300} s; it is still starting (pid $(cat "$PID_FILE"))"
+    [ "${2:-}" = "-d" ] && exit 1
+    follow ;;
 stop)
     if running; then kill "$(cat "$PID_FILE")"; rm -f "$PID_FILE"; echo "stopped"; else echo "not running"; fi ;;
 status)
