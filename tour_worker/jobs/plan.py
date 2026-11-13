@@ -82,6 +82,68 @@ def _voiceover(raw: dict | None) -> dict | None:
     return v.model_dump()
 
 
+def _planner_config(req: TourPlanRequest, **extra_fields):
+    """The planner's settings from the request's options (preset, pacing, output, branding, labels,
+    voiceover): the same for a photo tour and a 3D tour."""
+    from tour_worker.planner.config import PlannerConfig
+    from tour_worker.planner.tour_presets import preset as tour_preset
+    opts = req.options
+    pre = tour_preset(opts.preset)
+    branding = _branding(opts.branding)
+    if pre.get("kicker"):                      # Just Listed: a line above the address
+        branding = {**(branding or {}), "kicker": pre["kicker"]}
+    end_card = bool(branding and (branding.get("agent") or branding.get("logo_uri")))
+    extra = {"final_shot_min_s": PlannerConfig().end_card_hold_s} if end_card else {}
+    if pre.get("outdoor_boost"):
+        extra["outdoor_boost"] = pre["outdoor_boost"]
+    if pre.get("open_high"):
+        extra["music_v2_open_high"] = 6.0
+    return PlannerConfig(**extra, **extra_fields, pacing=opts.pacing or pre["pacing"],
+                         output_width=opts.output_width, output_height=opts.output_height,
+                         max_total_s=opts.max_total_s, output_max_bytes=opts.max_bytes,
+                         output_hevc=opts.hevc, output_mls_copy=opts.mls_copy,
+                         output_room_labels=opts.room_labels.model_dump() if opts.room_labels else None,
+                         output_branding=branding, voiceover=_voiceover(opts.voiceover))
+
+
+def _run_plan_3d(req: TourPlanRequest, storage, workdir: str, sw, t0: float) -> dict:
+    """A 3D tour: fetch and load the scene, plan it from its rooms (tour_worker/planner3d)."""
+    from tour_worker.planner3d.plan import plan_tour_3d
+    from tour_worker.scene import SceneInvalid
+    from tour_worker.scene.cache import ensure_scene
+    from tour_worker.scene.splat_io import load_scene
+    sc = req.scene
+    try:
+        with sw.stage("scene_fetch"):
+            path = ensure_scene(sc.uri, sc.sha256, sc.format, storage, os.path.join(workdir, "scene"),
+                                req.image_urls.get(sc.uri))
+        with sw.stage("scene_load"):
+            model = load_scene(path, sc.format, max_sh_degree=0)
+        os.remove(path)
+    except SceneInvalid as e:
+        return failure("scene_invalid", str(e))
+    except Exception as e:  # noqa: BLE001
+        return failure("scene_fetch_failed", f"{type(e).__name__}: {e}")
+    try:
+        cfg = _planner_config(req)
+        with sw.stage("planning"):
+            plan, rep, rooms_report = plan_tour_3d(
+                model, sc.model_dump(exclude_none=True), [r.model_dump() for r in req.rooms], req.listing_id, cfg,
+                music_track=req.music_track.model_dump() if req.music_track else None, preset=req.options.preset)
+    except Exception as e:  # noqa: BLE001
+        return failure("planning_failed", f"planning_failed: {type(e).__name__}: {e}")
+    plan_dict = plan.model_dump(mode="json")
+    try:
+        parse_plan(plan_dict)
+    except ValueError as e:
+        return plan_failure(e)
+    summary = _scoring_summary(rooms_report)
+    summary["photos"] = 0
+    return {"status": "completed", "plan": plan_dict, "plan_hash": plan.provenance.plan_hash,
+            "scoring": summary, "warnings": [], "planner_3d": rep,
+            "seconds": round(time.time() - t0, 2), "timings": sw.result()}
+
+
 def _scoring_summary(report) -> dict:
     return {
         "config_version": report.config.version,
@@ -103,7 +165,14 @@ def run_plan(request: dict, storage, workdir: str) -> dict:
         return failure("invalid_request", str(e))
 
     sw = Stopwatch()
+    fallback: list[str] = []
+    if req.scene is not None:                     # a splat scene: the 3D planner (planner3d)
+        out = _run_plan_3d(req, storage, workdir, sw, t0)
+        if out.get("status") == "completed" or not req.photos:
+            return out
+        fallback = [f"scene_fallback:{out['error']['code']}"]   # the photos instead
     inputs, assets, warnings, dusk = _fetch_photos(req, storage, workdir)
+    warnings = fallback + warnings
     sw.lap("fetch")
     if not inputs:
         return failure("image_fetch_failed",
@@ -120,24 +189,8 @@ def run_plan(request: dict, storage, workdir: str) -> dict:
         if opts.photo_order == "manual":           # drag-to-reorder: the request's order, not the narrative
             from tour_worker.scoring.selector import manual_order
             report = manual_order(report, [p.photo_id for p in req.photos])
-        from tour_worker.planner.tour_presets import preset as tour_preset
-        pre = tour_preset(opts.preset)
-        branding = _branding(opts.branding)
-        if pre.get("kicker"):                      # Just Listed: a line above the address
-            branding = {**(branding or {}), "kicker": pre["kicker"]}
-        end_card = bool(branding and (branding.get("agent") or branding.get("logo_uri")))
-        extra = {"final_shot_min_s": PlannerConfig().end_card_hold_s} if end_card else {}
-        if pre.get("outdoor_boost"):
-            extra["outdoor_boost"] = pre["outdoor_boost"]
-        if pre.get("open_high"):
-            extra["music_v2_open_high"] = 6.0
-        cfg = PlannerConfig(**extra, pacing=opts.pacing or pre["pacing"],
-                            output_width=opts.output_width, output_height=opts.output_height,
-                            max_total_s=opts.max_total_s, output_max_bytes=opts.max_bytes,
-                            output_hevc=opts.hevc, output_mls_copy=opts.mls_copy,
-                            output_room_labels=opts.room_labels.model_dump() if opts.room_labels else None,
-                            staged_photos=frozenset(p.photo_id for p in req.photos if p.staged),
-                            output_branding=branding, voiceover=_voiceover(opts.voiceover), dusk_photos=dusk)
+        cfg = _planner_config(req, staged_photos=frozenset(p.photo_id for p in req.photos if p.staged),
+                              dusk_photos=dusk)
         plan = build_shot_plan(
             report, req.listing_id, assets, preset=opts.preset,
             budget_blocked=opts.budget_blocked, cfg=cfg,

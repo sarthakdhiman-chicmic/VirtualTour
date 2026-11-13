@@ -309,3 +309,50 @@ def test_a_voiceover_reaches_the_plan_and_is_absent_otherwise():
     assert "voiceover" not in run_job(_request(), storage=FakeStorage())["plan"]
     bad = run_job(_request(options={"voiceover": {"uri": "s3://b/vo.mp3", "balance": 2}}), storage=FakeStorage())
     assert bad["status"] == "failed"
+
+
+# ---- a 3D tour: scene + rooms (tour_worker/planner3d) ------------------------------------------------
+def _scene_request(tmp_path, **kw):
+    """A tour_plan request for the planner3d test home, served from disk."""
+    from tests.planner3d.test_planner3d import ROOMS as ROOMS_3D
+    from tests.planner3d.test_planner3d import home
+    from tests.scene_fixtures import write_splat
+    from tour_worker.scene.cache import sha256_file
+    path = tmp_path / "home.splat"
+    write_splat(path, home())
+    files = {"s3://bucket/scenes/home.splat": path.read_bytes()}
+    req = {"job_type": "tour_plan", "job_id": "j3d", "listing_id": "L3D",
+           "scene": {"uri": "s3://bucket/scenes/home.splat", "sha256": sha256_file(str(path)), "format": "splat"},
+           "rooms": ROOMS_3D, "options": {"room_labels": {"font": "sacramento"}}}
+    req.update(kw)
+    return req, files
+
+
+def test_a_scene_and_its_rooms_plan_a_3d_tour(tmp_path):
+    req, files = _scene_request(tmp_path)
+    res = run_job(req, storage=FakeStorage(files))
+    assert res["status"] == "completed", res
+    TourPlanResult.model_validate(res)
+    plan = parse_plan(res["plan"])
+    assert plan.mode == "cinematic_3d" and plan.scene.uri == "s3://bucket/scenes/home.splat"
+    assert [s.room_key for s in plan.shots][0] == "living" and plan.shots[0].caption == "Living Room"
+    assert res["planner_3d"]["sequence"] == ["living", "bed"] and res["scoring"]["photos"] == 0
+    assert set(res["timings"]["stages"]) >= {"scene_fetch", "scene_load", "planning"}
+
+
+def test_a_scene_needs_its_rooms_and_a_request_needs_photos_or_a_scene(tmp_path):
+    req, _ = _scene_request(tmp_path)
+    assert validate_request({**req, "rooms": None})["error"]["code"] == "invalid_request"
+    bare = {k: v for k, v in req.items() if k not in ("scene", "rooms")}
+    assert validate_request(bare)["error"]["code"] == "invalid_request"
+
+
+def test_a_scene_that_fails_falls_back_to_the_photos_or_fails(tmp_path):
+    req, files = _scene_request(tmp_path)
+    bad = {**req, "scene": {**req["scene"], "sha256": "0" * 64}}       # the file is not what was promised
+    res = run_job(bad, storage=FakeStorage(files))
+    assert res["status"] == "failed" and res["error"]["code"] == "scene_invalid"
+    photos = _request()["photos"]
+    res = run_job({**bad, "photos": photos}, storage=FakeStorage({**PHOTOS, **files}))
+    assert res["status"] == "completed" and res["plan"]["mode"] != "cinematic_3d"
+    assert "scene_fallback:scene_invalid" in res["warnings"]

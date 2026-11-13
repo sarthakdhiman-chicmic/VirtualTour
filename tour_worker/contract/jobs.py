@@ -96,11 +96,35 @@ class RoomLabelsOption(BaseModel):
         return self
 
 
+class PlanScene(BaseModel):
+    """A 3D tour's Gaussian splat scene (plan 1.6 scene block): with one, tour_plan plans in 3D."""
+    model_config = ConfigDict(extra="ignore")
+    uri: str = Field(min_length=1)
+    sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    format: Literal["ply", "splat"]
+    up_axis: Optional[list[float]] = None     # the scene's up in its own axes; None: found from the geometry
+    motion_uri: Optional[str] = None          # 3D motion (curtains, plants, flames), made once per scene
+    motion_sha256: Optional[str] = None
+
+
+class PlanRoom(BaseModel):
+    """A room of a 3D tour: what it is and one point inside it (scene axes, any height)."""
+    model_config = ConfigDict(extra="ignore")
+    room_key: Optional[str] = None            # default <type>_<n>
+    room_type: str = Field(min_length=1)      # as for photos ("Living Room", "kitchen", ...)
+    point: list[float] = Field(min_length=3, max_length=3)
+    tour: bool = True                         # False: a room of the home that the tour leaves out
+
+
 class TourPlanRequest(_Request):
-    """Score a tour's photos and plan its shots (the plan tour_render renders)."""
+    """Plan a tour (the plan tour_render renders). With `scene` + `rooms`: a 3D tour from the splat
+    scene (tour_worker/planner3d); otherwise the photos are scored and planned (tour_worker/planner).
+    A scene that cannot be loaded falls back to the photos when there are any."""
     job_type: Literal["tour_plan"]
     listing_id: str = Field(min_length=1)     # seeds the motion regions; in the plan
-    photos: list[PlanPhoto] = Field(min_length=1)
+    photos: list[PlanPhoto] = Field(default_factory=list)
+    scene: Optional[PlanScene] = None
+    rooms: Optional[list[PlanRoom]] = None
     image_urls: dict[str, str] = Field(default_factory=dict)   # optional: photo uri -> fetch URL
     segments: Optional[dict[str, Optional[list[dict[str, Any]]]]] = None   # tour_segment results
     scenes: Optional[dict[str, Optional[dict[str, Any]]]] = None           # tour_segment scenes
@@ -112,6 +136,14 @@ class TourPlanRequest(_Request):
         ids = [p.photo_id for p in self.photos]
         if len(set(ids)) != len(ids):
             raise ValueError("photos: photo_id must be unique")
+        if self.scene is not None:
+            if not self.rooms:
+                raise ValueError("rooms: a 3D tour (scene) needs its rooms")
+            keys = [r.room_key for r in self.rooms if r.room_key]
+            if len(set(keys)) != len(keys):
+                raise ValueError("rooms: room_key must be unique")
+        elif not self.photos:
+            raise ValueError("photos: at least one photo (or a scene and its rooms)")
         return self
 
 
@@ -168,6 +200,7 @@ class TourPlanResult(BaseModel):
     warnings: list[str]                       # photos left out (photo_fetch_failed / photo_unreadable)
     seconds: float
     timings: Optional[dict[str, Any]] = None  # tour_worker.timing: seconds per stage, total, host
+    planner_3d: Optional[dict[str, Any]] = None   # a 3D tour: the scene as read, rooms, why each shot
 
 
 class SegmentRegion(BaseModel):
