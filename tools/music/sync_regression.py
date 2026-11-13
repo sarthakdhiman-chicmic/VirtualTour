@@ -52,7 +52,10 @@ def score_case(targets, roles, an: dict, cfg: PlannerConfig, v3: bool = False) -
         punch_at += [float(cuts[k]) + lead / fps for k in (r.hook_cuts or [])]   # the opening punch
     heroes = [(t, h) for t, h in played(an, m, an.get("heroes") or [], key="t") if 0.5 < t < end - 0.5]
     drops = [t for t, h in heroes if h["tier"] == 1 and t >= cfg.music_shot_abs_min_s]
-    cut_at = lambda t: bool(len(cuts)) and float(np.abs(cuts + lead / fps - t).min()) <= tol  # noqa: E731
+    # a cut sits on the audible attack, music_onset_lag_s before the analysis' time for it
+    # (planner/config.py): measure it against the analysis' times as the planner aimed it
+    at = cuts + lead / fps + float(getattr(cfg, "music_onset_lag_s", 0.0) or 0.0)
+    cut_at = lambda t: bool(len(at)) and float(np.abs(at - t).min()) <= tol  # noqa: E731
     segs = [(float(s.from_s), float(s.to_s)) for s in m.segments] if getattr(m, "segments", None) else None
     beats_at = cuts + lead / fps
     if segs and an.get("accent_peaks"):

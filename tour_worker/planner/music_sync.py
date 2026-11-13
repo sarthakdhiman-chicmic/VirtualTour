@@ -288,6 +288,42 @@ def sync_to_music(
     return _sync_v3(targets, track, cfg, roles)
 
 
+def subframe_shift(plan, cfg: PlannerConfig, step_s: float = 0.001) -> float:
+    """How far (s, within half a frame) to slide the music against the picture so the cuts land
+    nearest the beats: a cut can only fall on a frame boundary, so each beat is up to half a frame
+    (16.7 ms at 30 fps) off its cut; the music's start is free, and one slide of the whole track
+    moves every beat against the frame grid at once. Minimises the worst cut's error (then the
+    mean, then the slide). The music cannot start before the track does."""
+    cuts = np.array([plan.times[j] for j in plan.path[:-1]], float) - cfg.music_onset_lag_s
+    if not len(cuts):
+        return 0.0
+    h = 0.5 / cfg.fps
+    room = float(plan.segments[0][0])                 # track time before the music's start
+    best = None
+    for d in np.arange(-h, h + 1e-9, step_s):
+        if d > room:
+            continue
+        x = (cuts + d) * cfg.fps
+        r = np.abs(np.round(x) - x) / cfg.fps
+        key = (round(float(r.max()), 4), round(float(r.mean()), 5), abs(float(d)))
+        if best is None or key < best[0]:
+            best = (key, float(d))
+    return round(best[1], 4) if best else 0.0
+
+
+def _shift_music(plan, d: float) -> None:
+    """The music d s later against the picture: its first piece starts d s earlier in the track,
+    so every beat, edit and join moves d s later in the tour."""
+    if not d:
+        return
+    plan.times = np.asarray(plan.times, float) + d
+    a, b = plan.segments[0]
+    plan.segments[0] = (a - d, b)
+    for e in plan.edits or []:
+        if "tour_s" in e:
+            e["tour_s"] = e["tour_s"] + d
+
+
 def _sync_v2(targets, track: dict, cfg: PlannerConfig, roles) -> SyncResult | None:
     from .music_sync_v2 import plan_v2, punches_for
 
@@ -296,6 +332,8 @@ def _sync_v2(targets, track: dict, cfg: PlannerConfig, roles) -> SyncResult | No
     if plan is None:
         return None
     lead = cfg.music_cut_lead_frames
+    if cfg.music_subframe_align:
+        _shift_music(plan, subframe_shift(plan, cfg))
     durations = frame_align([plan.times[j] for j in plan.path], cfg.fps, lead, cfg.music_onset_lag_s)
     rows, hook_cuts, accents = punches_for(plan, durations, cfg, float(an.get("beat_period_s") or 0.5), lead)
     missed = sum(1 for r in rows if r.kind == "missed" and r.tier == 1)

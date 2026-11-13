@@ -233,3 +233,25 @@ def test_the_per_beat_loudness_finds_breakdowns_the_sections_miss():
     assert over_dip and all(d > 4.0 + 1e-6 for d in over_dip)      # held through the breakdown
     over_drop = [d for s0, d in zip(starts, out) if s0 - 0.25 <= 60.0 < s0 + d]
     assert over_drop and over_drop[0] < 4.0 - 1e-6                 # the drop cuts faster
+
+
+def test_the_music_slides_under_half_a_frame_so_cuts_sit_nearest_their_beats():
+    """A cut falls on a frame boundary, so a beat between two frames is up to half a frame off;
+    one slide of the whole track (within half a frame) brings the cuts as a whole nearest their
+    beats, and moves the music's pieces with it (user 2026-11-13: "very close, not on point")."""
+    from types import SimpleNamespace
+    from tour_worker.planner.config import PlannerConfig
+    from tour_worker.planner.music_sync import _shift_music, subframe_shift
+    cfg = PlannerConfig()
+    beats = np.array([4.012, 8.013, 12.011, 16.014, 20.0])          # all ~12 ms past a frame boundary
+    plan = SimpleNamespace(times=beats.copy(), path=list(range(5)), segments=[(10.0, 40.0)], edits=[{"tour_s": 9.0}])
+    fps, lag = cfg.fps, cfg.music_onset_lag_s
+    err = lambda b: np.abs(np.round((b - lag) * fps) - (b - lag) * fps).max() / fps   # noqa: E731
+    d = subframe_shift(plan, cfg)
+    assert abs(d) <= 0.5 / fps + 1e-9
+    _shift_music(plan, d)
+    assert err(plan.times[:-1]) < err(beats[:-1]) and err(plan.times[:-1]) <= 0.004
+    assert plan.segments[0] == (10.0 - d, 40.0) and plan.edits[0]["tour_s"] == 9.0 + d
+    # the music cannot start before the track does
+    plan0 = SimpleNamespace(times=beats.copy(), path=list(range(5)), segments=[(0.0, 40.0)], edits=[])
+    assert subframe_shift(plan0, cfg) <= 0.0

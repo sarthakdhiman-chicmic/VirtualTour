@@ -262,6 +262,9 @@ class PlannerConfig(BaseModel):
     # sample-exact to the track, the attacks came 27 ms before the cuts (detector calibrated on hits
     # at known times). Cuts move this much earlier, onto the attack.
     music_onset_lag_s: float = 0.027
+    # slide the whole track by up to half a frame so the cuts sit nearest their beats (frame
+    # rounding otherwise leaves each cut up to 16.7 ms off at 30 fps; user 2026-11-13)
+    music_subframe_align: bool = True
     # zoom punches: a shot opening on a hook, and accents (hooks with no cut) mid-shot
     # zoom punches (a quick zoom in / out on a hero moment): OFF (user 2026-10-23: "we dont need
     # that rapid zoom in and zoom out for a bass or smth" -> none at all). The music is followed by
