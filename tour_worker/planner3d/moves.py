@@ -385,7 +385,7 @@ class RoomMoves:
     def front(self, e, t) -> float:
         """Metres to the nearest wall or tall thing across the middle third of the view from e to t."""
         h = math.atan2(t[1] - e[1], t[0] - e[0])
-        return min(self.space.ray(e, h + a, max_m=6.0) for a in np.radians(np.linspace(-HFOV / 6, HFOV / 6, 7)))
+        return float(self.space.rays(e, h + np.radians(np.linspace(-HFOV / 6, HFOV / 6, 7)), max_m=6.0).min())
 
     def _roomy(self, m: Move) -> bool:
         """Room to breathe at both ends (FRONT_MIN, an enter's start FRONT_MIN_ENTER) and the end at
@@ -728,11 +728,19 @@ class RoomMoves:
 
     # ---- move kinds ------------------------------------------------------------------------------
     def _path(self, paths, i, j, rmin):
-        poly = paths(i, j)
-        if poly is None or len(poly) < 2:
-            return None, 0.0
-        q = smooth(self.space, poly, rmin)
-        return q, float(np.linalg.norm(np.diff(q, axis=0), axis=1).sum())
+        """The smoothed walking path from point i to j and its length - cached on the path finder
+        (each kind of move, and each step of the pitch ladder, asks for the same pairs)."""
+        cache = paths.__dict__.setdefault("smoothed", {})
+        key = (i, j, rmin)
+        if key not in cache:
+            poly = paths(i, j)
+            if poly is None or len(poly) < 2:
+                cache[key] = (None, 0.0)
+            else:
+                q = smooth(self.space, poly, rmin)
+                cache[key] = (q, float(np.linalg.norm(np.diff(q, axis=0), axis=1).sum()))
+        q, plen = cache[key]
+        return (None if q is None else q.copy()), plen
 
     def _walkway(self, room, piece, pts, paths, rmin, dur, pitch, prev, earlier, own) -> list[Move]:
         fp = piece.frame or piece                     # what is framed: the labelled object, else the piece

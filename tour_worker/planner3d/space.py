@@ -83,6 +83,18 @@ class Piece:
         return np.stack([r @ self.u, r @ self.v], -1)
 
     def contains(self, p, pad: float = 0.0) -> np.ndarray:
+        p = np.asarray(p)
+        if p.ndim == 2 and len(p) > 4096:             # many points (splats): only those near it can be in
+            r = math.hypot(self.half_long + pad, self.half_short + pad)
+            near = (np.abs(p[:, 0] - self.centre[0]) <= r) & (np.abs(p[:, 1] - self.centre[1]) <= r)
+            out = np.zeros(len(p), bool)
+            idx = np.nonzero(near)[0]
+            if len(idx):
+                out[idx] = self.contains(p[idx], pad) if len(idx) <= 4096 else self._contains(p[idx], pad)
+            return out
+        return self._contains(p, pad)
+
+    def _contains(self, p, pad: float) -> np.ndarray:
         q = self.local(p)
         return (np.abs(q[..., 0]) <= self.half_long + pad) & (np.abs(q[..., 1]) <= self.half_short + pad)
 
@@ -419,14 +431,17 @@ class Space:
         carry (a piece class), and the labelled objects become known (features, details)."""
         self.labels = labels
         L, lab = self.local, labels.labels
+        base = np.nonzero((L[:, 2] > 0.1) & (lab > 0))[0]     # labelled splats off the floor, once
+        Lb = L[base]
         for p in self.pieces:
-            m = p.contains(L, 0.05) & (L[:, 2] > 0.1) & (L[:, 2] < p.top + 0.2) & (lab > 0)
-            if m.sum() < 30:
+            sub = np.nonzero(Lb[:, 2] < p.top + 0.2)[0]
+            m = base[sub[p.contains(Lb[sub], 0.05)]]
+            if len(m) < 30:
                 continue
             vals, cnt = np.unique(lab[m], return_counts=True)
             best = max(((int(c), labels.name(int(v))) for v, c in zip(vals, cnt) if labels.name(int(v)) in PIECE_CLASSES),
                        default=None)
-            if best and best[0] >= 0.15 * m.sum():
+            if best and best[0] >= 0.15 * len(m):
                 p.cls = best[1]
         # glass, mirrors and doors stop a sight line: their faint splats are not walls on the floor
         # plan, but a view does not reach "into the home" through a frosted door or a mirror
@@ -524,29 +539,56 @@ class Space:
         a kitchen shot shows the kitchen, not the living room through the open plan."""
         half = math.radians(hfov_deg) / 4
         k = self.room_keys.index(room)
-        n = 0
-        for a in np.linspace(-half, half, rays):
-            d = self.ray(p, heading_rad + a)
-            c, s_ = math.cos(heading_rad + a), math.sin(heading_rad + a)
-            i, j = self.cell((p[0] + c * max(d - 0.15, 0), p[1] + s_ * max(d - 0.15, 0)))
-            if 0 <= i < self.shape[0] and 0 <= j < self.shape[1]:
-                n += int(self.room_fill[i, j] == k)
-        return n / rays
+        hs = heading_rad + np.linspace(-half, half, rays)
+        d = np.maximum(self.rays(p, hs) - 0.15, 0)
+        i, j = self._cells(p[0] + np.cos(hs) * d, p[1] + np.sin(hs) * d)
+        ok = (i >= 0) & (i < self.shape[0]) & (j >= 0) & (j < self.shape[1])
+        return int((self.room_fill[i[ok], j[ok]] == k).sum()) / rays
 
     def ray(self, p, heading_rad: float, max_m: float = 8.0) -> float:
         """How far the eye sees from p along a heading before a wall or tall obstacle (or leaving
         the home): low furniture does not stop a view."""
-        c, s = math.cos(heading_rad), math.sin(heading_rad)
+        return float(self.rays(p, np.array([heading_rad]), max_m)[0])
+
+    # sight lines step CELL at a time; the planner casts ~10^5 of them a tour, so they run as one
+    # array operation per view (the same steps, cells and stops as a step-by-step walk)
+    def _cells(self, x, y):
+        """cell() on arrays: int() truncates toward zero, as astype does."""
+        return ((np.asarray(y) - self.lo[1]) / CELL).astype(np.int64), ((np.asarray(x) - self.lo[0]) / CELL).astype(np.int64)
+
+    def _blocked(self) -> np.ndarray:
+        key = (id(self.tall), id(self.inside), id(self.view_block))
+        if getattr(self, "_blk_key", None) != key:
+            self._blk = self.tall | ~self.inside | self.view_block
+            self._blk_key = key
+        return self._blk
+
+    def _steps(self, max_m: float) -> np.ndarray:
+        """The distances a walk visits: CELL added step by step (the same float sums) while the
+        previous one is short of max_m."""
+        cache = self.__dict__.setdefault("_steps_cache", {})
+        if max_m not in cache:
+            d = np.cumsum(np.full(int(max_m / CELL) + 3, CELL))
+            keep = np.r_[True, d[:-1] < max_m]
+            cache[max_m] = d[:np.argmin(keep) if not keep.all() else len(d)]
+        return cache[max_m]
+
+    def rays(self, p, headings, max_m: float = 8.0) -> np.ndarray:
+        """ray() for many headings from one spot at once."""
+        hs = np.asarray(headings, np.float64)
+        d = self._steps(max_m)
+        x = p[0] + np.cos(hs)[:, None] * d[None, :]
+        y = p[1] + np.sin(hs)[:, None] * d[None, :]
+        i, j = self._cells(x, y)
         H, W = self.shape
-        d = 0.0
-        while d < max_m:
-            d += CELL
-            i, j = self.cell((p[0] + c * d, p[1] + s * d))
-            if not (0 <= i < H and 0 <= j < W) or self.tall[i, j] or not self.inside[i, j] or self.view_block[i, j]:
-                break
-        return d
+        out = (i < 0) | (i >= H) | (j < 0) | (j >= W)
+        blk = out.copy()
+        inb = ~out
+        blk[inb] = self._blocked()[i[inb], j[inb]]
+        first = np.where(blk.any(1), blk.argmax(1), len(d) - 1)
+        return d[first]
 
     def view_depth(self, p, heading_rad: float, hfov_deg: float, rays: int = 11) -> float:
         """Mean reach (m) of the view across the frame's width: how much room it shows."""
         half = math.radians(hfov_deg) / 2
-        return float(np.mean([self.ray(p, heading_rad + a) for a in np.linspace(-half, half, rays)]))
+        return float(np.mean(self.rays(p, heading_rad + np.linspace(-half, half, rays))))
