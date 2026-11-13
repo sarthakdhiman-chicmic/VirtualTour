@@ -2,7 +2,8 @@
 (tour_worker.contract.jobs), run it in a temporary folder and return its result - or, for any
 failure, {"status": "failed", "error": {"code", "message"}}.
 
-Jobs: tour_render (jobs/render.py), tour_segment (jobs/segment.py), tour_plan (jobs/plan.py).
+Jobs: tour_render (jobs/render.py), tour_segment (jobs/segment.py), tour_plan (jobs/plan.py),
+scene_label (jobs/scene_label.py).
 Codes: invalid_job_type, invalid_request (request shape), the plan's own codes (invalid_plan,
 unsupported_camera_type, unsupported_easing), and the run's (image_fetch_failed, encode_failed,
 verification_failed, planning_failed, ...; unknown for anything unexpected)."""
@@ -16,6 +17,7 @@ from tour_worker import progress
 from tour_worker.config import Settings, get_settings
 from tour_worker.contract.jobs import (
     JOB_TYPES,
+    SceneLabelRequest,
     TourPlanRequest,
     TourRenderRequest,
     TourSegmentRequest,
@@ -23,7 +25,7 @@ from tour_worker.contract.jobs import (
 from tour_worker.errors import failure, from_exception
 from tour_worker.io.storage import build_storage
 
-_REQUESTS = {"tour_render": TourRenderRequest, "tour_segment": TourSegmentRequest,
+_REQUESTS = {"tour_render": TourRenderRequest, "tour_segment": TourSegmentRequest, "scene_label": SceneLabelRequest,
              "tour_plan": TourPlanRequest}
 
 
@@ -75,6 +77,9 @@ def _run(job: dict, job_type: str, settings: Settings, storage) -> dict:
             if job_type == "tour_segment":
                 from tour_worker.jobs.segment import run_segment
                 return run_segment(job, storage, workdir, settings=settings)
+            if job_type == "scene_label":
+                from tour_worker.jobs.scene_label import run_scene_label
+                return run_scene_label(job, storage, workdir, settings=settings)
             if job_type == "tour_plan":
                 from tour_worker.jobs.plan import run_plan
                 return run_plan(job, storage, workdir)

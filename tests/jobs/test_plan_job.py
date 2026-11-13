@@ -247,11 +247,12 @@ def test_the_runpod_handler_runs_tour_plan(tmp_path, monkeypatch):
 
 
 def test_pacing_reaches_the_planner():
-    """options.pacing (Slow / Normal / Fast): a slow tour is longer than a fast one, shots within 3-8 s."""
+    """options.pacing (Slow / Normal / Fast): a slow tour is longer than a fast one, its shots longer."""
     slow = run_job(_request(options={"pacing": "slow"}), storage=FakeStorage())["plan"]
     fast = run_job(_request(options={"pacing": "fast"}), storage=FakeStorage())["plan"]
     assert slow["total_duration_s"] > fast["total_duration_s"]
-    assert all(3.0 - 1e-6 <= s["duration_s"] <= 8.0 + 1e-6 for s in slow["shots"] + fast["shots"])
+    assert min(s["duration_s"] for s in slow["shots"]) > min(s["duration_s"] for s in fast["shots"])
+    assert min(s["duration_s"] for s in fast["shots"]) >= 2.5 - 1e-6
     assert run_job(_request(options={"pacing": "turbo"}), storage=FakeStorage())["error"]["code"] == "invalid_request"
 
 

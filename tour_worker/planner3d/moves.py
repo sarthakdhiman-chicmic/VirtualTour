@@ -36,8 +36,10 @@ from tour_worker.scene.camera import BezierCameraPath, intrinsics, look_at
 EYE = 1.50                    # eye height (m)
 LOOK_DROP = 0.30              # a level look drops this much over ~2.5 m
 HFOV = 78.0                   # one field of view for the whole tour
-MAX_TURN_DPS, MAX_MOVE_MPS, PRE_SYNC_SHARE = 10.0, 0.8, 0.8
-TURN_BUDGET, MOVE_BUDGET = MAX_TURN_DPS * PRE_SYNC_SHARE, MAX_MOVE_MPS * PRE_SYNC_SHARE
+MAX_TURN_DPS, MAX_MOVE_MPS = 10.0, 0.8
+# moves are planned to this share of the limits: the beat sync only lengthens room and hero shots
+# (planner/lengths.SYNC_BOUNDS), but may shorten a close-up to 0.7x
+PRE_SYNC_SHARE = {"room": 0.95, "hero": 0.95, "detail": 0.65}
 PITCH_LADDER = (10.0, 13.0, 16.0)
 JUMP_ANGLE, JUMP_DIST = 30.0, 1.5
 RMIN_LADDER = (0.28, 0.22)    # camera body clearance, a little less in small rooms
@@ -48,10 +50,24 @@ OCC_NEAR, MAX_OCC, OCC_W, OCC_CHECK_KIND = 2.0, 0.20, 3.0, 15
 OPENING_GLIDE = 1.5          # the tour opens by moving into the home
 # near-lens distance per move: a walkway composes on a piece, so nothing may stand within 2 m in
 # front of it; a glide or pan looks down a room, where walls 1.2 m+ away are the room itself
-OCC_NEAR_KIND = {"walkway": 2.0, "glide": 1.2, "pan": 1.2}
+OCC_NEAR_KIND = {"walkway": 2.0, "glide": 1.2, "pan": 1.2, "detail": 0.7}
 PAN_SWEEP = 50.0
 SAMPLES = 50
 FRAME_W, FRAME_H = 1920, 1080
+# what a view is worth showing (scene labels): a fireplace or a window beats a door
+FEATURES = {"fireplace": 1.0, "windowpane": 0.8, "kitchen island": 0.8, "bathtub": 0.8, "bed": 0.8,
+            "stairs": 0.7, "stairway": 0.7, "countertop": 0.6, "stove": 0.6, "bookcase": 0.6, "chandelier": 0.6,
+            "sofa": 0.6, "television receiver": 0.5, "painting": 0.5, "table": 0.5, "desk": 0.5, "mirror": 0.4,
+            "curtain": 0.3, "door": 0.2}
+FEATURE_W = 0.4
+# close-ups (detail shots, 1.5-2.5 s): fixtures, finishes, decor
+DETAILS = {"chandelier": 1.0, "fireplace": 1.0, "vase": 0.9, "flower": 0.9, "sculpture": 0.9, "painting": 0.8,
+           "stove": 0.8, "sink": 0.7, "lamp": 0.7, "sconce": 0.7, "clock": 0.6, "plant": 0.6, "mirror": 0.6,
+           "hood": 0.6, "bathtub": 0.6, "television receiver": 0.3}
+DETAIL_SIZE = (0.12, 1.6)     # m across: a vase to a fireplace
+DETAIL_DIST = (0.9, 1.15, 1.4)
+DETAIL_PUSH = 0.25
+DETAIL_PITCH_MAX = 30.0
 
 
 @dataclass
@@ -64,6 +80,11 @@ class Move:
     piece: object = None
     occ: float | None = None
     why: dict = field(default_factory=dict)
+    eye_z: float = EYE           # detail moves sit lower / higher than the room eye height
+
+    @property
+    def eye3(self) -> np.ndarray:
+        return np.c_[self.eye, np.full(len(self.eye), self.eye_z)]
 
     @property
     def first(self):
@@ -146,8 +167,8 @@ def speeds_of(segments: list[dict], duration_s: float, easing: str = "ease_in_ou
     return float(turn.max()), float(move.max())
 
 
-def trial_speeds(eye2: np.ndarray, tgt: np.ndarray, dur: float) -> tuple[float, float]:
-    segs, _ = fit_pair(eye3(eye2), tgt)
+def trial_speeds(eye2: np.ndarray, tgt: np.ndarray, dur: float, z: float = EYE) -> tuple[float, float]:
+    segs, _ = fit_pair(np.c_[eye2, np.full(len(eye2), z)], tgt)
     return speeds_of([{"eye": e, "target": t} for e, t in segs], dur, samples=91)
 
 
@@ -207,10 +228,12 @@ class RoomMoves:
         self.space, self.occ = space, occlusion
 
     def best(self, room: str, dur: float, *, earlier=(), prev=None, piece_rank: int = 0,
-             opening: bool = False, closing: bool = False) -> tuple[Move | None, list[str]]:
+             opening: bool = False, closing: bool = False, kind: str = "room") -> tuple[Move | None, list[str]]:
         """The best move for a shot of `room` lasting dur s. earlier: (first, last) poses of the
         room's earlier shots; prev: the previous shot's last pose. Returns (move, warnings)."""
         sp = self.space
+        share = PRE_SYNC_SHARE.get(kind, 0.8)
+        self.turn_budget, self.move_budget = MAX_TURN_DPS * share, MAX_MOVE_MPS * share
         pieces = sp.main_pieces(room)
         piece = pieces[piece_rank % len(pieces)] if pieces else None
         cands: list[Move] = []
@@ -224,6 +247,11 @@ class RoomMoves:
             own = {k for k, p in enumerate(pts) if sp.room_at(p) == room}
             if not own:
                 continue
+            if kind == "detail":                      # a close-up of one of the room's details
+                cands += self._detail(room, rmin, dur, prev, earlier)
+                if cands:
+                    break
+                continue
             if piece is not None:
                 for pitch in PITCH_LADDER:
                     walk = self._walkway(room, piece, pts, paths, rmin, dur, pitch, prev, earlier, own)
@@ -235,7 +263,13 @@ class RoomMoves:
             if cands:
                 break
         if not cands:
-            return None, [f"room_no_move:{room}"]
+            return None, [f"room_no_move:{room}" if kind != "detail" else f"room_no_detail:{room}"]
+        for m in cands:                               # what the view shows (the scene's labels)
+            if m.kind != "detail":
+                b = self._feature_bonus(room, m)
+                m.score += b
+                if b:
+                    m.why["features"] = round(b / FEATURE_W, 2)
         cands.sort(key=lambda m: -m.score)
         if self.occ is not None:                      # occlusion renders work on this room's splats
             mask = sp.space_mask(room, RMIN_LADDER[-1])
@@ -251,9 +285,9 @@ class RoomMoves:
             if checked.get(m.kind, 0) >= OCC_CHECK_KIND:      # every kind gets its share of checks
                 continue
             if "turn_dps" not in m.why:
-                turn, move = trial_speeds(m.eye, m.tgt, dur)
+                turn, move = trial_speeds(m.eye, m.tgt, dur, m.eye_z)
                 m.why.update(turn_dps=round(turn, 1), move_mps=round(move, 2))
-                if turn > TURN_BUDGET or move > MOVE_BUDGET:
+                if turn > self.turn_budget or move > self.move_budget:
                     continue
             checked[m.kind] = checked.get(m.kind, 0) + 1
             m.occ = self._cover(m)
@@ -270,6 +304,67 @@ class RoomMoves:
             return best, []
         hold = self._hold(least, room)
         return hold, [f"view_partly_blocked:{room}"]
+
+    # ---- what a view shows ----------------------------------------------------------------------
+    def features_seen(self, room: str, eye2, tgt) -> float:
+        """Sum of FEATURES weights of the room's (and its open plan's) labelled features in the
+        middle 70% of the frame, in front within 8 m."""
+        sp = self.space
+        rooms = sp.spaces.get(room, {room})
+        d = np.asarray(tgt[:2]) - np.asarray(eye2[:2])
+        head = math.atan2(d[1], d[0])
+        half = math.radians(HFOV) * 0.35
+        w = 0.0
+        for o in sp.objects:
+            if o.get("room") not in rooms or o["class"] not in FEATURES:
+                continue
+            v = np.asarray(o["centre"][:2]) - np.asarray(eye2[:2])
+            dist = float(np.linalg.norm(v))
+            if not 0.5 < dist < 8.0:
+                continue
+            a = (math.atan2(v[1], v[0]) - head + math.pi) % (2 * math.pi) - math.pi
+            if abs(a) <= half:
+                w += FEATURES[o["class"]]
+        return min(w, 2.0)
+
+    def _feature_bonus(self, room: str, m: Move) -> float:
+        k = len(m.eye) // 2
+        return FEATURE_W * max(self.features_seen(room, m.eye[0], m.tgt[0]), self.features_seen(room, m.eye[k], m.tgt[k]))
+
+    def _detail(self, room, rmin, dur, prev, earlier) -> list[Move]:
+        """Close-ups of the room's details (scene labels): from DETAIL_DIST m off, the eye a little
+        above the object, a slow DETAIL_PUSH m push-in; the object well inside the frame."""
+        sp = self.space
+        out = []
+        objs = [o for o in sp.room_objects(room, DETAILS)
+                if DETAIL_SIZE[0] <= max(o["max"][0] - o["min"][0], o["max"][1] - o["min"][1]) <= DETAIL_SIZE[1]]
+        for o in objs:
+            c = np.asarray(o["centre"], float)
+            size = max(o["max"][0] - o["min"][0], o["max"][1] - o["min"][1], o["max"][2] - o["min"][2])
+            z_eye = float(np.clip(c[2] + 0.35, 0.9, 1.6))
+            for dist in DETAIL_DIST:
+                for ang in range(0, 360, 30):
+                    a = math.radians(ang)
+                    p0 = c[:2] + (dist + DETAIL_PUSH) * np.array([math.cos(a), math.sin(a)])
+                    p1 = c[:2] + dist * np.array([math.cos(a), math.sin(a)])
+                    if sp.clearance(p0) < 0.2 or sp.clearance(p1) < 0.2 or sp.room_at(p0) not in sp.spaces.get(room, {room}):
+                        continue
+                    pitch = math.degrees(math.atan2(z_eye - c[2], dist))
+                    if pitch > DETAIL_PITCH_MAX:
+                        continue
+                    s_ = np.linspace(0, 1, SAMPLES)
+                    eye = np.outer(1 - s_, p0) + np.outer(s_, p1)
+                    tgt = np.repeat(c[None], SAMPLES, 0)
+                    first, last = (eye[0], tgt[0]), (eye[-1], tgt[-1])
+                    if jump_cut(prev, first) or repeats(first, last, earlier):
+                        continue
+                    fill = size / (2 * dist * math.tan(math.radians(HFOV) / 2))
+                    if not 0.15 <= fill <= 0.8:
+                        continue
+                    score = 1.0 * DETAILS[o["class"]] - 1.5 * abs(fill - 0.4) + 0.3 * min(sp.clearance(p0), 0.6)
+                    out.append(Move("detail", eye, tgt, score, pitch, None, eye_z=z_eye,
+                                    why={"object": o["class"], "distance_m": dist, "fill": round(fill, 2)}))
+        return out
 
     # ---- move kinds ------------------------------------------------------------------------------
     def _path(self, paths, i, j, rmin):
@@ -292,7 +387,7 @@ class RoomMoves:
                     if i not in own:
                         continue
                     path, plen = self._path(paths, i, j, rmin)
-                    if path is None or plen > 1.3 * L or plen / dur * 1.5 > MOVE_BUDGET:
+                    if path is None or plen > 1.3 * L or plen / dur * 1.5 > self.move_budget:
                         continue
                     path = resample(path, SAMPLES)
                     tgt = cap_pitch(path, np.repeat(top[None], len(path), 0), pitch)
@@ -323,7 +418,7 @@ class RoomMoves:
                 if not MOVE_LEN[0] + 0.4 <= L <= MOVE_LEN[1] + 1.4:
                     continue
                 path, plen = self._path(paths, a, b, rmin)
-                if path is None or plen > 1.25 * L or plen / dur * 1.5 > MOVE_BUDGET:
+                if path is None or plen > 1.25 * L or plen / dur * 1.5 > self.move_budget:
                     continue
                 path = resample(path, SAMPLES)
                 d = path[-1] - path[0]
@@ -334,15 +429,21 @@ class RoomMoves:
                     continue
                 far = path[-1] + d * min(reach, 6.0)
                 dist = float(np.linalg.norm(far - path[0]))
-                aim = np.array([*far, EYE - min(0.45, 0.12 * dist)])
-                tgt = cap_pitch(path, np.repeat(aim[None], len(path), 0), PITCH_LADDER[0])
-                first, last = (path[0], tgt[0]), (path[-1], tgt[-1])
-                if jump_cut(prev, first) or repeats(first, last, earlier):
-                    continue
-                depth = self.space.view_depth(path[0], head, HFOV)
-                score = 0.3 * plen + 0.25 * min(depth, 6.0) + 0.3 * parallax(path, tgt) + (OPENING_GLIDE if opening else 0.0)
-                out.append(Move("glide", path, tgt, score,
-                                why={"travel_m": round(plen, 2), "view_depth_m": round(depth, 2)}))
+                aims = [("depth", np.array([*far, EYE - min(0.45, 0.12 * dist)]))]
+                for o in self.space.room_objects(room, FEATURES):      # or push toward a feature ahead
+                    v = np.asarray(o["centre"][:2]) - path[-1]
+                    if np.linalg.norm(v) > 0.8 and float(v @ d) / np.linalg.norm(v) > 0.5:
+                        aims.append((o["class"], np.array([*o["centre"][:2], max(o["centre"][2], EYE - 0.6)])))
+                for why_aim, aim in aims:
+                    tgt = cap_pitch(path, np.repeat(aim[None], len(path), 0), PITCH_LADDER[0])
+                    first, last = (path[0], tgt[0]), (path[-1], tgt[-1])
+                    if jump_cut(prev, first) or repeats(first, last, earlier):
+                        continue
+                    depth = self.space.view_depth(path[0], math.atan2(*(aim[:2] - path[0])[::-1]), HFOV)
+                    score = (0.3 * plen + 0.25 * min(depth, 6.0) + 0.3 * parallax(path, tgt)
+                             + (OPENING_GLIDE if opening else 0.0))
+                    out.append(Move("glide", path, tgt, score,
+                                    why={"travel_m": round(plen, 2), "view_depth_m": round(depth, 2), "aim": why_aim}))
         return out
 
     def _pan(self, room, pts, rmin, dur, prev, earlier, closing) -> list[Move]:
@@ -366,7 +467,7 @@ class RoomMoves:
                     hs = hc + sign * math.radians(sweep) * (s - 0.5)
                     tgt = np.c_[eye[:, 0] + 2.5 * np.cos(hs), eye[:, 1] + 2.5 * np.sin(hs), np.full(SAMPLES, EYE - LOOK_DROP)]
                     turn, move = trial_speeds(eye, tgt, dur)
-                    if turn <= TURN_BUDGET and move <= MOVE_BUDGET:
+                    if turn <= self.turn_budget and move <= self.move_budget:
                         break
                     sweep *= 0.85
                 else:
@@ -401,7 +502,7 @@ class RoomMoves:
         k = len(m.eye) // 2
         worst = 0.0
         for e, t in ((m.eye[k], m.tgt[k]), (m.eye[0], m.tgt[0]), (m.eye[-1], m.tgt[-1])):
-            worst = max(worst, self.occ.cover([*e, EYE], t, HFOV, m.piece, OCC_NEAR_KIND.get(m.kind, OCC_NEAR)))
+            worst = max(worst, self.occ.cover([*e, m.eye_z], t, HFOV, m.piece, OCC_NEAR_KIND.get(m.kind, OCC_NEAR)))
             if worst > MAX_OCC:                       # already out: the other poses cannot bring it back
                 break
         return worst

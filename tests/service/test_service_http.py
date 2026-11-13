@@ -145,7 +145,7 @@ def test_health(make_client):
     h = c.get("/health").json()
     assert h["jobs"] == {"inQueue": 0, "inProgress": 0, "completed": 1, "failed": 0, "cancelled": 0}
     assert h["workers"] == {"running": 0, "idle": 2, "concurrency": 2}
-    assert h["jobTypes"] == ["tour_render", "tour_segment", "tour_plan"]
+    assert h["jobTypes"] == ["tour_render", "tour_segment", "tour_plan", "scene_label"]
     assert h["segmentModel"] == "facebook/mask2former-swin-large-ade-panoptic@ae53ed7ab3"
     assert "version" in h and "workerId" in h
     assert h["splat"]["backend"] == "auto" and set(h["splat"]) == {"backend", "gsplatVersion", "torchVersion"}

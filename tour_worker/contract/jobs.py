@@ -8,7 +8,7 @@ from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-JOB_TYPES = ("tour_render", "tour_segment", "tour_plan")
+JOB_TYPES = ("tour_render", "tour_segment", "tour_plan", "scene_label")
 
 
 class _Request(BaseModel):
@@ -105,6 +105,8 @@ class PlanScene(BaseModel):
     up_axis: Optional[list[float]] = None     # the scene's up in its own axes; None: found from the geometry
     motion_uri: Optional[str] = None          # 3D motion (curtains, plants, flames), made once per scene
     motion_sha256: Optional[str] = None
+    labels_uri: Optional[str] = None          # what each Gaussian is (the scene_label job): the planner
+    labels_sha256: Optional[str] = None       # composes on beds / sofas, aims at windows, adds details
 
 
 class PlanRoom(BaseModel):
@@ -114,6 +116,18 @@ class PlanRoom(BaseModel):
     room_type: str = Field(min_length=1)      # as for photos ("Living Room", "kitchen", ...)
     point: list[float] = Field(min_length=3, max_length=3)
     tour: bool = True                         # False: a room of the home that the tour leaves out
+
+
+class SceneLabelRequest(_Request):
+    """Label a splat scene once (at upload): what every Gaussian is (Mask2Former classes voted from
+    rendered survey views of its rooms) -> <output_prefix>scene_labels.npz, and the scene's motion
+    (curtains, plants, lit fireplaces) -> <output_prefix>scene_motion.npz. tour_plan reads the
+    labels (scene.labels_uri); tour_render the motion (scene.motion_uri)."""
+    job_type: Literal["scene_label"]
+    scene: PlanScene
+    rooms: list[PlanRoom] = Field(min_length=1)
+    output_prefix: str = Field(min_length=1)
+    image_urls: dict[str, str] = Field(default_factory=dict)   # optional: scene uri -> fetch URL
 
 
 class TourPlanRequest(_Request):
@@ -211,6 +225,18 @@ class SegmentRegion(BaseModel):
     bbox: list[int]                           # [x1, y1, x2, y2] in `space` pixels
     space: list[int]                          # [w, h] the masks were made at
     mask_url: str
+
+
+class SceneLabelResult(BaseModel):
+    status: Literal["completed"]
+    labels_uri: str
+    labels_sha256: str
+    motion_uri: Optional[str] = None          # None: nothing in the scene moves
+    motion_sha256: Optional[str] = None
+    objects: list[dict[str, Any]]             # each labelled object: class, centre, box, footprint, room
+    stats: dict[str, Any]                     # views, rooms, labelled / seen Gaussians, per-class counts
+    seconds: float
+    timings: Optional[dict[str, Any]] = None
 
 
 class TourSegmentResult(BaseModel):

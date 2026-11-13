@@ -108,7 +108,13 @@ def label(model: SplatModel, views: list[View]) -> np.ndarray:
     h = hits[np.arange(len(model)), best]
     ok = (h >= MIN_HITS) & (h >= MIN_SHARE * np.maximum(seen, 1))
     lab[ok] = best[ok]
-    # grow into Gaussians no view saw (the far side of a curtain, a plant's inside)
+    return grow(model, lab, seen)
+
+
+def grow(model: SplatModel, lab: np.ndarray, seen: np.ndarray) -> np.ndarray:
+    """Labelled classes grown into Gaussians no view saw (the far side of a curtain, a plant's
+    inside): an unseen Gaussian within one GROW_VOXEL of a labelled one takes its label."""
+    lab = lab.copy()
     pts = model.means.astype(np.float64)
     cells = np.floor(pts / GROW_VOXEL).astype(np.int64)
     for cid in CLASSES.values():
@@ -220,3 +226,93 @@ def build_field(model: SplatModel, lab: np.ndarray, up, scene_sha256: str) -> Mo
     z = np.zeros((0, TERMS), np.float32)
     return MotionField(np.zeros(0, np.int64), np.zeros((0, TERMS, 3), np.float32), z, z, z, scene_sha256,
                        len(model), {})
+
+
+# ---- motion from the scene's labels (scene/semantics.py) ----------------------------------------------
+FLAME_MIN = 300                       # bright warm Gaussians in a fireplace: it is lit
+FLAME_AMP_UP, FLAME_AMP_SIDE = 0.035, 0.020
+FLAME_FREQ_UP, FLAME_FREQ_SIDE = (1.6, 2.6), (0.9, 1.4)
+FLAME_CELL = 0.04
+
+
+def _bright_warm(model: SplatModel) -> np.ndarray:
+    from tour_worker.scene.splat_io import SH_C0
+    raw = 0.5 + SH_C0 * model.sh[:, 0]
+    return (raw.max(1) > 0.9) & ((raw[:, 0] >= 1.15 * raw[:, 2]) | (raw.min(1) > 0.92))
+
+
+def flame_field(model: SplatModel, local: np.ndarray, fireplaces: list[dict], up_scene, R, scene_sha256: str):
+    """Flames in the lit fireplaces: the bright, warm Gaussians inside each fireplace's box (the
+    largest connected cluster), each 4 cm patch licking upward (a wave travelling up the flame) and
+    swaying along the firebox; zero at the flame's base, most at its tips. None when no fire is lit."""
+    up = np.asarray(up_scene, np.float64)
+    hot = _bright_warm(model)
+    idx_all, dirs_all, amp_all, freq_all, ph_all = [], [], [], [], []
+    for k, f in enumerate(fireplaces):
+        lo, hi = np.asarray(f["min"]) - 0.1, np.asarray(f["max"]) + 0.1
+        inside = np.flatnonzero(hot & np.all((local >= lo) & (local <= hi), axis=1))
+        if len(inside) < FLAME_MIN:
+            continue
+        cells = np.floor(local[inside] / 0.05).astype(np.int64)
+        c0 = cells.min(0)
+        grid = np.zeros(tuple(cells.max(0) - c0 + 1), bool)
+        grid[tuple((cells - c0).T)] = True
+        comp, n = ndi.label(grid, structure=np.ones((3, 3, 3), bool))
+        cid = comp[tuple((cells - c0).T)]
+        big = np.bincount(cid)[1:].argmax() + 1
+        idx = inside[cid == big]
+        if len(idx) < FLAME_MIN:
+            continue
+        z = local[idx, 2]
+        base, tip = np.percentile(z, [10, 98])
+        h = np.clip((z - base) / max(tip - base, 0.1), 0, 1)
+        a = math.radians(f["footprint"]["axis_deg"])
+        side = np.asarray(R, np.float64).T @ np.array([math.cos(a), math.sin(a), 0.0])   # along the firebox
+        cells = np.floor(local[idx][:, :2] / FLAME_CELL).astype(np.int64)
+        c3 = np.c_[cells, np.zeros(len(cells), np.int64)]
+        r = [_hash01(c3, 31.0 + k + s_) for s_ in range(4)]
+        amp = np.stack([FLAME_AMP_UP * h ** 1.3, FLAME_AMP_SIDE * h ** 1.5], 1)
+        freq = np.stack([FLAME_FREQ_UP[0] + (FLAME_FREQ_UP[1] - FLAME_FREQ_UP[0]) * r[0],
+                         FLAME_FREQ_SIDE[0] + (FLAME_FREQ_SIDE[1] - FLAME_FREQ_SIDE[0]) * r[1]], 1)
+        ph = np.stack([2 * math.pi * r[2] - 2 * math.pi * 1.2 * h, 2 * math.pi * r[3] - math.pi * h], 1) % (2 * math.pi)
+        dirs = np.stack([np.tile(up, (len(idx), 1)), np.tile(side, (len(idx), 1))], 1)
+        idx_all.append(idx); dirs_all.append(dirs); amp_all.append(amp); freq_all.append(freq); ph_all.append(ph)
+    if not idx_all:
+        return None
+    idx = np.concatenate(idx_all)
+    order = np.argsort(idx)
+    cat = lambda xs: np.concatenate(xs)[order].astype(np.float32)   # noqa: E731
+    return MotionField(idx[order].astype(np.int64), cat(dirs_all), cat(amp_all), cat(freq_all), cat(ph_all),
+                       scene_sha256, len(model), {"flame": int(len(idx))})
+
+
+def merge_fields(fields: list, scene_sha256: str, splats: int) -> MotionField | None:
+    """One motion field from several (curtains / plants, flames); a Gaussian in two keeps the first."""
+    fields = [f for f in fields if f is not None and len(f)]
+    if not fields:
+        return None
+    idx = np.concatenate([f.idx for f in fields])
+    _, first = np.unique(idx, return_index=True)
+    keep = np.sort(first)
+    cat = lambda name: np.concatenate([getattr(f, name) for f in fields])[keep]   # noqa: E731
+    order = np.argsort(idx[keep])
+    classes: dict = {}
+    for f in fields:
+        for k, v in f.classes.items():
+            classes[k] = classes.get(k, 0) + v
+    return MotionField(idx[keep][order].astype(np.int64), cat("dirs")[order], cat("amp")[order], cat("freq")[order],
+                       cat("phase")[order], scene_sha256, splats, classes)
+
+
+def motion_from_labels(model: SplatModel, scene_labels, seen: np.ndarray, local: np.ndarray, up_scene, R,
+                       scene_sha256: str) -> MotionField | None:
+    """The scene's motion from its labels: curtains sway, plants stir (grown into the Gaussians no
+    view saw), lit fireplaces flicker."""
+    lab = np.zeros(len(model), np.int8)
+    lab[scene_labels.mask("curtain")] = CLASSES["curtain"]
+    lab[scene_labels.mask("plant")] = CLASSES["potted_plant"]
+    lab = grow(model, lab, seen)
+    sway = build_field(model, lab, up_scene, scene_sha256)
+    fires = [o for o in scene_labels.objects if o["class"] == "fireplace"]
+    flames = flame_field(model, local, fires, up_scene, R, scene_sha256)
+    return merge_fields([sway, flames], scene_sha256, len(model))

@@ -103,7 +103,9 @@ def test_the_plan_follows_the_photo_planners_order_and_screen_time(planned):
     assert keys[0] == "living" and keys[-1] == "bed"               # narrative order, not request order
     assert keys.count("living") == 2 and keys.count("bed") == 1    # the living room is a hero room: two angles
     assert plan.mode == "cinematic_3d" and plan.plan_version == "1.6"
-    assert all(5.0 - 1e-6 <= s.duration_s <= 8.0 + 1e-6 for s in plan.shots)
+    from tour_worker.planner.lengths import ceiling_s
+    assert all(3.0 - 1e-6 <= s.duration_s <= ceiling_s("hero", "normal") * 1.5 + 1e-6 for s in plan.shots)
+    assert plan.shots[0].duration_s >= 5.0 - 1e-6                   # the opening shot holds
     assert [s.caption for s in plan.shots] == [None, None, None]   # no room labels asked for
     assert rep["sequence"] == ["living", "bed"]
 
@@ -174,3 +176,36 @@ def test_occlusion_is_measured_in_the_middle_of_the_frame(model):
                     np.concatenate([model.sh, np.zeros((400, 1, 3), np.float32)]), 0, "ply", {})
     sp2 = Space(m2)
     assert Occlusion(m2, sp2).cover([0.4, 2.5, 1.5], [3.0, 2.5, 1.2], HFOV) > 0.2
+
+
+# ---- with the scene's labels (scene/semantics.py) ---------------------------------------------------
+def _labels(model):
+    from tour_worker.scene.semantics import INDEX, SceneLabels
+    P = model.means
+    lab = np.zeros(len(model), np.uint8)
+    sofa = (P[:, 0] > 0.95) & (P[:, 0] < 3.25) & (P[:, 1] > 0.35) & (P[:, 1] < 1.35) & (P[:, 2] > 0.15) & (P[:, 2] < 0.85)
+    bed = (P[:, 0] > 7.55) & (P[:, 0] < 9.65) & (P[:, 1] > 2.95) & (P[:, 1] < 4.65) & (P[:, 2] > 0.15) & (P[:, 2] < 0.65)
+    lab[sofa], lab[bed] = INDEX["sofa"], INDEX["bed"]
+    vase = {"class": "vase", "centre": [5.0, 4.4, 0.9], "min": [4.85, 4.25, 0.7], "max": [5.15, 4.55, 1.1],
+            "footprint": {"centre": [5.0, 4.4], "long": 0.3, "short": 0.3, "axis_deg": 0.0}, "top": 1.1,
+            "splats": 400, "room": "living"}
+    return SceneLabels(lab, "ab" * 32, len(model), [vase])
+
+
+def test_labels_name_the_pieces_and_add_a_close_up_of_a_detail(model):
+    plan, rep, _ = plan_tour_3d(model, SCENE, ROOMS, "test-home", PlannerConfig(), check_occlusion=False,
+                                labels=_labels(model))
+    rooms = {r["room_key"]: r for r in rep["rooms"]}
+    assert rooms["living"]["main_pieces"][0]["class"] == "sofa" and rooms["bed"]["main_pieces"][0]["class"] == "bed"
+    close = [s for s in plan.shots if s.role == "close"]
+    assert len(close) == 1 and close[0].room_key == "living" and close[0].camera.move == "detail"
+    assert 1.5 - 1e-6 <= close[0].duration_s <= 2.5 + 1e-6
+    row = next(r for r in rep["shots"] if r["move"] == "detail")
+    assert row["object"] == "vase"
+    keys = [s.room_key for s in plan.shots]
+    assert keys.index("living") < plan.shots.index(close[0]) < len(keys) - 1     # after the room's first shot
+
+
+def test_without_labels_there_are_no_close_ups(planned):
+    plan, _, _ = planned
+    assert not [s for s in plan.shots if s.role == "close"]

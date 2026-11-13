@@ -29,6 +29,21 @@ OPAQUE, MAX_SPLAT_M = 0.35, 0.25       # splats that make the floor plan: opaque
 BODY = (0.15, 2.0)                     # heights a camera body could hit
 FURN_BODY, FURN_TALL = (0.30, 1.0), (1.3, 2.0)
 MIN_PIECE_M2 = 0.25
+# what a room's main piece is, by room type (scoring/rooms.py slugs): composed on first, largest first
+PIECE_CLASSES = ("bed", "sofa", "armchair", "table", "coffee table", "desk", "kitchen island", "counter",
+                 "countertop", "bathtub", "pool table", "chest of drawers", "buffet", "ottoman", "bench")
+PREFER = {
+    "bed": ("primary_bedroom", "master_bedroom", "secondary_bedroom", "guest_bedroom", "childrens_bedroom",
+            "bedroom", "bed_room", "nursery"),
+    "sofa": ("living_room", "family_room", "great_room", "sunroom", "open_concept", "media_room", "bonus_room",
+             "basement"),
+    "table": ("dining_room", "formal_dining_room", "breakfast_nook"),
+    "kitchen island": ("kitchen",), "desk": ("home_office", "study", "library"),
+    "bathtub": ("primary_bathroom", "master_bathroom", "ensuite", "bathroom", "secondary_bathroom"),
+    "pool table": ("game_room",),
+}
+SECOND = {"kitchen": ("countertop", "counter", "table"), "living_room": ("armchair", "coffee table"),
+          "family_room": ("armchair", "coffee table"), "dining_room": ("buffet",)}
 OPEN_PLAN_M = 0.9                      # shared boundary (on cells >= ROOM_RMIN clear) longer than this: one
                                        # open-plan space - an opening ~1.3 m+ wide; a 0.9 m door measures ~0.5 m
 ROOM_RMIN = 0.15                       # the room map uses cells at least this clear
@@ -57,6 +72,7 @@ class Piece:
     half_short: float
     top: float
     area: float
+    cls: str | None = None    # what it is, from the scene's labels (bed, sofa, kitchen island ...)
 
     def local(self, p) -> np.ndarray:
         r = np.asarray(p, np.float64)[..., :2] - self.centre
@@ -78,8 +94,9 @@ class Piece:
                          for sx in (-1, 1) for sy in (-1, 1)])
 
     def to_dict(self) -> dict:
-        return {"centre": [round(float(x), 2) for x in self.centre], "long_m": round(2 * self.half_long, 2),
-                "short_m": round(2 * self.half_short, 2), "top_m": round(self.top, 2), "area_m2": round(self.area, 2)}
+        return {"class": self.cls, "centre": [round(float(x), 2) for x in self.centre],
+                "long_m": round(2 * self.half_long, 2), "short_m": round(2 * self.half_short, 2),
+                "top_m": round(self.top, 2), "area_m2": round(self.area, 2)}
 
 
 class Space:
@@ -96,6 +113,9 @@ class Space:
         self._grid(model)
         self._furniture()
         self.room_keys: list[str] = []
+        self.room_types: dict[str, str | None] = {}
+        self.objects: list[dict] = []
+        self.labels = None
 
     # ---- axes -----------------------------------------------------------------------------------
     def to_scene(self, p) -> np.ndarray:
@@ -291,6 +311,22 @@ class Space:
         k = int(self.room_of[i, j])
         return self.room_keys[k] if k >= 0 else None
 
+    def room_near(self, p, radius: float = 1.5) -> str | None:
+        """The room of the free floor nearest p (within radius m): a sofa's middle is not floor."""
+        r = self.room_at(p)
+        if r is not None:
+            return r
+        i, j = self.cell(p)
+        k = int(radius / CELL)
+        H, W = self.shape
+        a0, a1, b0, b1 = max(0, i - k), min(H, i + k + 1), max(0, j - k), min(W, j + k + 1)
+        win = self.room_of[a0:a1, b0:b1]
+        ys, xs = np.nonzero(win >= 0)
+        if not len(ys):
+            return None
+        q = int(np.argmin((ys + a0 - i) ** 2 + (xs + b0 - j) ** 2))
+        return self.room_keys[int(win[ys[q], xs[q]])]
+
     def space_mask(self, room: str, rmin: float) -> np.ndarray:
         ids = [self.room_keys.index(r) for r in sorted(self.spaces.get(room, {room}))]
         return (self.dt >= rmin) & np.isin(self.room_of, ids)
@@ -311,8 +347,41 @@ class Space:
         return max(sorted(votes), key=votes.get) if votes else None
 
     def main_pieces(self, room: str, min_area: float = 0.8) -> list[Piece]:
-        """The room's low furniture big enough to compose on, largest first."""
-        return [p for p in self.pieces if p.area >= min_area and self.piece_room(p) == room]
+        """The room's low furniture big enough to compose on: what its type is about first (a
+        bedroom's bed, a living room's sofa, a kitchen's island - from the scene's labels), then
+        other labelled pieces, then unlabelled ones; largest first within each."""
+        from tour_worker.scoring.rooms import canon
+        rtype = canon(self.room_types.get(room))
+        want = [c for c, types in PREFER.items() if rtype in types] + list(SECOND.get(rtype, ()))
+
+        def rank(p):
+            if p.cls in want:
+                return want.index(p.cls)
+            return len(want) + (0 if p.cls in PIECE_CLASSES else 1)
+        mine = [p for p in self.pieces if p.area >= min_area and self.piece_room(p) == room]
+        return sorted(mine, key=lambda p: (rank(p), -p.area))
+
+    def attach_labels(self, labels) -> None:
+        """The scene's labels (scene/semantics.py): each piece gets the class most of its splats
+        carry (a piece class), and the labelled objects become known (features, details)."""
+        self.labels = labels
+        L, lab = self.local, labels.labels
+        for p in self.pieces:
+            m = p.contains(L, 0.05) & (L[:, 2] > 0.1) & (L[:, 2] < p.top + 0.2) & (lab > 0)
+            if m.sum() < 30:
+                continue
+            vals, cnt = np.unique(lab[m], return_counts=True)
+            best = max(((int(c), labels.name(int(v))) for v, c in zip(vals, cnt) if labels.name(int(v)) in PIECE_CLASSES),
+                       default=None)
+            if best and best[0] >= 0.15 * m.sum():
+                p.cls = best[1]
+        self.objects = [dict(o) for o in labels.objects]
+        for o in self.objects:                      # the room of the free floor nearest it (rooms set later)
+            o["room"] = self.room_near(np.asarray(o["centre"][:2])) if self.room_keys else o.get("room")
+
+    def room_objects(self, room: str, classes=None) -> list[dict]:
+        return [o for o in getattr(self, "objects", []) if o.get("room") == room
+                and (classes is None or o["class"] in classes)]
 
     # ---- sampling and paths ---------------------------------------------------------------------
     def spread_points(self, mask: np.ndarray, n: int = 36, min_gap: float = 0.25) -> np.ndarray:

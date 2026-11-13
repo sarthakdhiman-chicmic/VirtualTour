@@ -124,12 +124,26 @@ def _run_plan_3d(req: TourPlanRequest, storage, workdir: str, sw, t0: float) -> 
         return failure("scene_invalid", str(e))
     except Exception as e:  # noqa: BLE001
         return failure("scene_fetch_failed", f"{type(e).__name__}: {e}")
+    labels, label_warnings = None, []
+    if sc.labels_uri:                              # what every splat is (the scene_label job)
+        from tour_worker.scene.semantics import check_binding, load_labels
+        try:
+            with sw.stage("labels_fetch"):
+                lpath = ensure_scene(sc.labels_uri, sc.labels_sha256 or "", "npz", storage,
+                                     os.path.join(workdir, "labels"), req.image_urls.get(sc.labels_uri))
+                labels = load_labels(lpath)
+            why = check_binding(labels, sc.sha256, len(model))
+            if why:
+                raise ValueError(why)
+        except Exception as e:  # noqa: BLE001 - labels never fail a plan: it plans from the geometry
+            labels, label_warnings = None, [f"scene_labels_skipped:{type(e).__name__}"]
     try:
         cfg = _planner_config(req)
         with sw.stage("planning"):
             plan, rep, rooms_report = plan_tour_3d(
                 model, sc.model_dump(exclude_none=True), [r.model_dump() for r in req.rooms], req.listing_id, cfg,
-                music_track=req.music_track.model_dump() if req.music_track else None, preset=req.options.preset)
+                music_track=req.music_track.model_dump() if req.music_track else None, preset=req.options.preset,
+                labels=labels)
     except Exception as e:  # noqa: BLE001
         return failure("planning_failed", f"planning_failed: {type(e).__name__}: {e}")
     plan_dict = plan.model_dump(mode="json")
@@ -140,7 +154,7 @@ def _run_plan_3d(req: TourPlanRequest, storage, workdir: str, sw, t0: float) -> 
     summary = _scoring_summary(rooms_report)
     summary["photos"] = 0
     return {"status": "completed", "plan": plan_dict, "plan_hash": plan.provenance.plan_hash,
-            "scoring": summary, "warnings": [], "planner_3d": rep,
+            "scoring": summary, "warnings": label_warnings, "planner_3d": rep,
             "seconds": round(time.time() - t0, 2), "timings": sw.result()}
 
 
