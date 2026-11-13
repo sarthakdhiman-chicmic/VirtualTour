@@ -298,3 +298,11 @@ def test_cuts_follow_the_hardest_drum_hits_not_the_guessed_bar_line():
     cuts = boundaries(r.durations)[:-1]
     on = [np.abs(strong - c).min() <= TOL for c in cuts]
     assert r.music.synced and all(on)
+
+
+def test_cuts_move_onto_the_attack_the_analysis_beat_trails():
+    """The analysis' beat times trail the audible attack (~27 ms, measured on a render): cuts move
+    that much earlier before they are rounded to frames; the tour's end does not move."""
+    plain = np.round(np.cumsum(frame_align([2.0, 4.02, 6.0], 30)) * 30).tolist()
+    moved = np.round(np.cumsum(frame_align([2.0, 4.02, 6.0], 30, 0, 0.027)) * 30).tolist()
+    assert plain == [60, 121, 180] and moved == [59, 120, 180]

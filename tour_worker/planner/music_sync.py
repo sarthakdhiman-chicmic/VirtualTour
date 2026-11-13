@@ -120,11 +120,14 @@ def snap_durations(
     return path[::-1]
 
 
-def frame_align(boundaries_s, fps, lead_frames=0):
+def frame_align(boundaries_s, fps, lead_frames=0, onset_lag_s=0.0):
     """Boundary times -> exact video frames -> per-shot durations (centiseconds) whose cumulative
     sums round back to those frames (the worker: shot k spans round(S_k*fps)..round(S_k+1*fps)).
-    Cuts (not the tour end) land lead_frames early: a cut right on a beat's onset reads as late."""
-    frames = np.round(np.asarray(boundaries_s, dtype=float) * fps).astype(int)
+    Cuts (not the tour end) move onset_lag_s earlier - onto the attack the analysis' beat time trails
+    (planner/config.music_onset_lag_s) - and then lead_frames earlier still."""
+    b = np.asarray(boundaries_s, dtype=float).copy()
+    b[:-1] -= onset_lag_s
+    frames = np.round(b * fps).astype(int)
     frames[:-1] -= lead_frames
     for k in range(1, len(frames)):                 # strictly increasing
         frames[k] = max(frames[k], frames[k - 1] + 1)
@@ -293,7 +296,7 @@ def _sync_v2(targets, track: dict, cfg: PlannerConfig, roles) -> SyncResult | No
     if plan is None:
         return None
     lead = cfg.music_cut_lead_frames
-    durations = frame_align([plan.times[j] for j in plan.path], cfg.fps, lead)
+    durations = frame_align([plan.times[j] for j in plan.path], cfg.fps, lead, cfg.music_onset_lag_s)
     rows, hook_cuts, accents = punches_for(plan, durations, cfg, float(an.get("beat_period_s") or 0.5), lead)
     missed = sum(1 for r in rows if r.kind == "missed" and r.tier == 1)
     music = MusicTrack(
@@ -372,7 +375,7 @@ def _sync_v3(
     if path is None:
         durations = frame_align(np.cumsum(targets), fps)
     else:
-        durations = frame_align([times[j] for j in path], fps, lead)
+        durations = frame_align([times[j] for j in path], fps, lead, cfg.music_onset_lag_s)
     tour_end = float(np.sum(durations))
     cuts = np.cumsum(durations)[:-1]
     tol = (lead + 1) / fps

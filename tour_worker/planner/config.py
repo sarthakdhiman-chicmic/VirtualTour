@@ -257,6 +257,11 @@ class PlannerConfig(BaseModel):
     # that ignore the MP4 edit list, read as "1-2 frames ahead of the beat, systematic"); frame_align
     # still supports a lead for tuning
     music_cut_lead_frames: int = 0
+    # the analysis' beat times trail the audible attack by about one analysis frame (onset envelope,
+    # hop 512 at 22.05 kHz): measured on the green-house render 2026-11-13 - the render's audio is
+    # sample-exact to the track, the attacks came 27 ms before the cuts (detector calibrated on hits
+    # at known times). Cuts move this much earlier, onto the attack.
+    music_onset_lag_s: float = 0.027
     # zoom punches: a shot opening on a hook, and accents (hooks with no cut) mid-shot
     # zoom punches (a quick zoom in / out on a hero moment): OFF (user 2026-10-23: "we dont need
     # that rapid zoom in and zoom out for a bass or smth" -> none at all). The music is followed by
