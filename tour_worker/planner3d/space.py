@@ -44,6 +44,7 @@ PREFER = {
 }
 SECOND = {"kitchen": ("countertop", "counter", "table"), "living_room": ("armchair", "coffee table"),
           "family_room": ("armchair", "coffee table"), "dining_room": ("buffet",)}
+VIEW_BLOCKERS = ("door", "screen door", "windowpane", "mirror", "wardrobe", "glass", "shower")
 OPEN_PLAN_M = 0.9                      # shared boundary (on cells >= ROOM_RMIN clear) longer than this: one
                                        # open-plan space - an opening ~1.3 m+ wide; a 0.9 m door measures ~0.5 m
 ROOM_RMIN = 0.15                       # the room map uses cells at least this clear
@@ -116,6 +117,7 @@ class Space:
         self.room_types: dict[str, str | None] = {}
         self.objects: list[dict] = []
         self.labels = None
+        self.view_block = np.zeros(self.shape, bool)
 
     # ---- axes -----------------------------------------------------------------------------------
     def to_scene(self, p) -> np.ndarray:
@@ -254,6 +256,10 @@ class Space:
             reached = src >= 0
             lab[ij[reached, 0], ij[reached, 1]] = [order[int(x)] for x in src[reached]]
         self.room_of = lab
+        # every cell of the home with a room, the floor under furniture included (nearest room):
+        # what a view's sight lines end on (own_share)
+        _, (ii, jj) = ndi.distance_transform_edt(lab < 0, return_indices=True)
+        self.room_fill = np.where(self.inside | (lab >= 0), lab[ii, jj], -1)
         if not keys:
             self.spaces = {}
             return warnings
@@ -311,6 +317,22 @@ class Space:
         k = int(self.room_of[i, j])
         return self.room_keys[k] if k >= 0 else None
 
+    def room_of_object(self, p, radius: float = 1.0) -> str | None:
+        """The room most of the free floor within radius m of p belongs to (closer cells count
+        more): a basin by a bathroom door is the bathroom's, not the hall's nearest strip."""
+        i, j = self.cell(p)
+        k = int(radius / CELL)
+        H, W = self.shape
+        a0, a1, b0, b1 = max(0, i - k), min(H, i + k + 1), max(0, j - k), min(W, j + k + 1)
+        win = self.room_of[a0:a1, b0:b1]
+        ys, xs = np.nonzero(win >= 0)
+        if not len(ys):
+            return self.room_near(p, 1.5)
+        d = np.hypot(ys + a0 - i, xs + b0 - j) * CELL
+        w = np.clip(1.0 - d / radius, 0.05, 1.0)
+        votes = np.bincount(win[ys, xs], weights=w, minlength=len(self.room_keys))
+        return self.room_keys[int(np.argmax(votes))]
+
     def room_near(self, p, radius: float = 1.5) -> str | None:
         """The room of the free floor nearest p (within radius m): a sofa's middle is not floor."""
         r = self.room_at(p)
@@ -359,6 +381,21 @@ class Space:
                 return want.index(p.cls)
             return len(want) + (0 if p.cls in PIECE_CLASSES else 1)
         mine = [p for p in self.pieces if p.area >= min_area and self.piece_room(p) == room]
+        if self.labels is not None:          # labelled: a small piece the labels cannot name is a cabinet, not a subject
+            mine = [p for p in mine if p.cls is not None or p.area >= 1.5]
+        if not want:        # a hall or a balcony: never another room type's furniture (a living room's coffee table)
+            others = {c for c in PREFER} | {c for cs in SECOND.values() for c in cs}
+            mine = [p for p in mine if p.cls not in others]
+        # in an open plan a room may compose on what it is about standing in a neighbouring part of
+        # the space (a dining room's table drawn into the living room's floor) - unless that piece
+        # is what its own room is about too
+        mates = self.spaces.get(room, {room}) - {room}
+        for p in self.pieces:
+            if p.area < min_area or any(p is q for q in mine) or p.cls is None or p.cls not in want[:1]:
+                continue
+            home = self.piece_room(p)
+            if home in mates and canon(self.room_types.get(home)) not in PREFER.get(p.cls, ()):
+                mine.append(p)
         return sorted(mine, key=lambda p: (rank(p), -p.area))
 
     def attach_labels(self, labels) -> None:
@@ -375,9 +412,19 @@ class Space:
                        default=None)
             if best and best[0] >= 0.15 * m.sum():
                 p.cls = best[1]
+        # glass, mirrors and doors stop a sight line: their faint splats are not walls on the floor
+        # plan, but a view does not reach "into the home" through a frosted door or a mirror
+        blk = labels.mask(*VIEW_BLOCKERS) & (L[:, 2] > 0.3) & (L[:, 2] < 2.0)
+        if blk.any():
+            q = L[blk]
+            ix = ((q[:, 0] - self.lo[0]) / CELL).astype(int).clip(0, self.shape[1] - 1)
+            iy = ((q[:, 1] - self.lo[1]) / CELL).astype(int).clip(0, self.shape[0] - 1)
+            cnt = np.zeros(self.shape, np.int32)
+            np.add.at(cnt, (iy, ix), 1)
+            self.view_block = ndi.binary_closing(cnt >= 3, iterations=1)
         self.objects = [dict(o) for o in labels.objects]
         for o in self.objects:                      # the room of the free floor nearest it (rooms set later)
-            o["room"] = self.room_near(np.asarray(o["centre"][:2])) if self.room_keys else o.get("room")
+            o["room"] = self.room_of_object(np.asarray(o["centre"][:2])) if self.room_keys else o.get("room")
 
     def room_objects(self, room: str, classes=None) -> list[dict]:
         return [o for o in getattr(self, "objects", []) if o.get("room") == room
@@ -424,6 +471,20 @@ class Space:
         return path
 
     # ---- views ----------------------------------------------------------------------------------
+    def own_share(self, room: str, p, heading_rad: float, hfov_deg: float, rays: int = 9) -> float:
+        """Share of the middle of a view (half the frame's width) whose sight line ends in `room`:
+        a kitchen shot shows the kitchen, not the living room through the open plan."""
+        half = math.radians(hfov_deg) / 4
+        k = self.room_keys.index(room)
+        n = 0
+        for a in np.linspace(-half, half, rays):
+            d = self.ray(p, heading_rad + a)
+            c, s_ = math.cos(heading_rad + a), math.sin(heading_rad + a)
+            i, j = self.cell((p[0] + c * max(d - 0.15, 0), p[1] + s_ * max(d - 0.15, 0)))
+            if 0 <= i < self.shape[0] and 0 <= j < self.shape[1]:
+                n += int(self.room_fill[i, j] == k)
+        return n / rays
+
     def ray(self, p, heading_rad: float, max_m: float = 8.0) -> float:
         """How far the eye sees from p along a heading before a wall or tall obstacle (or leaving
         the home): low furniture does not stop a view."""
@@ -433,7 +494,7 @@ class Space:
         while d < max_m:
             d += CELL
             i, j = self.cell((p[0] + c * d, p[1] + s * d))
-            if not (0 <= i < H and 0 <= j < W) or self.tall[i, j] or not self.inside[i, j]:
+            if not (0 <= i < H and 0 <= j < W) or self.tall[i, j] or not self.inside[i, j] or self.view_block[i, j]:
                 break
         return d
 

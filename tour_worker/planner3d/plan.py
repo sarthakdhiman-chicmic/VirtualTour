@@ -103,7 +103,14 @@ def plan_tour_3d(model, scene: dict, rooms: list[dict], listing_id: str, cfg: Pl
     from types import SimpleNamespace
     from tour_worker.planner3d.moves import DETAILS
     c3 = cfg                                   # the same lengths as photo tours (planner/lengths.py)
-    details = {k: len(space.room_objects(k, DETAILS)) for k, _ in toured}
+    # close-ups are accents: at most one per three room shots' worth of rooms, hero rooms first, then
+    # the rooms with the strongest details
+    from tour_worker.scoring.rooms import tier_for
+    best = {k: max((DETAILS[o["class"]] for o in space.room_objects(k, DETAILS)), default=0.0) for k, _ in toured}
+    hero_tiers = {"living_room", "kitchen", "primary_bedroom"}
+    ranked = sorted((k for k, _ in toured if best[k] > 0),
+                    key=lambda k: (tier_for(dict(toured)[k]) not in hero_tiers, -best[k], k))
+    details = {k: 1 for k in ranked[:max(1, len(toured) // 3)]}
     report = _report(toured, details)
     contexts = {k: SimpleNamespace(richness=_richness(space, k)) for k, _ in toured} if labels is not None else {}
     selected, alloc_w = allocate_content(report, c3, contexts)
@@ -134,10 +141,13 @@ def plan_tour_3d(model, scene: dict, rooms: list[dict], listing_id: str, cfg: Pl
         moves.append((sel, mv))
     if not moves:
         raise ValueError("no room allows a camera move")
+    # a room is never shown by a close-up alone: without a room shot its close-up goes too
+    room_filmed = {s.room_key for s, mv in moves if s.kind != "detail"}
+    moves = [(s, mv) for s, mv in moves if s.room_key in room_filmed]
     filmed = {s.room_key for s, _ in moves}
-    warnings += [f"room_skipped:{k}" for k in sorted(set(spare) - filmed)]
+    warnings += [f"room_skipped:{k}" for k in sorted({s.room_key for s in selected} - filmed)]
     for sel, _ in moves:              # a dropped angle gives its time to the room's shot: the same move, slower
-        if spare.get(sel.room_key):
+        if sel.kind != "detail" and spare.get(sel.room_key):
             add = min(spare.pop(sel.room_key), c3.shot_max_s - sel.final_duration)
             sel.final_duration = round(sel.final_duration + max(0.0, add), 2)
 

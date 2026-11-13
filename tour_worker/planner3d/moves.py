@@ -39,7 +39,7 @@ HFOV = 78.0                   # one field of view for the whole tour
 MAX_TURN_DPS, MAX_MOVE_MPS = 10.0, 0.8
 # moves are planned to this share of the limits: the beat sync only lengthens room and hero shots
 # (planner/lengths.SYNC_BOUNDS), but may shorten a close-up to 0.7x
-PRE_SYNC_SHARE = {"room": 0.95, "hero": 0.95, "detail": 0.65}
+PRE_SYNC_SHARE = {"room": 0.9, "hero": 0.9, "detail": 0.65}   # 0.9: the planner's 91-sample check vs per frame
 PITCH_LADDER = (10.0, 13.0, 16.0)
 JUMP_ANGLE, JUMP_DIST = 30.0, 1.5
 RMIN_LADDER = (0.28, 0.22)    # camera body clearance, a little less in small rooms
@@ -58,7 +58,10 @@ FRAME_W, FRAME_H = 1920, 1080
 FEATURES = {"fireplace": 1.0, "windowpane": 0.8, "kitchen island": 0.8, "bathtub": 0.8, "bed": 0.8,
             "stairs": 0.7, "stairway": 0.7, "countertop": 0.6, "stove": 0.6, "bookcase": 0.6, "chandelier": 0.6,
             "sofa": 0.6, "television receiver": 0.5, "painting": 0.5, "table": 0.5, "desk": 0.5, "mirror": 0.4,
-            "curtain": 0.3, "door": 0.2}
+            "curtain": 0.3, "door": 0.2, "sink": 0.5, "hood": 0.5, "oven": 0.4, "refrigerator": 0.3,
+            "cabinet": 0.15}
+OWN_SHARE = {"walkway": 0.35, "glide": 0.5, "pan": 0.5}   # of a view's middle on the shot's own room
+OWN_W = 4.0                                                # score lost per missing share
 FEATURE_W = 0.4
 # close-ups (detail shots, 1.5-2.5 s): fixtures, finishes, decor
 DETAILS = {"chandelier": 1.0, "fireplace": 1.0, "vase": 0.9, "flower": 0.9, "sculpture": 0.9, "painting": 0.8,
@@ -258,8 +261,8 @@ class RoomMoves:
                     if walk:
                         cands += walk
                         break
-            cands += self._glide(room, pts, paths, rmin, dur, prev, earlier, opening, own)
-            cands += self._pan(room, [pts[k] for k in sorted(own)], rmin, dur, prev, earlier, closing)
+            cands += self._glide(room, pts, paths, rmin, dur, prev, earlier, opening, own, closing)
+            cands += self._pan(room, [pts[k] for k in sorted(own)], rmin, dur, prev, earlier, closing, opening)
             if cands:
                 break
         if not cands:
@@ -284,6 +287,15 @@ class RoomMoves:
                 break
             if checked.get(m.kind, 0) >= OCC_CHECK_KIND:      # every kind gets its share of checks
                 continue
+            if m.kind in OWN_SHARE and "own_share" not in m.why:    # it films its own room
+                k = len(m.eye) // 2
+                share = sp.own_share(room, m.eye[k], math.atan2(*(m.tgt[k][:2] - m.eye[k])[::-1]), HFOV)
+                m.why["own_share"] = round(share, 2)
+                # a view mostly of another room loses score (a small room in an open plan still
+                # gets its best view: there is no view of it without its neighbour)
+                m.score -= OWN_W * max(0.0, OWN_SHARE[m.kind] - share)
+                if best is not None and m.score <= best.score - OCC_W * best.occ:
+                    continue
             if "turn_dps" not in m.why:
                 turn, move = trial_speeds(m.eye, m.tgt, dur, m.eye_z)
                 m.why.update(turn_dps=round(turn, 1), move_mps=round(move, 2))
@@ -384,8 +396,8 @@ class RoomMoves:
                 if not MOVE_LEN[0] <= L <= MOVE_LEN[1]:
                     continue
                 for i, j in ((a, b), (b, a)):
-                    if i not in own:
-                        continue
+                    # a walkway's subject is the room's own piece: it may start anywhere in the open
+                    # plan (a dining table filmed from the living side is a dining shot)
                     path, plen = self._path(paths, i, j, rmin)
                     if path is None or plen > 1.3 * L or plen / dur * 1.5 > self.move_budget:
                         continue
@@ -408,7 +420,7 @@ class RoomMoves:
                                          "start_from_piece_m": round(d0, 2), "pitch_cap": pitch}))
         return out
 
-    def _glide(self, room, pts, paths, rmin, dur, prev, earlier, opening, own) -> list[Move]:
+    def _glide(self, room, pts, paths, rmin, dur, prev, earlier, opening, own, closing=False) -> list[Move]:
         out = []
         for a in sorted(own):
             for b in range(len(pts)):
@@ -441,12 +453,12 @@ class RoomMoves:
                         continue
                     depth = self.space.view_depth(path[0], math.atan2(*(aim[:2] - path[0])[::-1]), HFOV)
                     score = (0.3 * plen + 0.25 * min(depth, 6.0) + 0.3 * parallax(path, tgt)
-                             + (OPENING_GLIDE if opening else 0.0))
+                             + (OPENING_GLIDE if opening else 0.0) + (0.25 * min(depth, 6.0) if opening or closing else 0.0))
                     out.append(Move("glide", path, tgt, score,
                                     why={"travel_m": round(plen, 2), "view_depth_m": round(depth, 2), "aim": why_aim}))
         return out
 
-    def _pan(self, room, pts, rmin, dur, prev, earlier, closing) -> list[Move]:
+    def _pan(self, room, pts, rmin, dur, prev, earlier, closing, opening=False) -> list[Move]:
         sp = self.space
         out = []
         spots = sorted(pts, key=lambda p: -sp.clearance(p))[:12]
@@ -476,7 +488,8 @@ class RoomMoves:
                 if jump_cut(prev, first) or repeats(first, last, earlier):
                     continue
                 depth = float(np.mean([sp.view_depth(e, h, HFOV) for e, h in zip(eye[::10], hs[::10])]))
-                score = 0.25 * min(depth, 6.0) + 0.4 * sweep / PAN_SWEEP + (0.6 if closing else 0.0) - 0.3
+                score = (0.25 * min(depth, 6.0) + 0.4 * sweep / PAN_SWEEP + (0.6 if closing else 0.0) - 0.3
+                         + (0.25 * min(depth, 6.0) if opening or closing else 0.0))
                 out.append(Move("pan", eye, tgt, score,
                                 why={"sweep_deg": round(sweep), "view_depth_m": round(depth, 2),
                                      "turn_dps": round(turn, 1), "move_mps": round(move, 2)}))
