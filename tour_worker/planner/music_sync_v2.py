@@ -130,6 +130,9 @@ class V2Plan:
 
 
 # ---- the music as track pieces ------------------------------------------------------------
+# a queued copy restarts this far into the track, not at 0.0: a join's centred crossfade needs half
+# of it (music_v2_crossfade_s / 2) of audio before the join point (contract.plan checks it)
+RESTART_S = 0.015
 def base_segments(an: dict, start: float, needed_s: float) -> tuple[list[tuple[float, float]], float]:
     """The track from `start`, queued again after itself (each copy cut at the loop point, as v3)
     until it covers needed_s; the last copy plays to the file's end (fade tail)."""
@@ -143,7 +146,7 @@ def base_segments(an: dict, start: float, needed_s: float) -> tuple[list[tuple[f
             break
         segs.append((a, loop))
         have += loop - a
-        a = 0.0
+        a = RESTART_S
     return segs, loop
 
 
