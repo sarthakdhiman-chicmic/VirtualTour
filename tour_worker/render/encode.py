@@ -13,6 +13,13 @@ The delivery file:
   players start and seek quickly
 - moov atom first (faststart), so playback starts before the whole file has downloaded
 - AAC 128 kbps stereo (Remotion's track is silent; this keeps the audio behaviour)
+- audio and video in sync in EVERY player (mux_aligned): no MP4 edit lists. H.264 / HEVC B-frames
+  start the video a few frames in (66.7 ms with our x264 settings) and AAC adds 1024 samples of
+  encoder priming (21.3 ms at 48 kHz); edit lists tell a player to skip both, but players that
+  ignore them (some browsers, editors, older VLC) showed every cut ~45 ms after its beat (user
+  2026-11-13: "very close, but for many not on point"). Instead the video's first frame sits at 0
+  (negative composition offsets) and the audio's first `priming` samples are dropped before the
+  encode, so decoded sample n IS the tour's sample n - in every player, edit lists or not.
 - colour: BT.709 matrix, primaries and transfer, limited range (render/direct.py COLOUR_TAGS; it was
   BT.601 until the client review of 2026-11-05)
 x264 runs single-threaded per chunk, chunks in parallel (see deliver), so the same master always
@@ -123,6 +130,97 @@ def _frame_count(path: str) -> int:
     return int(out.strip())
 
 
+# ---- audio / video alignment without edit lists ------------------------------------------------
+def edit_offsets(path: str) -> dict[str, float]:
+    """{"vide" | "soun": seconds an MP4 track's edit list skips at its start (0.0 without one)}:
+    the video's B-frame delay, the audio's encoder priming."""
+    import struct
+    data = open(path, "rb").read()
+
+    def boxes(a: int, b: int):
+        while a + 8 <= b:
+            size, kind = struct.unpack(">I4s", data[a:a + 8])
+            head = 8
+            if size == 1:
+                size, head = struct.unpack(">Q", data[a + 8:a + 16])[0], 16
+            elif size == 0:
+                size = b - a
+            if size < head:
+                return
+            yield kind.decode("latin-1"), a + head, a + size
+            a += size
+
+    def find(a, b, kind):
+        return next(((x, y) for k, x, y in boxes(a, b) if k == kind), None)
+
+    out: dict[str, float] = {}
+    moov = find(0, len(data), "moov")
+    if moov is None:
+        return out
+    for k, a, b in boxes(*moov):
+        if k != "trak":
+            continue
+        mdia = find(a, b, "mdia")
+        hdlr, mdhd = (find(*mdia, "hdlr"), find(*mdia, "mdhd")) if mdia else (None, None)
+        if not hdlr or not mdhd:
+            continue
+        handler = data[hdlr[0] + 8:hdlr[0] + 12].decode("latin-1")
+        ver = data[mdhd[0]]
+        scale = struct.unpack(">I", data[mdhd[0] + (20 if ver == 1 else 12):][:4])[0]
+        skip = 0.0
+        edts = find(a, b, "edts")
+        elst = find(*edts, "elst") if edts else None
+        if elst:
+            v, n = data[elst[0]], struct.unpack(">I", data[elst[0] + 4:elst[0] + 8])[0]
+            q = elst[0] + 8
+            for _ in range(n):
+                media = struct.unpack(">q" if v == 1 else ">i", data[q + (8 if v == 1 else 4):][:8 if v == 1 else 4])[0]
+                q += 20 if v == 1 else 12
+                if media >= 0:                      # the first real edit (-1: an empty edit)
+                    skip = media / scale
+                    break
+        out[handler] = skip
+    return out
+
+
+_PRIMING: dict[tuple, float] = {}
+
+
+def aac_priming(sample_rate: int = 48000) -> float:
+    """Seconds of encoder priming our AAC encoder puts before the audio (read once, from a short
+    encode's edit list)."""
+    import tempfile
+    key = (sample_rate, AUDIO_BITRATE)
+    if key not in _PRIMING:
+        with tempfile.TemporaryDirectory(prefix="prime_") as td:
+            out = os.path.join(td, "p.m4a")
+            subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-f", "lavfi", "-t", "0.5", "-i",
+                            f"anullsrc=channel_layout=stereo:sample_rate={sample_rate}", "-c:a", "aac", "-b:a",
+                            AUDIO_BITRATE, "-ac", "2", out], check=True, capture_output=True)
+            _PRIMING[key] = edit_offsets(out).get("soun", 0.0)
+    return _PRIMING[key]
+
+
+def mux_aligned(video_path: str, audio_path: str, out_path: str, end_s: float | None = None,
+                sample_rate: int = 48000, bitrate: str = AUDIO_BITRATE) -> None:
+    """Mux a video-only MP4 (stream-copied) with an uncompressed audio track (encoded here to AAC)
+    with NO edit lists, in sync to the sample in every player: the video's first frame at 0
+    (negative composition offsets instead of a B-frame edit list), the audio's first `priming`
+    samples dropped before the encode (the priming takes their place). end_s: the tour's length."""
+    import tempfile
+    n = int(round(aac_priming(sample_rate) * sample_rate))
+    with tempfile.TemporaryDirectory(prefix="mux_") as td:
+        aac = os.path.join(td, "a.m4a")
+        af = f"aresample={sample_rate},atrim=start_sample={n},asetpts=PTS-STARTPTS"
+        if end_s is not None:                 # decoded with its priming, the track runs end_s
+            af += f",apad=whole_len={max(0, int(round(end_s * sample_rate)) - n)}"
+            af += f",atrim=end_sample={max(0, int(round(end_s * sample_rate)) - n)}"
+        _run(["ffmpeg", "-y", "-loglevel", "error", "-i", audio_path, "-af", af,
+              "-c:a", "aac", "-b:a", bitrate, "-ac", "2", aac])
+        _run(["ffmpeg", "-y", "-loglevel", "error", "-i", video_path, "-i", aac, "-map", "0:v:0", "-map", "1:a:0",
+              "-c", "copy", "-use_editlist", "0", "-movflags", "+faststart+negative_cts_offsets", out_path])
+
+
 def deliver(master_path: str, out_path: str, fps: int, profile: VideoProfile | None = None) -> str:
     """Re-encode the master in parallel chunks, each with ONE x264 thread, then join them.
     Every multi-threaded x264 mode with a VBV cap varied run to run (frame threads, sliced threads,
@@ -161,10 +259,21 @@ def deliver(master_path: str, out_path: str, fps: int, profile: VideoProfile | N
         listing = os.path.join(td, "parts.txt")
         with open(listing, "w") as f:
             f.writelines(f"file '{p}'\n" for p in parts)
+        video = os.path.join(td, "video.mp4")
         _run(["ffmpeg", "-y", "-loglevel", "error", "-f", "concat", "-safe", "0", "-i", listing,
-              "-i", master_path, "-map", "0:v:0", "-map", "1:a:0?",
-              "-c:v", "copy", "-c:a", "aac", "-b:a", AUDIO_BITRATE, "-ac", "2",
-              "-movflags", "+faststart", out_path])
+              "-map", "0:v:0", "-c:v", "copy", video])
+        has_audio = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "a", "-show_entries", "stream=index",
+                                    "-of", "csv=p=0", master_path], capture_output=True, text=True).stdout.strip()
+        if not has_audio:
+            _run(["ffmpeg", "-y", "-loglevel", "error", "-i", video, "-c", "copy", "-movflags", "+faststart", out_path])
+            return out_path
+        # the master's sound as it plays, back to PCM (an aligned master: decoded sample n is the
+        # tour's sample n; an older one: skip the priming its edit list names), then muxed aligned
+        lead = edit_offsets(master_path).get("soun", 0.0)
+        pcm = os.path.join(td, "audio.wav")
+        _run(["ffmpeg", "-y", "-loglevel", "error", "-ignore_editlist", "1", "-i", master_path, "-map", "0:a:0",
+              "-af", f"atrim=start={lead:.6f},asetpts=PTS-STARTPTS", "-c:a", "pcm_f32le", pcm])
+        mux_aligned(video, pcm, out_path)
     return out_path
 
 

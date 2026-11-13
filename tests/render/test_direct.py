@@ -147,10 +147,19 @@ def test_a_beat_at_the_cut_plays_at_the_cut():
         music = {"track_id": "t", "uri": "file://" + track, "end_s": 3.0, "loops": 1,
                  "track_duration_s": 3.5, "fade_out_s": 0.2, "synced": True}
         out = render_direct(_plan(music=music), td, music_path=track, workers=1)
-        raw = subprocess.run(["ffmpeg", "-v", "error", "-i", out, "-map", "0:a", "-ac", "1", "-ar", str(sr),
-                              "-f", "f32le", "-"], capture_output=True, check=True).stdout
-        a = np.abs(np.frombuffer(raw, np.float32))
-        assert abs(np.argmax(a > 0.2) / sr - 1.5) < 0.002
+        # the same in every player: one that honours MP4 edit lists and one that ignores them
+        # (user 2026-11-13: cuts ~45 ms late in such players) - the file carries none
+        from tour_worker.render.encode import edit_offsets
+        assert edit_offsets(out) == {"vide": 0.0, "soun": 0.0}
+        for ign in ("0", "1"):
+            raw = subprocess.run(["ffmpeg", "-v", "error", "-ignore_editlist", ign, "-i", out, "-map", "0:a", "-ac", "1",
+                                  "-ar", str(sr), "-f", "f32le", "-"], capture_output=True, check=True).stdout
+            a = np.abs(np.frombuffer(raw, np.float32))
+            assert abs(np.argmax(a > 0.2) / sr - 1.5) < 0.002
+            v0 = subprocess.run(["ffprobe", "-v", "error", "-ignore_editlist", ign, "-select_streams", "v:0",
+                                 "-show_entries", "stream=start_time", "-of", "csv=p=0", out],
+                                capture_output=True, text=True).stdout.strip()
+            assert abs(float(v0)) < 1e-6                           # the first frame at 0
 
 
 def test_a_voiceover_ducks_the_music_and_the_mix_is_delivered_at_minus_14_lufs():

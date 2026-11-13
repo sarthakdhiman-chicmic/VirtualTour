@@ -306,7 +306,8 @@ def _voice_graph(plan, voice_path: str, index: int, music: bool) -> str:
 
 
 def _audio_track(plan, music_path: str | None, out_path: str, voice_path: str | None = None) -> str:
-    """The tour's audio as AAC in out_path, made once and muxed into every copy: the music (plan
+    """The tour's audio as PCM (WAV) in out_path, made once; each copy encodes it to AAC aligned
+    to its own video (encode.mux_aligned): the music (plan
     1.5) - the track queued `loops` times or played as sync v2 segments, trimmed to the tour, faded
     out - with the voiceover over it (the music ducking under the voice), normalised to LOUDNESS_I /
     LOUDNESS_TP; with neither, a silent track (players and platforms expect one)."""
@@ -315,7 +316,7 @@ def _audio_track(plan, music_path: str | None, out_path: str, voice_path: str | 
     voice = voice_path if (voice_path and os.path.exists(voice_path) and getattr(plan, "voiceover", None)) else None
     if built is None and voice is None:
         _run(["ffmpeg", "-y", "-loglevel", "error", "-f", "lavfi", "-t", str(end), "-i",
-              "anullsrc=channel_layout=stereo:sample_rate=48000", "-c:a", "aac", "-b:a", "128k", "-ac", "2", out_path])
+              "anullsrc=channel_layout=stereo:sample_rate=48000", "-c:a", "pcm_f32le", out_path])
         return out_path
     ins, graph = built if built is not None else ([], "")
     if voice is not None:
@@ -328,7 +329,7 @@ def _audio_track(plan, music_path: str | None, out_path: str, voice_path: str | 
             f"measured_TP={m['input_tp']}:measured_LRA={m['input_lra']}:measured_thresh={m['input_thresh']}:"
             f"offset={m['target_offset']}:linear=true")
     _run(["ffmpeg", "-y", "-loglevel", "error", *ins, "-filter_complex", f"{graph};[mix]{norm},aresample=48000[o]",
-          "-map", "[o]", "-c:a", "aac", "-b:a", AUDIO_BITRATE, "-ac", "2", "-t", str(end), out_path])
+          "-map", "[o]", "-c:a", "pcm_f32le", "-ac", "2", "-t", str(end), out_path])
     return out_path
 
 
@@ -419,7 +420,7 @@ def render_direct(plan, workdir: str, warnings: list | None = None, music_path: 
                         if progress:
                             progress(len(parts), len(tasks))
         with stage("audio"):
-            audio = _audio_track(plan, music_path, os.path.join(td, "audio.m4a"), voice_path)
+            audio = _audio_track(plan, music_path, os.path.join(td, "audio.wav"), voice_path)
         with stage("join"):
             _join(plan, parts, os.path.join(td, "parts.txt"), audio, out_path)
             if wants_hevc(plan):
@@ -432,9 +433,14 @@ def render_direct(plan, workdir: str, warnings: list | None = None, music_path: 
 
 
 def _join(plan, parts: list[str], listing: str, audio: str, out_path: str) -> None:
-    """The chunks back to back and the tour's audio track, both stream-copied, moov first."""
+    """The chunks back to back (stream-copied) and the tour's audio, encoded to AAC aligned to this
+    copy's own video with no edit lists (encode.mux_aligned: in sync in every player), moov first."""
+    from tour_worker.render.encode import mux_aligned
     with open(listing, "w") as f:
         f.writelines(f"file '{p}'\n" for p in parts)
-    _run(["ffmpeg", "-y", "-loglevel", "error", "-f", "concat", "-safe", "0", "-i", listing, "-i", audio,
-          "-map", "0:v:0", "-map", "1:a:0", "-c", "copy", "-t", str(round(plan.total_duration_s, 3)),
-          "-movflags", "+faststart", out_path])
+    video = os.path.splitext(listing)[0] + "_video.mp4"
+    end = round(plan.total_duration_s, 3)
+    _run(["ffmpeg", "-y", "-loglevel", "error", "-f", "concat", "-safe", "0", "-i", listing,
+          "-map", "0:v:0", "-c", "copy", "-t", str(end), video])
+    mux_aligned(video, audio, out_path, end_s=end, bitrate=AUDIO_BITRATE)
+    os.remove(video)
