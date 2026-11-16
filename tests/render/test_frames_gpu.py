@@ -52,3 +52,33 @@ def test_the_cpu_setting_keeps_the_opencv_path():
     assert photo_device("cpu") is None
     if not torch.cuda.is_available():
         assert photo_device("auto") is None and photo_device("gpu") is None
+
+
+def test_labels_and_the_mls_copy_through_the_device_path_match_the_cpu_render():
+    """The frame stays on the device through composition (a fade) and the overlays (room labels):
+    the master and the MLS copy decode to the CPU path's frames."""
+    import subprocess
+    from tour_worker.contract.plan import compute_plan_hash
+    from tour_worker.render.direct import render_direct, total_frames
+    from tests.render.test_direct import _plan as two_shots, _workdir as two_shot_images
+    d = two_shots(fade=0.5).model_dump(mode="json")
+    d["output"]["room_labels"] = {"font": "sacramento", "scale": 0.8, "placement": "bottom_left"}
+    d["output"]["mls_copy"] = True
+    d["shots"][0]["caption"], d["shots"][1]["caption"] = "Living Room", "Bedroom"
+    d["provenance"]["plan_hash"] = compute_plan_hash(d)
+    plan = parse_plan(d)
+    n = total_frames(plan)
+
+    def frames(path):
+        raw = subprocess.run(["ffmpeg", "-loglevel", "error", "-i", path, "-f", "rawvideo", "-pix_fmt", "bgr24", "-"],
+                             capture_output=True, check=True).stdout
+        return np.frombuffer(raw, np.uint8).reshape(n, 360, 640, 3).astype(float)
+    with tempfile.TemporaryDirectory() as a, tempfile.TemporaryDirectory() as b:
+        two_shot_images(a), two_shot_images(b)
+        cpu = render_direct(plan, a, workers=1)
+        gpu = render_direct(plan, b, workers=2, photo_device=CPU)
+        for name in ("out.mp4", "out_mls.mp4"):
+            x, y = frames(os.path.join(a, name)), frames(os.path.join(b, name))
+            psnr = 10 * np.log10(255 ** 2 / max(1e-9, ((x - y) ** 2).mean()))
+            assert psnr > 40, (name, psnr)
+        assert os.path.exists(gpu)

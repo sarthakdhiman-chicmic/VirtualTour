@@ -20,6 +20,7 @@ class _Torch:
         import torch
         self.torch = torch
         self.float32, self.float64, self.int64, self.int32 = torch.float32, torch.float64, torch.int64, torch.int32
+        self.uint8 = torch.uint8
         for name in ("sin", "cos", "exp", "tanh", "abs", "sqrt", "floor", "where", "hypot"):
             setattr(self, name, getattr(torch, name))
 

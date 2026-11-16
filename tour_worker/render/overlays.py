@@ -30,6 +30,8 @@ import threading
 import os
 
 import numpy as np
+
+from tour_worker.motion.xp import ns
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 FONT_DIR = os.path.join(os.path.dirname(__file__), "fonts")
@@ -336,13 +338,17 @@ class Overlays:
             return got
 
     @staticmethod
-    def _blend(f: np.ndarray, layer: _Layer, k):
-        """f (float32 BGR frame) <- layer over it at opacity k (a scalar or an array the layer's shape)."""
+    def _blend(f, layer: _Layer, k):
+        """f (float32 BGR frame: NumPy, or torch on the GPU path) <- layer over it at opacity k (a
+        scalar or an array the layer's shape)."""
+        xp = ns(f)
         h, w = layer.alpha.shape[:2]
         sl = f[layer.y0:layer.y0 + h, layer.x0:layer.x0 + w]
-        a = layer.alpha * k
+        alpha = xp.on(layer.alpha, f, owner=layer, key="alpha")
+        rgb = xp.on(layer.rgb, f, owner=layer, key="rgb")
+        a = alpha * k
         sl *= 1.0 - a
-        sl += layer.rgb * k
+        sl += rgb * k
 
     def apply(self, frame: np.ndarray, g: int, captions: bool = True) -> np.ndarray:
         """Frame g (BGR uint8) with its overlays. captions=False: the MLS (unbranded) copy - the
@@ -355,7 +361,8 @@ class Overlays:
         corner = captions and self.corner is not None and self.corner[0] <= t <= self.corner[1]
         if not (live or staged or title or end or corner):
             return frame
-        f = frame.astype(np.float32)
+        xp = ns(frame)
+        f = xp.astype(frame, xp.float32)
         if title:
             a, e = self.title
             k = _smooth((t - a) / CARD_FADE_S) * (1.0 - _smooth((t - (e - CARD_FADE_S)) / CARD_FADE_S))
@@ -370,17 +377,19 @@ class Overlays:
         for i in live:
             L = self._label(i)
             fade = 1.0 - _smooth((t - L.t_out) / OUT_S)
-            shade = self._shade[L.vert] * (fade * _smooth((t - L.t0) / SHADE_FADE_S))
+            shade = xp.on(self._shade[L.vert], f, owner=self, key=("shade", L.vert)) * (fade * _smooth((t - L.t0) / SHADE_FADE_S))
             f *= (1.0 - shade)[:, None, None]
             p = _smooth((t - L.t0) / RULE_S)                          # the rule draws downward
             y0, y1 = L.rule_y
-            ys = np.arange(L.rule.y0, L.rule.y0 + L.rule.alpha.shape[0], dtype=np.float32)[:, None, None]
-            self._blend(f, L.rule, fade * np.clip((y0 - 4 + p * (y1 - y0 + 8) - ys) / 4.0, 0, 1))
+            ys = xp.on(np.arange(L.rule.y0, L.rule.y0 + L.rule.alpha.shape[0], dtype=np.float32)[:, None, None],
+                       f, owner=L, key="ys")
+            self._blend(f, L.rule, fade * xp.clip((y0 - 4 + p * (y1 - y0 + 8) - ys) / 4.0, 0, 1))
             self._blend(f, L.index, fade * _smooth((t - L.t0) / INDEX_FADE_S))
             q = _smooth((t - L.t0 - (WRITE_AT - LABEL_IN)) / WRITE_S)   # the name writes on
             x0, x1 = L.name_x
-            xs = np.arange(L.text.x0, L.text.x0 + L.text.alpha.shape[1], dtype=np.float32)[None, :, None]
-            self._blend(f, L.text, fade * np.clip((x0 + q * (x1 - x0 + L.soft) - xs) / L.soft, 0, 1))
+            xs = xp.on(np.arange(L.text.x0, L.text.x0 + L.text.alpha.shape[1], dtype=np.float32)[None, :, None],
+                       f, owner=L, key="xs")
+            self._blend(f, L.text, fade * xp.clip((x0 + q * (x1 - x0 + L.soft) - xs) / L.soft, 0, 1))
         for a, e in staged:
             k = _smooth((t - a) / STAGED_FADE_S) * (1.0 - _smooth((t - (e - STAGED_FADE_S)) / STAGED_FADE_S))
             self._blend(f, self._staged_layer, k)
@@ -389,4 +398,4 @@ class Overlays:
             f *= 1.0 - END_SCRIM * k
             for lay in self._end_layers():
                 self._blend(f, lay, k)
-        return np.clip(f + 0.5, 0, 255).astype(np.uint8)
+        return xp.astype(xp.clip(f + 0.5, 0, 255), xp.uint8)

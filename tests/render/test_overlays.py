@@ -202,3 +202,20 @@ def test_the_contract_checks_branding():
         parse_plan(_plan({"room_labels": {}, "branding": {"logo_uri": "ftp://x/logo.png"}}))
     ok = parse_plan(_plan({"room_labels": {}, "branding": {"address": "1 Main St", "corner_logo": True}}))
     assert ok.output.branding.address == "1 Main St"
+
+
+def test_overlays_on_gpu_tensors_match_the_numpy_ones(tmp_path):
+    """The GPU photo path (render/frames_gpu.py) overlays frames that stay on the device: the
+    same arithmetic on torch tensors - title card, room label, corner logo, end card, both copies."""
+    torch = pytest.importorskip("torch")
+    ov = _branded(tmp_path)
+    rng = np.random.default_rng(0)
+    frame = rng.integers(0, 255, (H, W, 3), dtype=np.uint8)
+    t = torch.as_tensor(frame)
+    for g in (30, 75, 160, 200, 250, 389):
+        for captions in (True, False):
+            a = ov.apply(frame, g, captions=captions)
+            b = ov.apply(t, g, captions=captions)
+            b = b.numpy() if torch.is_tensor(b) else b
+            d = np.abs(a.astype(int) - b.astype(int))
+            assert d.max() <= 1, (g, captions, d.max())          # float32 order of operations: a level at most

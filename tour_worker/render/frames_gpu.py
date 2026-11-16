@@ -178,12 +178,21 @@ class GpuShot:
 
     # ---- the frame ---------------------------------------------------------------------------
     def frame(self, f: int) -> np.ndarray:
+        return self.frame_t(f).cpu().numpy()
+
+    def frame_t(self, f: int, stats: dict | None = None):
+        """Frame f as a uint8 (oh, ow, 3) tensor on the device. The moving sky (CPU, OpenCV - it
+        releases the GIL) is made before the GPU lock, so parallel encoders make theirs at once."""
+        import time
         torch = _t()
         sw = self.sw
+        t0 = time.perf_counter()
+        sky = sw.sky.frame(f / sw.fps) if sw.sky is not None else None
+        t1 = time.perf_counter()
         with GPU_LOCK, torch.no_grad():
+            t2 = time.perf_counter()
             m = sw.homography(f)
-            src = (torch.as_tensor(sw.sky.frame(f / sw.fps), device=self.dev).to(torch.float32)
-                   if sw.sky is not None else self.src)
+            src = torch.as_tensor(sky, device=self.dev).to(torch.float32) if sky is not None else self.src
             mx, my = self.maps(m)
             img = _sample(src, mx, my, "border")                            # (oh, ow, 3)
             win = sw.window(m) if sw.regions else None
@@ -195,4 +204,17 @@ class GpuShot:
                 if gain is not None:
                     patch = patch * gain[..., None]
                 img[r0:r1, c0:c1] = patch
-            return torch.round(img).clamp_(0, 255).to(torch.uint8).cpu().numpy()
+            out = torch.round(img).clamp_(0, 255).to(torch.uint8)
+        if stats is not None:
+            t3 = time.perf_counter()
+            _add(stats, sky_s=t1 - t0, gpu_wait_s=t2 - t1, gpu_draw_s=t3 - t2)
+        return out
+
+
+_STATS_LOCK = threading.Lock()
+
+
+def _add(stats: dict, **kw) -> None:
+    with _STATS_LOCK:
+        for k, v in kw.items():
+            stats[k] = stats.get(k, 0.0) + v
