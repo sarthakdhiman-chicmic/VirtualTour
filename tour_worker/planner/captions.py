@@ -13,7 +13,7 @@ ROOM_LABELS = {
     "sunroom": "Sunroom", "dining_room": "Dining Room", "formal_dining_room": "Formal Dining",
     "open_concept": "Living Space", "kitchen": "Kitchen", "breakfast_nook": "Breakfast Nook",
     "butlers_pantry": "Butler's Pantry",
-    "primary_bedroom": "Primary Suite", "master_bedroom": "Primary Suite",
+    "primary_bedroom": "Primary Bedroom", "master_bedroom": "Primary Bedroom",
     "secondary_bedroom": "Bedroom", "guest_bedroom": "Guest Bedroom", "childrens_bedroom": "Bedroom",
     "bedroom": "Bedroom", "nursery": "Nursery",
     "primary_bathroom": "Primary Bath", "master_bathroom": "Primary Bath", "ensuite": "Ensuite",

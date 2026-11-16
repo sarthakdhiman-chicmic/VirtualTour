@@ -101,8 +101,9 @@ UTILITY = {"bathroom", "ensuite", "powder_room", "half_bath", "laundry", "laundr
 def _walk_order(space, selected: list, stage: dict[str, str], rtype: dict[str, str], cfg=None) -> list:
     """The narrative order kept stage by stage; within a stage the rooms follow the walk (user
     2026-11-16, the Home Scan jumped living -> far family room -> back to the kitchen beside the
-    living room): nearest next by walking distance from the room before, starting from the stage's
-    narrative first only for the tour's opening. Each room's shots stay together, in their order.
+    living room): each stage opens on its narrative first room (its lead: the living room, the
+    primary bedroom), then nearest next by walking distance from the room before. Each room's shots
+    stay together, in their order.
     A tour never closes in a bathroom or other utility room: it moves before the last other room."""
     blocks: list[tuple[str, list]] = []
     for s_ in selected:
@@ -130,11 +131,10 @@ def _walk_order(space, selected: list, stage: dict[str, str], rtype: dict[str, s
         while j < len(blocks) and stage.get(blocks[j][0]) == st:
             j += 1
         group = blocks[i:j]
-        if out:                                      # follow on from the last room toured
-            ordered, prev = [], out[-1][0]
-        else:                                        # the tour opens on its narrative first room
-            ordered, prev = [group[0]], group[0][0]
-            group = group[1:]
+        # each stage opens on its narrative first room - the living room, the primary bedroom
+        # (user 2026-11-16: the primary bedroom came after the other bedrooms, by walking distance)
+        ordered, prev = [group[0]], group[0][0]
+        group = group[1:]
         while group:
             k = min(range(len(group)), key=lambda n: dist(prev, group[n][0]))
             ordered.append(group.pop(k))
