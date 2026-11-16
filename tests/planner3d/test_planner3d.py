@@ -247,11 +247,29 @@ def test_a_kitchen_with_no_piece_pushes_toward_its_counter():
     moves = [s.camera.move for s, _ in kit]
     # reached through a doorway: it may open walking in; its own shots push / pull on the counter.
     # No close-ups in 3D tours (2026-11-16: a scan rarely holds detail at 1 m)
-    assert set(moves) <= {"enter", "push", "pull"} and not [s for s, _ in kit if s.role == "close"]
-    pp = [(s, r) for s, r in kit if r["move"] in ("push", "pull")]
-    assert pp
-    anchor = pp[0][1]["anchor"]
-    assert anchor[1] <= 0.7 and anchor[2] < 1.0                        # the counter, not the upper cabinets
+    assert moves and set(moves) <= {"enter", "push", "pull"} and not [s for s, _ in kit if s.role == "close"]
+    # a push on the counter is offered with every rule kept (out of the doorways, seen to move, the
+    # counter whole with floor in front of it) - a further shot is taken only when it shows walls the
+    # walk-in did not (up to 3 a room, by coverage)
+    from tour_worker.planner3d.moves import RoomMoves
+    taken = []
+    good = RoomMoves._good
+
+    def spy(self, m, dur):
+        ok = good(self, m, dur)
+        if ok and m.kind in ("push", "pull"):
+            taken.append(m)
+        return ok
+    RoomMoves._good = spy
+    try:
+        plan_tour_3d(m, SCENE, rooms, "test-home", PlannerConfig(), check_occlusion=False,
+                     labels=SceneLabels(lab, "ab" * 32, len(m), objs))
+    finally:
+        RoomMoves._good = good
+    assert taken
+    for mv in taken:
+        anchor = mv.why["anchor"]
+        assert anchor[1] <= 0.7 and anchor[2] < 1.0                    # the counter, not the upper cabinets
     for s, _ in kit:
         assert all(seg.target[k][2] <= AIM_Z_MAX + 0.02 for seg in s.camera.segments for k in range(4))
 
@@ -268,13 +286,16 @@ def test_a_hallway_is_a_link_between_two_rooms_not_a_stop():
     keys = [s.room_key for s in plan.shots]
     h = keys.index("hall")
     assert set(keys[:h]) == {"living"} and keys[h + 1:] and set(keys[h + 1:]) == {"bed"}
-    assert plan.shots[h].camera.move == "link" and plan.shots[h + 1].camera.move == "enter"
+    # the bedroom opens walking in when that walk ends with the bed whole and floor under it, else
+    # on its best fully framed shot (user 2026-11-16: the subject seen fully)
+    assert plan.shots[h].camera.move == "link" and plan.shots[h + 1].camera.move in ("enter", "walkway", "arc")
     link = rep["shots"][h]
     assert link["from"] == "living" and link["toward"] == "bed" and link["hall_share"] >= 0.3   # through it, the bedroom
     seg = plan.shots[h].camera.segments
     assert seg[0].eye[0][0] < 4.5 and seg[-1].target[-1][0] > 5.5     # stands in the living room, looks down the hallway
-    enter = plan.shots[h + 1].camera.segments
-    assert enter[0].eye[0][0] < 6.0 < enter[-1].eye[-1][0]            # from the hallway, through the door
+    if plan.shots[h + 1].camera.move == "enter":
+        enter = plan.shots[h + 1].camera.segments
+        assert enter[0].eye[0][0] < 6.0 < enter[-1].eye[-1][0]        # from the hallway, through the door
     assert all(s.transition_in.type == "cut" for s in plan.shots[h:h + 2])
 
 

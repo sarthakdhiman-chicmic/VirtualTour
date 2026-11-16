@@ -20,6 +20,7 @@ _WHITE = (1.0 - 0.5) / SH_C0
 # above is part of a room, not something in the way
 CENTRE_X, CENTRE_Y = (0.2, 0.8), (0.15, 0.85)
 CEILING_GAP = 0.25
+VOID_SPLATS = 400_000      # the scene, thinned, for the void check
 
 
 class Occlusion:
@@ -42,8 +43,9 @@ class Occlusion:
                 return idx
         return self._keep
 
-    def cover(self, eye, target, hfov: float, piece=None, near: float = 2.0) -> float:
-        """eye, target: planner points (z above the floor)."""
+    def cover(self, eye, target, hfov: float, piece=None, near: float = 2.0, region: str = "centre") -> float:
+        """eye, target: planner points (z above the floor). region: "centre" (the subject's part of
+        the frame) or "full" (a door frame at the edge counts too)."""
         from tour_worker.render.splat_cpu import CpuSplatRenderer
         idx = self._candidates(eye, near)
         L = self.space.local[idx]
@@ -60,5 +62,28 @@ class Occlusion:
         sub = SplatModel(m.means[sel], m.scales[sel], m.quats[sel], m.opacities[sel], sh, 0, m.source_format, {})
         e, t = self.space.to_scene(eye), self.space.to_scene(target)
         img = CpuSplatRenderer(sub).render(look_at(e, t, up=self.space.up_scene), intrinsics(hfov, W, H), W, H)
+        if region == "full":
+            return float((img.mean(2) > 0.5).mean())
         mid = img[int(CENTRE_Y[0] * H):int(CENTRE_Y[1] * H), int(CENTRE_X[0] * W):int(CENTRE_X[1] * W)]
         return float((mid.mean(2) > 0.5).mean())
+
+    def void(self, eye, target, hfov: float) -> float:
+        """Share of the view the scan never captured (it renders as the empty black background): an
+        uncaptured window or glass door, a missing ceiling. The whole scene, thinned to VOID_SPLATS
+        with each kept splat grown to cover for the ones left out, drawn white at 96 x 54."""
+        from tour_worker.render.splat_cpu import CpuSplatRenderer
+        if getattr(self, "_void", None) is None:
+            from tour_worker.scene.orient import opaque_cut
+            m = self.model
+            idx = np.nonzero(m.opacities > opaque_cut(m, 0.35))[0]
+            k = max(1, int(np.ceil(len(idx) / VOID_SPLATS)))
+            idx = idx[::k]
+            sh = np.zeros((len(idx), 1, 3), np.float32)
+            sh[:, 0] = _WHITE
+            grow = np.float32(np.sqrt(k))
+            sub = SplatModel(m.means[idx], m.scales[idx] * grow, m.quats[idx],
+                             np.minimum(1.0, m.opacities[idx] * 1.5).astype(np.float32), sh, 0, m.source_format, {})
+            self._void = CpuSplatRenderer(sub)
+        e, t = self.space.to_scene(eye), self.space.to_scene(target)
+        img = self._void.render(look_at(e, t, up=self.space.up_scene), intrinsics(hfov, W, H), W, H)
+        return float((img.mean(2) < 0.35).mean())
