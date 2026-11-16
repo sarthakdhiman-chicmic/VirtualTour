@@ -20,6 +20,7 @@ _WHITE = (1.0 - 0.5) / SH_C0
 # above is part of a room, not something in the way
 CENTRE_X, CENTRE_Y = (0.2, 0.8), (0.15, 0.85)
 CEILING_GAP = 0.25
+TOP_ROWS = 0.2                # the top of the frame a ceiling's black band would fill
 VOID_SPLATS = 400_000      # the scene, thinned, for the void check
 
 
@@ -67,7 +68,7 @@ class Occlusion:
         mid = img[int(CENTRE_Y[0] * H):int(CENTRE_Y[1] * H), int(CENTRE_X[0] * W):int(CENTRE_X[1] * W)]
         return float((mid.mean(2) > 0.5).mean())
 
-    def void(self, eye, target, hfov: float) -> float:
+    def void(self, eye, target, hfov: float, top: bool = False):
         """Share of the view the scan never captured (it renders as the empty black background): an
         uncaptured window or glass door, a missing ceiling. The whole scene, thinned to VOID_SPLATS
         with each kept splat grown to cover for the ones left out, drawn white at 96 x 54."""
@@ -86,4 +87,7 @@ class Occlusion:
             self._void = CpuSplatRenderer(sub)
         e, t = self.space.to_scene(eye), self.space.to_scene(target)
         img = self._void.render(look_at(e, t, up=self.space.up_scene), intrinsics(hfov, W, H), W, H)
-        return float((img.mean(2) < 0.35).mean())
+        dark = img.mean(2) < 0.35
+        if top:                       # (whole view, its top TOP_ROWS: a missing ceiling's black band)
+            return float(dark.mean()), float(dark[:max(1, int(round(TOP_ROWS * H)))].mean())
+        return float(dark.mean())

@@ -147,6 +147,9 @@ TYPE_SIGNS = {"kitchen": ("stove", "oven", "sink", "refrigerator", "dishwasher",
               "bathroom": ("toilet", "bathtub", "shower", "sink"),
               "living_room": ("sofa", "television receiver", "fireplace"), "family_room": ("sofa", "television receiver", "fireplace"),
               "dining_room": ("table",), "home_office": ("desk", "computer", "monitor", "table")}
+TYPE_WHOLE = ("bed", "sofa")    # ... framed whole, when the room has one
+TOP_VOID_MAX = 0.3            # at most this share of the frame's top fifth may be uncaptured (a missing ceiling)
+TOP_TILT = (3.0, 6.0)         # deg a shot tilts down to clear it, before it is dropped
 FRAME_W, FRAME_H = 1920, 1080
 # what a view is worth showing (scene labels): a fireplace or a window beats a door
 FEATURES = {"fireplace": 1.0, "windowpane": 0.8, "kitchen island": 0.8, "bathtub": 0.8, "bed": 0.8,
@@ -515,6 +518,12 @@ class RoomMoves:
         # the room's first shot shows what makes it that room (TYPE_SIGNS), when anything does
         if piece_rank == 0 and covered is None and kind != "detail" and self.type_signs(room):
             shown = [[m for m in t if m.kind in ("link",) or self.shows_type(room, m)] for t in tiers]
+            # a bedroom / living room opens on its bed / sofa whole (user 2026-11-16: the primary
+            # bedroom opened on a mirror and a corner of the bed); else on what shows its kind
+            if any(o["class"] in TYPE_WHOLE for o in self.type_signs(room)):
+                whole = [[m for m in t if m.kind in ("link",) or self.shows_type(room, m, whole=True)] for t in shown]
+                if any(whole):
+                    shown = whole
             if any(shown):
                 tiers = shown
             else:
@@ -578,6 +587,8 @@ class RoomMoves:
                 return best, type_warn
         if least is None:
             return None, [f"room_no_move:{room}"]
+        if covered is not None:                   # a further shot is a good one or none (user 2026-11-16:
+            return None, [f"coverage_no_move:{room}"]     # a held view ended on a blur at the lens)
         hold = self._hold(least, room)
         self._last_kind = hold.kind
         return hold, [f"view_partly_blocked:{room}"] + type_warn
@@ -671,7 +682,7 @@ class RoomMoves:
         candidate can win."""
         sp = self.space
         cands = sorted(cands, key=lambda m: -m.score)
-        best, least, checked = None, None, {}
+        best, least, checked, passed = None, None, {}, []
         for m in cands:
             if best is not None and m.score <= best.score - OCC_W * best.occ:
                 break
@@ -697,14 +708,21 @@ class RoomMoves:
                 least = m
             if m.occ > MAX_OCC:
                 continue
+            passed.append(m)
             if best is None or m.score - OCC_W * m.occ > best.score - OCC_W * best.occ:
-                # about to win: what of its view the scan never captured (rendered, so only now)
-                if self.occ is not None and m.kind not in ("detail",):
+                best = m
+        # what of its view the scan never captured (rendered, so only for the winners): best first,
+        # down the ranking until one passes
+        if self.occ is not None and best is not None:
+            best = None
+            for m in sorted(passed, key=lambda m: -(m.score - OCC_W * m.occ)):
+                if m.kind != "detail":
                     v = self._void(m)
                     m.why["void"] = round(v, 3)
                     if v > VOID_MAX:
                         continue
                 best = m
+                break
         return best, least
 
     # ---- what a view shows ----------------------------------------------------------------------
@@ -1115,10 +1133,16 @@ class RoomMoves:
             return False
         return sp.ray(np.asarray(eye2[:2]), math.atan2(v[1], v[0]), max_m=dist + 0.3) >= dist - 0.6
 
-    def shows_type(self, room: str, m: Move) -> bool:
-        """The move's middle or last frame shows something that makes the room what it is."""
+    def shows_type(self, room: str, m: Move, whole: bool = False) -> bool:
+        """The move's middle or last frame shows something that makes the room what it is; whole:
+        a bed or sofa (TYPE_WHOLE) among them is in the last frame whole, with floor under it."""
         signs = self.type_signs(room)
         zs = m.zs
+        if whole:
+            big = [o for o in signs if o["class"] in TYPE_WHOLE]
+            hit = any(frames_fully(m.eye[-1], m.tgt[-1], objects_box([o]), float(zs[-1])) for o in big)
+            m.why["frames_type"] = hit
+            return hit
         hit = any(self.sees(m.eye[k], m.tgt[k], o, float(zs[k])) for k in (len(m.eye) // 2, len(m.eye) - 1) for o in signs)
         m.why["shows_type"] = hit
         return hit
@@ -1258,6 +1282,8 @@ class RoomMoves:
                 for ks in range(ke):
                     L = s_[ke] - s_[ks]
                     if not EXIT_LEN[0] <= L <= EXIT_LEN[1] or (ks % 3) or at[ks] not in mine:
+                        continue
+                    if L / dur * 1.6 > self.move_budget:          # eased: its peak ~1.5x its mean speed
                         continue
                     seg = poly[ks:ke + 1]
                     if min(sp.clearance(q) for q in seg) < rmin * 0.9:
@@ -1527,8 +1553,32 @@ class RoomMoves:
         return m
 
     def _void(self, m: Move) -> float:
+        """The worst share of the view the scan never captured (start, middle, end). A black band
+        across the top (a missing ceiling, TOP_VOID_MAX of its top fifth) tilts the move down
+        TOP_TILT deg; if that does not clear it (or loses the subject's floor) the move fails."""
         e3 = m.eye3
-        return max(self.occ.void(e3[k], m.tgt[k], HFOV) for k in (0, len(e3) // 2, len(e3) - 1))
+        ks = (0, len(e3) // 2, len(e3) - 1)
+
+        def worst(tgt):
+            r = [self.occ.void(e3[k], tgt[k], HFOV, top=True) for k in ks]
+            return max(a for a, _ in r), max(b for _, b in r)
+        whole, top = worst(m.tgt)
+        m.why["void_top"] = round(top, 3)
+        if top <= TOP_VOID_MAX or m.kind in ("detail", "link"):
+            return whole
+        h = np.linalg.norm(m.tgt[:, :2] - m.eye, axis=1)
+        for deg in TOP_TILT:
+            tgt = m.tgt.copy()
+            tgt[:, 2] -= h * math.tan(math.radians(deg))
+            w2, t2 = worst(tgt)
+            if t2 <= TOP_VOID_MAX:
+                old = m.tgt
+                m.tgt = tgt
+                if self.framed(m):
+                    m.why.update(void_top=round(t2, 3), tilt_for_void=deg)
+                    return w2
+                m.tgt = old
+        return 1.0
 
     def _cover(self, m: Move) -> float:
         if self.occ is None:

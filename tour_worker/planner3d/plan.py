@@ -289,7 +289,7 @@ def plan_tour_3d(model, scene: dict, rooms: list[dict], listing_id: str, cfg: Pl
         r = space.route(room, nxt.room_key)
         if not r:
             return prev
-        dur = round(length_range("room", c3.pacing)[0], 2)
+        dur = round(length_range("room", c3.pacing)[1], 2)          # room to fly it at a walking pace
         earlier_ = [p for k in sorted(space.spaces.get(room, {room})) for p in poses.get(k, [])]
         mv, w = mover.exit(room, nxt.room_key, r, dur, prev, earlier_)
         if mv is None:
