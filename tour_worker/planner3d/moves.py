@@ -89,6 +89,11 @@ FRONT_MIN = 2.2               # m to the nearest wall or tall thing across the m
 FRONT_MIN_ENTER = 1.5         # at a room shot's start and end (an enter starts in a doorway)
 AIM_MIN = 2.0                 # m from what a room shot aims at, at its end
 WIDE_W = 0.6                  # score per m the view opens up from start to end (pulling back)
+# coverage (user 2026-11-16: "each room should get up to 3 shots so all its walls get covered"):
+# a room's further shots must each show this share of its walls the earlier ones did not, and the
+# more new wall a candidate shows the better it scores
+COVER_NEW_MIN = 0.15
+COVER_W = 3.0
 REVEAL_SWING = 40.0           # deg: the most a reveal turns (from down its path onto the next room)
 SAMPLES = 50
 FRAME_W, FRAME_H = 1920, 1080
@@ -272,7 +277,7 @@ class RoomMoves:
     def best(self, room: str, dur: float, *, earlier=(), prev=None, piece_rank: int = 0,
              opening: bool = False, closing: bool = False, kind: str = "room",
              next_room: str | None = None, enter_route=None,
-             follows_link: bool = False) -> tuple[Move | None, list[str]]:
+             follows_link: bool = False, covered: np.ndarray | None = None) -> tuple[Move | None, list[str]]:
         """The best move for a shot of `room` lasting dur s. earlier: (first, last) poses of the
         room's earlier shots; prev: the previous shot's last pose; next_room: the tour's next room
         (an opening reveal turns onto it). Returns (move, warnings).
@@ -344,8 +349,22 @@ class RoomMoves:
         # breathe, or none: without one the room's first shot keeps the time.
         strict = piece_rank > 0 and kind != "detail"
         roomy = lambda t: [m for m in t if self._roomy(m)]
-        tiers = ([roomy(t) for t in tiers] if strict       # a second angle: composed, with room, or none
-                 else [roomy(t) for t in tiers] + tiers + [roomy(glides), glides])
+        if covered is not None and kind != "detail":
+            # a further shot of the room: it must show walls the earlier ones did not (glides
+            # included - they face away from the piece the first shot framed), with room to breathe
+            def fresh(t):
+                out = []
+                for m in t:
+                    new = self.new_walls(room, m, covered)
+                    if new >= COVER_NEW_MIN:
+                        m.why["walls_new"] = round(new, 2)
+                        m.score += COVER_W * new
+                        out.append(m)
+                return out
+            tiers = [fresh(roomy(t)) for t in tiers] + [fresh(roomy(glides))]
+        else:
+            tiers = ([roomy(t) for t in tiers] if strict       # a second angle: composed, with room, or none
+                     else [roomy(t) for t in tiers] + tiers + [roomy(glides), glides])
         tiers = [t for t in tiers if t]
         if not tiers:
             return None, [f"room_no_move:{room}" if kind != "detail" else f"room_no_detail:{room}"]
@@ -397,6 +416,30 @@ class RoomMoves:
         f0, f1 = m.why["front_m"]
         aim = float(np.linalg.norm(m.tgt[-1][:2] - m.eye[-1]))
         return f0 >= (FRONT_MIN_ENTER if m.kind == "enter" else FRONT_MIN) and f1 >= FRONT_MIN and aim >= AIM_MIN
+
+    def walls_seen(self, room: str, m: Move) -> np.ndarray:
+        """Flat indices of the room's wall cells the move shows (five poses along it, a cell's
+        tolerance for rounding)."""
+        sp = self.space
+        walls = sp.wall_cells(room)
+        if not len(walls):
+            return walls
+        hit = []
+        for k in np.linspace(0, len(m.eye) - 1, 5).astype(int):
+            e, t = m.eye[k], m.tgt[k]
+            hit.append(sp.seen_cells(e, math.atan2(t[1] - e[1], t[0] - e[0]), HFOV))
+        grid = np.zeros(sp.shape, bool)
+        grid.flat[np.concatenate(hit)] = True
+        grid = ndi.binary_dilation(grid, iterations=1)
+        return walls[grid.flat[walls]]
+
+    def new_walls(self, room: str, m: Move, covered: np.ndarray) -> float:
+        """Share of the room's walls the move shows that `covered` (flat indices) does not."""
+        walls = self.space.wall_cells(room)
+        if not len(walls):
+            return 0.0
+        seen = self.walls_seen(room, m)
+        return float(len(np.setdiff1d(seen, covered, assume_unique=False))) / len(walls)
 
     def _check(self, room: str, cands: list[Move], dur: float) -> tuple[Move | None, Move | None]:
         """(the best candidate within the speed limits, its own room share and the lens rule;

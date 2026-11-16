@@ -593,6 +593,26 @@ class Space:
         first = np.where(blk.any(1), blk.argmax(1), len(d) - 1)
         return d[first]
 
+    def wall_cells(self, room: str) -> np.ndarray:
+        """The room's walls on the floor plan (flat cell indices): blocking cells within two cells of
+        its floor - what a shot of the room should show (user 2026-11-16: up to 3 shots a room, so
+        all its walls are seen)."""
+        cache = self.__dict__.setdefault("_walls", {})
+        if room not in cache:
+            mask = self.room_of == self.room_keys.index(room)
+            near = ndi.binary_dilation(mask, iterations=2) & self._blocked()
+            cache[room] = np.flatnonzero(near)
+        return cache[room]
+
+    def seen_cells(self, p, heading_rad: float, hfov_deg: float, rays: int = 33) -> np.ndarray:
+        """Flat indices of the blocking cells the view's sight lines end on (walls, tall things)."""
+        half = math.radians(hfov_deg) / 2
+        hs = heading_rad + np.linspace(-half, half, rays)
+        d = self.rays(p, hs)
+        i, j = self._cells(p[0] + np.cos(hs) * d, p[1] + np.sin(hs) * d)
+        ok = (i >= 0) & (i < self.shape[0]) & (j >= 0) & (j < self.shape[1])
+        return i[ok] * self.shape[1] + j[ok]
+
     def view_depth(self, p, heading_rad: float, hfov_deg: float, rays: int = 11) -> float:
         """Mean reach (m) of the view across the frame's width: how much room it shows."""
         half = math.radians(hfov_deg) / 2

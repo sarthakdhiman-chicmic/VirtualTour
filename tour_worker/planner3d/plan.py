@@ -40,6 +40,9 @@ FADE_S = 0.5
 # from dining pan onto the hallway then move into bedroom"): shown by a link shot where the tour's
 # walking route first crosses them
 CONNECTORS = {"hallway", "corridor", "landing", "staircase", "stairs", "stairway"}
+LOOK_BACK = {"balcony", "patio", "outdoor_patio", "terrace", "deck", "porch", "garden", "backyard", "rooftop"}
+MAX_WIDE = 3                  # wide shots a room at most (coverage: user 2026-11-16)
+COVER_ENOUGH = 0.85           # a room whose walls are this covered gets no further shot
 MAX_DETAILS = 2                # close-ups a tour (client: details on the drops; user: option A)
 PLANNER3D_VERSION = "3d-2"
 
@@ -212,18 +215,16 @@ def plan_tour_3d(model, scene: dict, rooms: list[dict], listing_id: str, cfg: Pl
     from types import SimpleNamespace
     from tour_worker.planner3d.moves import DETAILS
     c3 = cfg                                   # the same lengths as photo tours (planner/lengths.py)
-    # shots per room (the green-house v3 standard, user 2026-11-13): one room shot each; a hero room
-    # (best living room, kitchen, primary bedroom) with a piece to compose on gets a second angle of
-    # it; a hero room without one gets a close-up of its best detail instead - at most MAX_DETAILS a
-    # tour, never more than two shots a room
+    # shots per room (user 2026-11-16, superseding the v3 "one shot, a hero's second angle"): up to
+    # MAX_WIDE wide shots a room, as many as it takes to show its walls (added below, by coverage);
+    # a close-up of a hero room's best detail - at most MAX_DETAILS a tour
     from tour_worker.scoring.rooms import tier_for
     hero_tiers = {"living_room", "kitchen", "primary_bedroom"}
     heroes = [k for k, t in toured if tier_for(t) in hero_tiers]
-    second = {k for k in heroes if space.main_pieces(k)}
     best = {k: max((DETAILS[o["class"]] for o in space.room_objects(k, DETAILS)), default=0.0) for k, _ in toured}
-    ranked = sorted((k for k in heroes if k not in second and best[k] > 0), key=lambda k: (-best[k], k))
+    ranked = sorted((k for k in heroes if best[k] > 0), key=lambda k: (-best[k], k))
     details = {k: 1 for k in ranked[:MAX_DETAILS]}
-    report = _report(toured, details, second)
+    report = _report(toured, details, set())
     contexts = {k: SimpleNamespace(richness=_richness(space, k)) for k, _ in toured} if labels is not None else {}
     selected, alloc_w = allocate_content(report, c3, contexts)
     warnings += alloc_w
@@ -237,6 +238,36 @@ def plan_tour_3d(model, scene: dict, rooms: list[dict], listing_id: str, cfg: Pl
     moves, plan_rows, prev = [], [], None
     poses: dict[str, list] = {}
     spare: dict[str, float] = {}
+    covered: dict[str, np.ndarray] = {}           # per room: its wall cells the shots so far show
+    wide: dict[str, int] = {}
+    first_s: dict = {}
+    extras: list = []                             # (walls_new, (sel, mv)) of the shots added for coverage
+
+    def _cover_room(room: str, i: int, prev):
+        """Further wide shots of `room` while its walls are not covered (COVER_ENOUGH), at most
+        MAX_WIDE in all, each showing walls the earlier ones did not (RoomMoves.best covered=)."""
+        import dataclasses
+        from tour_worker.planner.lengths import length_range
+        walls = space.wall_cells(room)
+        lead = first_s[room]
+        while wide.get(room, 0) < MAX_WIDE and len(walls) and len(covered.get(room, ())) / len(walls) < COVER_ENOUGH:
+            kind = lead.kind if lead.kind in ("room", "hero") else "room"
+            dur = round(max(length_range("room", c3.pacing)[0], 0.85 * lead.final_duration), 2)
+            earlier_ = [p for k in sorted(space.spaces.get(room, {room})) for p in poses.get(k, [])]
+            mv, _ = mover.best(room, dur, earlier=earlier_, prev=prev, piece_rank=wide.get(room, 0),
+                               kind=kind, covered=covered.get(room, np.zeros(0, np.int64)))
+            if mv is None:
+                break
+            sel = dataclasses.replace(lead, role="detail", kind="room", is_hero=False, is_lead=False,
+                                      final_duration=dur, raw_duration=dur)
+            mv.why["coverage_shot"] = True
+            poses.setdefault(room, []).append((mv.first, mv.last))
+            moves.append((sel, mv))
+            extras.append((mv.why.get("walls_new", 0.0), (sel, mv)))
+            covered[room] = np.union1d(covered[room], mover.walls_seen(room, mv))
+            wide[room] += 1
+            prev = mv.last
+        return prev
     for i, sel in enumerate(selected):
         # no repeats across the room's open-plan space: a hall and the living room it opens into
         # are one space, and a camera in one films the other
@@ -247,9 +278,12 @@ def plan_tour_3d(model, scene: dict, rooms: list[dict], listing_id: str, cfg: Pl
             src, dst, route = links[id(sel)]
             mv, w = mover.link(src, sel.room_key, dst, route, sel.final_duration, prev)
         else:
+            # the closing look-back pan suits an outdoor space looking back at the home (the green
+            # house's balcony); another last room is filmed as any room, its last coverage shot closing
+            closing = i == len(selected) - 1 and canon(rtype.get(sel.room_key)) in LOOK_BACK
             mv, w = mover.best(sel.room_key, sel.final_duration, earlier=earlier, prev=prev,
                                piece_rank=len(poses.get(sel.room_key, [])), opening=i == 0,
-                               closing=i == len(selected) - 1, kind=sel.kind, next_room=nxt,
+                               closing=closing, kind=sel.kind, next_room=nxt,
                                enter_route=enters.get(id(sel)),
                                follows_link=i > 0 and id(selected[i - 1]) in links)
         if mv is None and poses.get(sel.room_key) and sel.kind != "detail":
@@ -263,11 +297,33 @@ def plan_tour_3d(model, scene: dict, rooms: list[dict], listing_id: str, cfg: Pl
         poses.setdefault(sel.room_key, []).append((mv.first, mv.last))
         prev = mv.last
         moves.append((sel, mv))
+        if sel.kind != "detail" and id(sel) not in links:
+            room = sel.room_key
+            covered[room] = np.union1d(covered.get(room, np.zeros(0, np.int64)), mover.walls_seen(room, mv))
+            wide[room] = wide.get(room, 0) + 1
+            first_s.setdefault(room, sel)
+        last_of_room = i == len(selected) - 1 or selected[i + 1].room_key != sel.room_key
+        if last_of_room and sel.room_key in first_s and id(sel) not in links \
+                and canon(rtype.get(sel.room_key)) not in LOOK_BACK:
+            prev = _cover_room(sel.room_key, i, prev)
     if not moves:
         raise ValueError("no room allows a camera move")
     # a room is never shown by a close-up alone: without a room shot its close-up goes too
     room_filmed = {s.room_key for s, mv in moves if s.kind != "detail"}
     moves = [(s, mv) for s, mv in moves if s.room_key in room_filmed]
+    # the closing length (allocate gave it to the last room's first shot) goes with the shot that now
+    # closes the tour, when a coverage shot follows it
+    if moves and moves[-1][1].why.get("coverage_shot"):
+        lead_ = first_s.get(moves[-1][0].room_key)
+        if lead_ is not None and lead_.final_duration > moves[-1][0].final_duration:
+            moves[-1][0].final_duration, lead_.final_duration = lead_.final_duration, moves[-1][0].final_duration
+    # the tour's cap: the coverage shots showing the least new wall go first
+    cap = getattr(c3, "max_total_s", None) or 120.0
+    for _, pair in sorted(extras, key=lambda e: e[0]):
+        if sum(s_.final_duration for s_, _ in moves) <= cap:
+            break
+        moves = [m for m in moves if m is not pair]
+        warnings.append(f"coverage_shot_dropped_for_length:{pair[0].room_key}")
     filmed = {s.room_key for s, _ in moves}
     warnings += [f"room_skipped:{k}" for k in sorted({s.room_key for s in selected} - filmed)]
     for sel, _ in moves:              # a dropped angle gives its time to the room's shot: the same move, slower
