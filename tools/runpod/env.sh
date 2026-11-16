@@ -29,6 +29,9 @@ TORCH_EXTENSIONS_DIR="${TORCH_EXTENSIONS_DIR:-$POD_DIR/torch_extensions}"
 # not to the host's count, or torch / BLAS oversubscribe the quota and crawl
 _TW_CPUS="$("${VENV:-$_TW_REPO/.venv-pod}/bin/python" -c 'import sys; sys.path.insert(0, sys.argv[1]); from tour_worker.cpus import usable_cpus; print(usable_cpus())' "$_TW_REPO" 2>/dev/null || nproc)"
 OMP_NUM_THREADS="${OMP_NUM_THREADS:-$_TW_CPUS}"
+# load torch / CUDA / boto3 when the service starts, not in the first job (the venv is on the network
+# volume: the first job after a restart paid minutes for it - tour_worker/warmup.py)
+WORKER_WARMUP="${WORKER_WARMUP:-1}"
 MKL_NUM_THREADS="${MKL_NUM_THREADS:-$_TW_CPUS}"
 set +a
 mkdir -p "$MODELS_DIR" "$JOBS_DIR"

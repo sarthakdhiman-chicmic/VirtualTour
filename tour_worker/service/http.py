@@ -16,6 +16,8 @@ checks) is refused at submit with HTTP 400 and the worker's failure shape
 Every other HTTP error uses that shape too (401 unauthorized, 404 job_not_found)."""
 from __future__ import annotations
 
+import os
+
 import hmac
 import logging
 import socket
@@ -77,6 +79,9 @@ def create_app(settings: Settings | None = None, store: JobStore | None = None) 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         store.start_janitor()
+        if os.environ.get("WORKER_WARMUP") == "1":     # the pod: load the heavy libraries now (warmup.py)
+            from tour_worker import warmup
+            warmup.start()
         log.info("tour-worker %s: %d job(s) at once, records %s, TTL %ss", package_version(),
                  store.concurrency, settings.jobs_dir or "in memory", settings.job_ttl_s)
         yield

@@ -101,7 +101,7 @@ class GpuShot:
     def _coarse_eval(self, r, fn, n_out, mx, my, step, box, origin, frame_shape):
         torch = _t()
         oy, ox = origin
-        ys, xs, gx, gy = R._coarse_grid(*frame_shape, step)
+        ys, xs = R._sample_grid(*frame_shape, *step)
         r0, r1, c0, c1 = box
         i0, i1 = np.searchsorted(ys, r0, "right") - 1, np.searchsorted(ys, r1 - 1, "left")
         j0, j1 = np.searchsorted(xs, c0, "right") - 1, np.searchsorted(xs, c1 - 1, "left")
@@ -119,8 +119,12 @@ class GpuShot:
         anyneed = bool(need.any())
         vals = fn(cu[need], cv[need]) if anyneed else [None] * n_out
         G = (slice(int(ys[i0]), int(ys[i1]) + 1), slice(int(xs[j0]), int(xs[j1]) + 1))
-        lx = torch.as_tensor(gx[G] - np.float32(j0), device=self.dev)
-        ly = torch.as_tensor(gy[G] - np.float32(i0), device=self.dev)
+        # the full-res pixels' positions in the coarse grid (motion.region._coarse_grid's np.interp,
+        # piecewise linear over the uneven last cell), made here on the device: built on the CPU and
+        # uploaded per region per frame (up to 2 x 32 MB at 4K) they were most of a frame's time
+        fx = self._grid_pos(xs, step[1], frame_shape[1])[G[1]] - float(j0)
+        fy = self._grid_pos(ys, step[0], frame_shape[0])[G[0]] - float(i0)
+        lx, ly = torch.broadcast_tensors(fx[None, :], fy[:, None])
         out = []
         for k, val in enumerate(vals):
             if val is None:
@@ -134,6 +138,18 @@ class GpuShot:
             out[:2] = [z, z]
         Rs = (slice(G[0].start - oy, G[0].stop - oy), slice(G[1].start - ox, G[1].stop - ox))
         return Rs, out
+
+    def _grid_pos(self, pts: np.ndarray, step: int, n: int):
+        """np.interp(arange(n), pts, arange(len(pts))) as a float32 device vector, cached."""
+        torch = _t()
+        cache = self.__dict__.setdefault("_gpos", {})
+        key = (len(pts), int(pts[-1]), step, n)
+        if key not in cache:
+            p = torch.as_tensor(pts, dtype=torch.float64, device=self.dev)
+            x = torch.arange(n, dtype=torch.float64, device=self.dev)
+            k = (torch.bucketize(x, p, right=True) - 1).clamp_(0, len(pts) - 2)
+            cache[key] = (k + (x - p[k]) / (p[k + 1] - p[k])).to(torch.float32)
+        return cache[key]
 
     def apply_regions(self, mx, my, t: float, origin, frame_shape):
         """motion.region.apply_regions on device maps (in place); returns the gain or None."""
