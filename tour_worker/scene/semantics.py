@@ -237,6 +237,9 @@ def find_objects(local: np.ndarray, labels: np.ndarray, space=None) -> list[dict
     return out
 
 
+EMPTY_LEVEL = 3          # a pixel at most this bright in every channel is the render's empty background
+
+
 def label_scene(model, space, renderer, segmenter, rooms: list[str], scene_sha256: str,
                 progress=None, device: str | None = None) -> tuple[SceneLabels, dict, np.ndarray]:
     """Survey, segment, vote: the scene's labels and objects, stats, and how many views saw each
@@ -248,9 +251,12 @@ def label_scene(model, space, renderer, segmenter, rooms: list[str], scene_sha25
     voter = Voter(model.means, model.opacities, dev)
     K = intrinsics(VIEW_HFOV, VIEW_W, VIEW_H)
     up = space.up_scene
+    empty: dict[str, list[float]] = {}
     for k, v in enumerate(views):
         V = look_at(space.to_scene(v.eye), space.to_scene(v.target), up=up)
         bgr = render_view(renderer, V, K, VIEW_W, VIEW_H)
+        # what the scan never captured renders as the black background: how much of the view it is
+        empty.setdefault(v.room, []).append(float((bgr.max(axis=2) <= EMPTY_LEVEL).mean()))
         voter.add(V, K, VIEW_W, VIEW_H, class_map(segmenter, bgr))
         if progress:
             progress(k + 1, len(views))
@@ -260,7 +266,9 @@ def label_scene(model, space, renderer, segmenter, rooms: list[str], scene_sha25
     counts = {VOCAB[c - 1]: int(n) for c, n in zip(*np.unique(labels[labels > 0], return_counts=True))}
     stats = {"views": len(views), "rooms": len({v.room for v in views}),
              "labelled": int((labels > 0).sum()), "seen": int((voter.seen_np > 0).sum()),
-             "classes": dict(sorted(counts.items(), key=lambda t: -t[1])), "objects": len(objects)}
+             "classes": dict(sorted(counts.items(), key=lambda t: -t[1])), "objects": len(objects),
+             # per room: the share of its survey views the scan covers (1 - empty black)
+             "room_capture": {r: round(1.0 - float(np.mean(e)), 3) for r, e in empty.items()}}
     return lab, stats, voter.seen_np
 
 

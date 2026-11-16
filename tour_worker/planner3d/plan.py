@@ -89,6 +89,67 @@ def _richness(space, room: str) -> float:
     return min(1.0, len(kinds) / 5.0)
 
 
+UTILITY = {"bathroom", "ensuite", "powder_room", "half_bath", "laundry", "laundry_room", "utility_room",
+           "garage", "storage", "closet"}
+
+
+def _walk_order(space, selected: list, stage: dict[str, str], rtype: dict[str, str], cfg=None) -> list:
+    """The narrative order kept stage by stage; within a stage the rooms follow the walk (user
+    2026-11-16, the Home Scan jumped living -> far family room -> back to the kitchen beside the
+    living room): nearest next by walking distance from the room before, starting from the stage's
+    narrative first only for the tour's opening. Each room's shots stay together, in their order.
+    A tour never closes in a bathroom or other utility room: it moves before the last other room."""
+    blocks: list[tuple[str, list]] = []
+    for s_ in selected:
+        if blocks and blocks[-1][0] == s_.room_key:
+            blocks[-1][1].append(s_)
+        else:
+            blocks.append((s_.room_key, [s_]))
+    dist_cache: dict[tuple[str, str], float] = {}
+
+    def dist(a: str, b: str) -> float:
+        if (a, b) not in dist_cache:
+            r = space.route(a, b)
+            d = float(np.linalg.norm(np.diff(r[0], axis=0), axis=1).sum()) if r else float("inf")
+            if not np.isfinite(d):                   # rooms in parts of their own: as the crow flies
+                pa, pb = space.room_points.get(a), space.room_points.get(b)
+                d = float(np.linalg.norm(pa - pb)) + 100.0 if pa is not None and pb is not None else 1e9
+            dist_cache[(a, b)] = dist_cache[(b, a)] = d
+        return dist_cache[(a, b)]
+
+    out: list[tuple[str, list]] = []
+    i = 0
+    while i < len(blocks):
+        st = stage.get(blocks[i][0])
+        j = i
+        while j < len(blocks) and stage.get(blocks[j][0]) == st:
+            j += 1
+        group = blocks[i:j]
+        if out:                                      # follow on from the last room toured
+            ordered, prev = [], out[-1][0]
+        else:                                        # the tour opens on its narrative first room
+            ordered, prev = [group[0]], group[0][0]
+            group = group[1:]
+        while group:
+            k = min(range(len(group)), key=lambda n: dist(prev, group[n][0]))
+            ordered.append(group.pop(k))
+            prev = ordered[-1][0]
+        out += ordered
+        i = j
+    if len(out) > 1 and canon(rtype.get(out[-1][0])) in UTILITY:
+        last_other = max((n for n, (k, _) in enumerate(out) if canon(rtype.get(k)) not in UTILITY), default=None)
+        if last_other is not None:
+            out.insert(last_other, out.pop())
+    seq = [s_ for _, shots in out for s_ in shots]
+    if seq and selected and seq[-1] is not selected[-1] and cfg is not None:
+        # the closing length (allocate gave it to the narrative's last shot) goes with the closing
+        from tour_worker.planner.lengths import shot_length
+        old_last = selected[-1]
+        seq[-1].final_duration = max(seq[-1].final_duration, old_last.final_duration)
+        old_last.final_duration = shot_length("room", cfg.pacing, 0.5)
+    return seq
+
+
 def _route_tour(space, selected: list, connectors: set[str], cfg: PlannerConfig):
     """Hallways (CONNECTORS) as links, not stops: the stops keep their narrative order; between two
     consecutive rooms the walking route (Space.route) says what way the next lies and what it passes
@@ -168,6 +229,7 @@ def plan_tour_3d(model, scene: dict, rooms: list[dict], listing_id: str, cfg: Pl
     warnings += alloc_w
     rtype = dict(toured)
     stage = {r.room_key: r.narrative_stage for r in report.rooms}
+    selected = _walk_order(space, selected, stage, rtype, c3)
     selected, links, enters, link_w = _route_tour(space, selected, {k for k, t in toured if canon(t) in CONNECTORS}, c3)
     warnings += link_w
 

@@ -92,15 +92,16 @@ def run_scene_label(request: dict, storage, workdir: str, settings: Settings | N
             out.update(motion_uri=prefix + "scene_motion.npz", motion_sha256=sha256_file(mpath))
             storage.put(mpath, out["motion_uri"])
             stats["motion"] = motion.classes
-    stats["warnings"] = warnings
-    if found is not None:                       # name them from what they hold
-        from tour_worker.planner3d.discover import room_types
-        types = room_types(space, labels.objects, found)
-        out["rooms"] = [{"room_key": k, "room_type": types[k],
-                         "point": [round(float(x), 4) for x in space.to_scene(np.array([*found[k], 1.0]))]}
-                        for k in keys]
-        report.note("rooms: " + ", ".join(f"{k} {types[k]}" for k in keys))
+    if found is not None:                       # name them from what they hold; merge; drop the poorly captured
+        from tour_worker.planner3d.discover import finalize_rooms
+        final, room_w = finalize_rooms(space, found, labels.objects, stats.get("room_capture"))
+        warnings += room_w
+        out["rooms"] = [{"room_key": k, "room_type": t, "tour": toured,
+                         "point": [round(float(x), 4) for x in space.to_scene(np.array([*p, 1.0]))]}
+                        for k, t, p, toured in final]
+        report.note("rooms: " + ", ".join(f"{k} {t}" + ("" if toured else " (not toured)") for k, t, _, toured in final))
     else:
         out["rooms"] = rooms
+    stats["warnings"] = warnings
     return {"status": "completed", **out, "objects": labels.objects, "stats": stats,
             "seconds": round(time.time() - t0, 2), "timings": sw.result()}

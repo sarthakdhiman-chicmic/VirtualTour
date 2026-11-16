@@ -81,55 +81,134 @@ def discover_rooms(space) -> dict[str, np.ndarray]:
     return {k: pts[k] for k in keys}
 
 
-KITCHEN = ("stove", "oven", "sink", "refrigerator", "dishwasher", "kitchen island", "countertop", "hood")
+KITCHEN = ("stove", "oven", "sink", "refrigerator", "dishwasher", "kitchen island", "countertop", "hood", "microwave")
 BATH = ("toilet", "bathtub", "shower")
 LIVING = ("sofa", "television receiver", "fireplace")
-OFFICE = ("desk",)
+OFFICE = ("desk", "computer", "monitor", "crt screen", "screen")
+BED_MIN_M2 = 1.2         # this much bed (all its pieces) makes a bedroom - a stray bath fixture does not
+DINING_TABLE_M2 = 1.2    # a dining table at least this big (a desk is smaller), with chairs
+CAPTURE_MIN = 0.75       # rooms whose survey views the scan covers less than this are not toured
+
+
+def _area(o) -> float:
+    f = o.get("footprint") or {}
+    return float(f.get("long", 0.0)) * float(f.get("short", 0.0))
+
+
+def _evidence(held: dict[str, list[dict]]) -> dict[str, float]:
+    a = lambda names: sum(_area(o) for n in names for o in held.get(n, []))      # noqa: E731
+    return {"bed": a(("bed",)), "bath": float(sum(len(held.get(n, [])) for n in BATH)),
+            "kitchen": a(KITCHEN), "kitchen_kinds": float(sum(n in held for n in KITCHEN)),
+            "living": a(("sofa",)) + 0.6 * sum(n in held for n in ("television receiver", "fireplace")),
+            "table": max((_area(o) for o in held.get("table", [])), default=0.0),
+            "chairs": float(len(held.get("chair", []))), "office": float(sum(n in held for n in OFFICE))}
+
+
+def _type_of(space, key: str, ev: dict[str, float]) -> str:
+    """One room's type from its evidence (module docstring): a bed dominates; then bath fixtures;
+    then kitchen vs living by the larger area of their own furniture; a dining table; an office."""
+    from tour_worker.planner3d.space import CELL
+    if ev["bed"] >= BED_MIN_M2:
+        return "bedroom"
+    if ev["bath"] >= 1 and ev["bed"] < 0.5:
+        return "bathroom"
+    kitchen = ev["kitchen"] if ev["kitchen_kinds"] >= 2 else 0.0
+    living = ev["living"] if ev["living"] >= 0.8 else 0.0
+    if kitchen or living:
+        return "kitchen" if kitchen >= living else "living_room"
+    if ev["table"] >= DINING_TABLE_M2 and ev["chairs"] >= 3:
+        return "dining_room"
+    if ev["office"] or (ev["table"] > 0 and ev["chairs"] >= 1):
+        return "home_office"
+    mask = space.room_of == space.room_keys.index(key)
+    if not mask.any():
+        return "other_room"
+    ys, xs = np.nonzero(mask)
+    narrow = float(space.dt[mask].max())
+    long_side = max(np.ptp(ys), np.ptp(xs)) * CELL
+    return "hallway" if narrow <= 0.75 and long_side >= 3.0 else "other_room"
+
+
+def _held(objects, keys) -> dict[str, dict[str, list[dict]]]:
+    held: dict[str, dict[str, list[dict]]] = {k: {} for k in keys}
+    for o in objects:
+        if o.get("room") in held:
+            held[o["room"]].setdefault(o["class"], []).append(o)
+    return held
 
 
 def room_types(space, objects: list[dict], points: dict[str, np.ndarray]) -> dict[str, str]:
-    """{room key: room type} from the labelled objects in each room (module docstring)."""
+    """{room key: room type} from the labelled objects in each room (module docstring): the primary
+    bedroom is the largest bedroom by floor and bed; more than one living room: the largest is the
+    living room, the others family rooms."""
     from tour_worker.planner3d.space import CELL
-    held: dict[str, dict[str, list[dict]]] = {k: {} for k in points}
-    for o in objects:
-        r = o.get("room")
-        if r in held:
-            held[r].setdefault(o["class"], []).append(o)
-
-    def size(o):
-        f = o.get("footprint") or {}
-        return float(f.get("long", 0.0)) * float(f.get("short", 0.0))
-
-    out: dict[str, str] = {}
-    beds = {k: max((size(o) for o in h.get("bed", [])), default=0.0) for k, h in held.items()}
-    primary = max((k for k in beds if beds[k] >= 1.5), key=lambda k: beds[k], default=None)
-    living = []
-    for k, h in held.items():
-        has = lambda names: any(n in h for n in names)          # noqa: E731
-        if has(BATH):
-            out[k] = "bathroom"
-        elif sum(n in h for n in KITCHEN) >= 2 or "kitchen island" in h or "stove" in h:
-            out[k] = "kitchen"
-        elif beds[k] >= 1.5:
-            out[k] = "primary_bedroom" if k == primary else "bedroom"
-        elif has(LIVING):
-            living.append(k)
-            out[k] = "living_room"
-        elif "table" in h and len(h.get("chair", [])) >= 3:
-            out[k] = "dining_room"
-        elif has(OFFICE):
-            out[k] = "home_office"
-        else:
-            mask = space.room_of == space.room_keys.index(k)
-            ys, xs = np.nonzero(mask)
-            narrow = float(space.dt[mask].max()) if mask.any() else 0.0
-            long_side = max(np.ptp(ys), np.ptp(xs)) * CELL if mask.any() else 0.0
-            out[k] = "hallway" if narrow <= 0.75 and long_side >= 3.0 else "other_room"
-    # one living room: the largest; the others are family rooms
+    held = _held(objects, points)
+    ev = {k: _evidence(h) for k, h in held.items()}
+    out = {k: _type_of(space, k, ev[k]) for k in points}
+    area = {k: float((space.room_of == space.room_keys.index(k)).sum()) * CELL * CELL for k in points}
+    beds = [k for k in out if out[k] == "bedroom"]
+    if beds:
+        out[max(beds, key=lambda k: area[k] + 2.0 * ev[k]["bed"])] = "primary_bedroom"
+    living = [k for k in out if out[k] == "living_room"]
     if len(living) > 1:
-        areas = {k: float((space.room_of == space.room_keys.index(k)).sum()) for k in living}
-        best = max(living, key=lambda k: areas[k])
+        best = max(living, key=lambda k: area[k])
         for k in living:
             if k != best:
                 out[k] = "family_room"
     return out
+
+
+MERGE_SAME = {"living_room", "family_room", "dining_room", "home_office", "bedroom", "primary_bedroom",
+              "kitchen", "hallway", "other_room", "bathroom"}
+
+
+def finalize_rooms(space, points: dict[str, np.ndarray], objects: list[dict],
+                   capture: dict[str, float] | None = None):
+    """The rooms as tour_plan takes them, from the found rooms and the scene's labels:
+      - neighbours in one open space merge when they are the same kind of room, or one is an
+        "other_room" (one family room split in three is one room; a kitchen beside a living room
+        stays two), the more open centre kept, then typed again;
+      - a room the scan covers poorly (capture < CAPTURE_MIN of its survey views) is not toured.
+    Returns ([(key, type, centre, toured)], warnings); objects' rooms are updated to the merges."""
+    keys = list(points)
+    merged: dict[str, str] = {}
+    while True:
+        space.set_rooms({k: points[k] for k in keys})
+        for o in objects:
+            if o.get("room") in merged:
+                o["room"] = merged[o["room"]]
+        types = room_types(space, objects, {k: points[k] for k in keys})
+        sad = _saddles(space, len(keys))
+        clear = {i: float(space.dt[space.cell(points[k])]) for i, k in enumerate(keys)}
+        pairs = []
+        for (i, j), d in sad.items():
+            a, b = keys[i], keys[j]
+            if b not in space.spaces.get(a, {a}):
+                continue                                   # a doorway between them: two rooms
+            ta, tb = types[a], types[b]
+            same = ta == tb or {ta, tb} <= {"living_room", "family_room"}
+            if same or "other_room" in (ta, tb):
+                pairs.append((d, i, j))
+        if not pairs:
+            break
+        _, i, j = max(pairs)
+        keep, drop = (keys[i], keys[j]) if clear[i] >= clear[j] else (keys[j], keys[i])
+        if types[drop] != "other_room" and types[keep] == "other_room":
+            keep, drop = drop, keep
+        merged = {**{k: (keep if v == drop else v) for k, v in merged.items()}, drop: keep}
+        keys = [k for k in keys if k != drop]
+    warnings = [f"rooms_merged:{d}->{k}" for d, k in sorted(merged.items())]
+    out = []
+    for k in keys:
+        c = (capture or {}).get(k)
+        if c is None:                                      # a merged room: its parts' worst coverage
+            parts = [d for d, kk in merged.items() if kk == k] + [k]
+            vals = [(capture or {}).get(p) for p in parts if (capture or {}).get(p) is not None]
+            c = min(vals) if vals else None
+        toured = c is None or c >= CAPTURE_MIN
+        if types[k] == "other_room" and len(keys) > 1:
+            toured = False                                 # nothing a viewer would recognise
+        if not toured:
+            warnings.append(f"room_not_toured:{k}:" + ("other_room" if types[k] == "other_room" else f"capture_{c:.2f}"))
+        out.append((k, types[k], points[k], toured))
+    return out, warnings
