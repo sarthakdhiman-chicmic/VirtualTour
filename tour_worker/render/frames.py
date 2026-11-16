@@ -19,7 +19,7 @@ import math
 from tour_worker.render.camera_path import (KeyframePath, base_window, roll_fit_scale, rotate_homography, DEFAULT_HFOV_DEG,
                                  time_warp_at)
 from tour_worker.motion.loader import load_regions
-from tour_worker.motion.region import ROI_PROBE, apply_regions, field_align, probe_box
+from tour_worker.motion.region import ROI_PROBE, apply_regions, field_align, grid_scale, probe_box
 from tour_worker.cpus import usable_cpus
 
 def crop_roll_homography(cx, cy, zoom, roll_deg, src_w, src_h, out_w, out_h):
@@ -202,7 +202,7 @@ class ShotWarp:
             warnings.extend(region_warnings)
         self.grid = (np.meshgrid(np.arange(self.ow, dtype=np.float64), np.arange(self.oh, dtype=np.float64))
                      if self.regions else None)
-        self.align = field_align(self.regions)
+        self.align = field_align(self.regions, grid_scale((self.oh, self.ow)))
         self.probe_ys = np.unique(np.r_[np.arange(0, self.oh, ROI_PROBE), self.oh - 1])
         self.probe_xs = np.unique(np.r_[np.arange(0, self.ow, ROI_PROBE), self.ow - 1])
 

@@ -1,4 +1,5 @@
-"""Seeded 3D gradient noise (classic Perlin construction), vectorised NumPy, float64.
+"""Seeded 3D gradient noise (classic Perlin construction), vectorised NumPy, float32 (half the
+memory traffic of float64; the noise is about +-1, far inside float32's precision - 4K render time).
 
 Used for organic, smooth-in-time motion (foliage sway, fabric ripple). No dependency: the noise
 libraries (`noise`, `opensimplex`, `pyfastnoiselite`) are not installed, and our own version is
@@ -11,14 +12,14 @@ import numpy as np
 
 _GRAD3 = np.array([[1, 1, 0], [-1, 1, 0], [1, -1, 0], [-1, -1, 0],
                    [1, 0, 1], [-1, 0, 1], [1, 0, -1], [-1, 0, -1],
-                   [0, 1, 1], [0, -1, 1], [0, 1, -1], [0, -1, -1]], dtype=np.float64)
+                   [0, 1, 1], [0, -1, 1], [0, 1, -1], [0, -1, -1]], dtype=np.float32)
 _GX, _GY, _GZ = (np.ascontiguousarray(_GRAD3[:, i]) for i in range(3))
 
 
 class GradientNoise3D:
     def __init__(self, seed: int):
         p = np.random.default_rng(seed & 0xFFFFFFFF).permutation(256)
-        self.perm = np.concatenate([p, p]).astype(np.int64)
+        self.perm = np.concatenate([p, p]).astype(np.int32)
         self.perm12 = self.perm % 12        # gradient index per hash, looked up once
 
     @staticmethod
@@ -31,10 +32,14 @@ class GradientNoise3D:
         return _GX[g] * x + _GY[g] * y + _GZ[g] * z
 
     def __call__(self, x, y, z):
+        # the integer cell from float64 (a large coordinate keeps its exact cell), the rest in float32
         x, y, z = np.asarray(x, np.float64), np.asarray(y, np.float64), np.asarray(z, np.float64)
         x, y, z = np.broadcast_arrays(x, y, z)
-        xi, yi, zi = np.floor(x).astype(np.int64), np.floor(y).astype(np.int64), np.floor(z).astype(np.int64)
-        xf, yf, zf = x - xi, y - yi, z - zi
+        fx, fy, fz = np.floor(x), np.floor(y), np.floor(z)
+        xi, yi, zi = fx.astype(np.int32), fy.astype(np.int32), fz.astype(np.int32)
+        x, y, z = (x - fx).astype(np.float32), (y - fy).astype(np.float32), (z - fz).astype(np.float32)
+        fx = fy = fz = None
+        xf, yf, zf = x, y, z
         xi, yi, zi = xi & 255, yi & 255, zi & 255
         u, v, w = self._fade(xf), self._fade(yf), self._fade(zf)
         P = self.perm

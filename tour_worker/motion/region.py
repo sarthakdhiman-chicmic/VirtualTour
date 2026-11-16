@@ -147,8 +147,22 @@ SMOOTH_STEP = {"calm_water": (2, 2)}   # 4 px left 0.35 px max error on far wate
 _INTERP_CACHE: dict = {}
 
 
-def field_step(effect: str) -> tuple[int, int]:
-    return FIELD_STEP.get(effect, DEFAULT_FIELD_STEP)
+# The grids above were set and reviewed at 1080p. A larger output samples the same picture with
+# proportionally more pixels; the fields are smooth, so at 4K the grid keeps 1080p's points per
+# picture (user 2026-11-16: 4K render time) - steps, the exact path and the error budget (screen px)
+# all scale by grid_scale(). Up to 1080p it is 1: nothing changes.
+def grid_scale(frame_shape) -> int:
+    return 2 if min(frame_shape) >= 2000 else 1
+
+
+def field_step(effect: str, k: int = 1) -> tuple[int, int]:
+    s = FIELD_STEP.get(effect, DEFAULT_FIELD_STEP)
+    return (s[0] * k, s[1] * k)
+
+
+def smooth_step(effect: str, k: int = 1) -> tuple[int, int] | None:
+    s = SMOOTH_STEP.get(effect)
+    return (s[0] * k, s[1] * k) if s else None
 
 
 def _coarse_grid(h: int, w: int, step: tuple[int, int]):
@@ -240,22 +254,22 @@ def _coarse_eval(r: Region, fn, n_out: int, map_x, map_y, step: tuple[int, int],
 FIELD_ERR_BUDGET = 0.02   # screen px: predicted interpolation error a coarse grid may add
 
 
-def adaptive_step(r: Region, configured: tuple[int, int], screen_per_src: float) -> tuple[int, int]:
+def adaptive_step(r: Region, configured: tuple[int, int], screen_per_src: float, k: int = 1) -> tuple[int, int]:
     """The coarsest grid (4, 2 or exact) whose interpolation error stays small: bilinear error
     grows with the strength and with (step / detail size)^2 - est. strength x (step / detail)^2,
     calibrated on Downing / Turkey Trot (curtains at 7 px with step 4 over 48 px detail: 0.06 px
     p99 - too much; trees at 10 px flutter with step 2 over ~25 px leaves: 0.35 px max)."""
-    for st in (4, 2):
-        if st <= min(configured) and r.step_error(st, screen_per_src) <= FIELD_ERR_BUDGET:
+    for st in (4 * k, 2 * k):
+        if st <= min(configured) and r.step_error(st, screen_per_src) <= FIELD_ERR_BUDGET * k:
             return (min(configured[0], st), min(configured[1], st))
-    return (1, 1)
+    return (k, k)
 
 
-def field_align(regions: list[Region]) -> int:
+def field_align(regions: list[Region], k: int = 1) -> int:
     """A window whose bounds are multiples of this (or the frame's last row/col) contains every
     coarse grid point its regions use."""
-    steps = [s for r in regions for s in field_step(r.effect) + SMOOTH_STEP.get(r.effect, ())]
-    assert all(s in (1, 2, 4) for s in steps), "field steps must be 1, 2 or 4 (window alignment)"
+    steps = [s for r in regions for s in field_step(r.effect, k) + (smooth_step(r.effect, k) or ())]
+    assert all(s in (1, 2, 4, 8) for s in steps), "field steps must be 1, 2, 4 or 8 (window alignment)"
     return int(np.lcm.reduce([max(1, s) for s in steps] or [1]))
 
 
@@ -273,16 +287,17 @@ def apply_regions(map_x: np.ndarray, map_y: np.ndarray, regions: list[Region], t
     gain = None
     frame_shape = frame_shape or map_x.shape
     oy, ox = origin
+    k = grid_scale(frame_shape)
     for r in regions:
         box, screen_per_src = _screen_box(r, map_x, map_y)
         if box is None:
             continue
         if step is None:
-            st = adaptive_step(r, field_step(r.effect), screen_per_src)
+            st = adaptive_step(r, field_step(r.effect, k), screen_per_src, k)
         else:
             st = (step, step) if isinstance(step, int) else tuple(step)
         gbox = (box[0] + oy, box[1] + oy, box[2] + ox, box[3] + ox)
-        smooth = SMOOTH_STEP.get(r.effect) if step is None else None
+        smooth = smooth_step(r.effect, k) if step is None else None
         irr = None
         if max(st) > 1:
             R, (fdx, fdy, fb) = _coarse_eval(r, lambda u, v: r.fields(u, v, t), 3, map_x, map_y, st, gbox,
