@@ -61,7 +61,9 @@ OCC_NEAR, MAX_OCC, OCC_W, OCC_CHECK_KIND = 2.0, 0.20, 3.0, 30
 OPENING_GLIDE = 1.5          # the tour opens by moving into the home
 # near-lens distance per move: a walkway composes on a piece, so nothing may stand within 2 m in
 # front of it; a glide or pan looks down a room, where walls 1.2 m+ away are the room itself
-OCC_NEAR_KIND = {"walkway": 2.0, "push": 1.2, "pull": 1.2, "reveal": 1.2, "link": 1.2, "enter": 0.9, "glide": 1.2, "pan": 1.2, "detail": 0.7}
+# (user 2026-11-16, Home Scan: shots closing in on walls the floor plan does not hold - a poorly
+# captured wall is no "tall" cell - so the rendered check looks 1.8 m out for every room move)
+OCC_NEAR_KIND = {"walkway": 2.0, "push": 1.8, "pull": 1.8, "reveal": 1.8, "link": 1.2, "enter": 1.5, "glide": 1.8, "pan": 1.2, "detail": 0.7}
 PAN_SWEEP = 50.0
 AIM_Z_MAX = EYE - 0.10        # a room shot never looks up: not at a ceiling, not at upper cabinets
 LOW_TOP = 1.4                 # m: an object whose top is below this is a surface a room shot may aim at
@@ -103,7 +105,11 @@ FEATURES = {"fireplace": 1.0, "windowpane": 0.8, "kitchen island": 0.8, "bathtub
             "sofa": 0.6, "television receiver": 0.5, "painting": 0.5, "table": 0.5, "desk": 0.5, "mirror": 0.4,
             "curtain": 0.3, "door": 0.2, "sink": 0.5, "hood": 0.5, "oven": 0.4, "refrigerator": 0.3,
             "cabinet": 0.15}
-OWN_SHARE = {"walkway": 0.35, "push": 0.5, "pull": 0.5, "glide": 0.5}   # of a view's middle on the shot's own room
+OWN_SHARE = {"walkway": 0.35, "push": 0.5, "pull": 0.5, "glide": 0.5}
+OWN_MIN = 0.5                 # a room shot's view is at least half its own room
+OWN_FREE = ("enter", "reveal", "link", "pan", "detail")   # they look in from outside it, or back over the home
+COVER_OWN_MIN = 0.6           # a room's further shot shows mostly that room (not the hallway beyond)
+COMPOSED = ("walkway", "push", "pull")    # the kinds a room's further shots may be   # of a view's middle on the shot's own room
 OWN_W = 4.0                                                # score lost per missing share
 FEATURE_W = 0.4
 # close-ups (detail shots, 1.5-2.5 s): fixtures, finishes, decor
@@ -352,19 +358,41 @@ class RoomMoves:
         if covered is not None and kind != "detail":
             # a further shot of the room: it must show walls the earlier ones did not (glides
             # included - they face away from the piece the first shot framed), with room to breathe
+            # (user 2026-11-16: glides and doorway views as further shots made "close up walls, in
+            # hallways without getting into the room") - only composed moves, of this room
             def fresh(t):
                 out = []
                 for m in t:
+                    if m.kind not in COMPOSED:
+                        continue
+                    k = len(m.eye) // 2
+                    own_ = sp.own_share(room, m.eye[k], math.atan2(*(m.tgt[k][:2] - m.eye[k])[::-1]), HFOV)
+                    if own_ < COVER_OWN_MIN:
+                        continue
                     new = self.new_walls(room, m, covered)
                     if new >= COVER_NEW_MIN:
                         m.why["walls_new"] = round(new, 2)
                         m.score += COVER_W * new
                         out.append(m)
                 return out
-            tiers = [fresh(roomy(t)) for t in tiers] + [fresh(roomy(glides))]
+            tiers = [fresh(roomy(t)) for t in tiers]
         else:
-            tiers = ([roomy(t) for t in tiers] if strict       # a second angle: composed, with room, or none
-                     else [roomy(t) for t in tiers] + tiers + [roomy(glides), glides])
+            # every room shot keeps room to breathe and shows mostly its own room, or the room is not
+            # filmed (user 2026-11-16: "close up walls" - the closest-call fallback is gone)
+            def own_room(t):
+                out = []
+                for m in t:
+                    if m.kind in OWN_FREE:
+                        out.append(m)
+                        continue
+                    k = len(m.eye) // 2
+                    o = sp.own_share(room, m.eye[k], math.atan2(*(m.tgt[k][:2] - m.eye[k])[::-1]), HFOV)
+                    m.why["own_share"] = round(o, 2)
+                    if o >= OWN_MIN:
+                        out.append(m)
+                return out
+            tiers = ([own_room(roomy(t)) for t in tiers] if strict
+                     else [own_room(roomy(t)) for t in tiers] + [own_room(roomy(glides))])
         tiers = [t for t in tiers if t]
         if not tiers:
             return None, [f"room_no_move:{room}" if kind != "detail" else f"room_no_detail:{room}"]

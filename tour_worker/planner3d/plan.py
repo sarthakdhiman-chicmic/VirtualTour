@@ -42,8 +42,10 @@ FADE_S = 0.5
 CONNECTORS = {"hallway", "corridor", "landing", "staircase", "stairs", "stairway"}
 LOOK_BACK = {"balcony", "patio", "outdoor_patio", "terrace", "deck", "porch", "garden", "backyard", "rooftop"}
 MAX_WIDE = 3                  # wide shots a room at most (coverage: user 2026-11-16)
+SYNC_HEADROOM = 0.88          # the cap is met before the sync with this share of it
 COVER_ENOUGH = 0.85           # a room whose walls are this covered gets no further shot
-MAX_DETAILS = 2                # close-ups a tour (client: details on the drops; user: option A)
+MAX_DETAILS = 0                # 3D close-ups off (user 2026-11-16, Home Scan: a painting rendered as a black
+#                               blob, wall photos blurred - a scan rarely holds detail at 1 m); was 2
 PLANNER3D_VERSION = "3d-2"
 
 
@@ -162,7 +164,7 @@ def _route_tour(space, selected: list, connectors: set[str], cfg: PlannerConfig)
     warnings)."""
     from tour_worker.planner.lengths import shot_length
     stops = [s for s in selected if s.room_key not in connectors]
-    if not connectors or not stops:
+    if not stops:
         return selected, {}, {}, []
     hall_shot = {}
     for s in selected:
@@ -183,6 +185,10 @@ def _route_tour(space, selected: list, connectors: set[str], cfg: PlannerConfig)
                     links[id(link)] = (last_room, s.room_key, r)
                     used.add(h)
                     seq.append(link)
+            # a room reached through a doorway (not across an open plan) opens walking in from it,
+            # when that walk is a good shot (user 2026-11-16: a hallway view into the primary bedroom
+            # came as its last shot - "it could have been the first scene")
+            if r and s.room_key not in space.spaces.get(last_room, {last_room}):
                 enters[id(s)] = r
         seq.append(s)
         last_room = s.room_key
@@ -292,6 +298,9 @@ def plan_tour_3d(model, scene: dict, rooms: list[dict], listing_id: str, cfg: Pl
             mv.why["plan_s"] = round(time.perf_counter() - t_shot, 1)
         warnings += [x for x in w if x not in warnings]
         if mv is None:
+            if not poses.get(sel.room_key) and sel.kind != "detail":
+                w = [f"room_no_good_view:{sel.room_key}"]      # no shot with room to breathe of its own room
+                warnings += [x for x in w if x not in warnings]
             spare[sel.room_key] = spare.get(sel.room_key, 0.0) + sel.final_duration
             continue
         poses.setdefault(sel.room_key, []).append((mv.first, mv.last))
@@ -317,8 +326,9 @@ def plan_tour_3d(model, scene: dict, rooms: list[dict], listing_id: str, cfg: Pl
         lead_ = first_s.get(moves[-1][0].room_key)
         if lead_ is not None and lead_.final_duration > moves[-1][0].final_duration:
             moves[-1][0].final_duration, lead_.final_duration = lead_.final_duration, moves[-1][0].final_duration
-    # the tour's cap: the coverage shots showing the least new wall go first
-    cap = getattr(c3, "max_total_s", None) or 120.0
+    # the tour's cap: the coverage shots showing the least new wall go first. Checked with room for
+    # the beat sync, which only lengthens room shots afterwards (the Home Scan: 131 s past a 120 s cap)
+    cap = SYNC_HEADROOM * (getattr(c3, "max_total_s", None) or 120.0)
     for _, pair in sorted(extras, key=lambda e: e[0]):
         if sum(s_.final_duration for s_, _ in moves) <= cap:
             break

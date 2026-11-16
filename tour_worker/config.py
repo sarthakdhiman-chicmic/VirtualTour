@@ -74,9 +74,10 @@ class Settings:
     splat_supersample: float = 1.5
     splat_sh_degree: int = 3
     scene_cache_dir: str | None = None      # None: no disk cache (fetched per job, deleted after loading)
-    # photo tours: frames drawn on the GPU when CUDA is there (render/frames_gpu.py); "cpu" forces
-    # the OpenCV path (worker processes)
-    photo_backend: str = "auto"
+    # photo tours: "cpu" - the OpenCV path, worker processes (the default: on the A100 pod the GPU
+    # path drew frames one at a time behind the other threads' device work, 1263 s vs the CPU path's
+    # 742 s for Turkey Trot 4K, 2026-11-16); "gpu" / "auto" - frames drawn on CUDA (render/frames_gpu.py)
+    photo_backend: str = "cpu"
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> "Settings":
@@ -103,7 +104,7 @@ class Settings:
             splat_supersample=min(3.0, max(1.0, float(env.get("SPLAT_SUPERSAMPLE") or 1.5))),
             splat_sh_degree=min(3, max(0, int(env.get("SPLAT_SH_DEGREE") or 3))),
             scene_cache_dir=(env.get("SCENE_CACHE_DIR") or "").strip() or None,
-            photo_backend=(env.get("PHOTO_BACKEND") or "auto").strip().lower(),
+            photo_backend=(env.get("PHOTO_BACKEND") or "cpu").strip().lower(),
         )
 
     def segment_path(self) -> str:

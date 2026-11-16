@@ -223,7 +223,7 @@ def _obj(cls, lo, hi):
                           "short": min(hi[0] - lo[0], hi[1] - lo[1]), "axis_deg": 0.0 if hi[0] - lo[0] >= hi[1] - lo[1] else 90.0}}
 
 
-def test_a_kitchen_with_no_piece_pushes_toward_its_counter_and_gets_the_close_up():
+def test_a_kitchen_with_no_piece_pushes_toward_its_counter():
     """A hero room with nothing to compose on (a kitchen of units) gets one push toward its own
     working surfaces - never an aim at its upper cabinets - and its close-up; never more than two
     shots a room."""
@@ -243,11 +243,15 @@ def test_a_kitchen_with_no_piece_pushes_toward_its_counter_and_gets_the_close_up
     plan, rep, _ = plan_tour_3d(m, SCENE, rooms, "test-home", PlannerConfig(), check_occlusion=False,
                                 labels=SceneLabels(lab, "ab" * 32, len(m), objs))
     kit = [(s, r) for s, r in zip(plan.shots, rep["shots"]) if s.room_key == "kit"]
-    assert [s.camera.move for s, _ in kit][:2] in (["push", "detail"], ["pull", "detail"]) and kit[1][0].role == "close"
-    assert kit[1][1]["object"] == "vase"                              # not the sink the push ends on
-    anchor = kit[0][1]["anchor"]
+    moves = [s.camera.move for s, _ in kit]
+    # reached through a doorway: it may open walking in; its own shots push / pull on the counter.
+    # No close-ups in 3D tours (2026-11-16: a scan rarely holds detail at 1 m)
+    assert set(moves) <= {"enter", "push", "pull"} and not [s for s, _ in kit if s.role == "close"]
+    pp = [(s, r) for s, r in kit if r["move"] in ("push", "pull")]
+    assert pp
+    anchor = pp[0][1]["anchor"]
     assert anchor[1] <= 0.7 and anchor[2] < 1.0                        # the counter, not the upper cabinets
-    for s, _ in kit[:1]:
+    for s, _ in kit:
         assert all(seg.target[k][2] <= AIM_Z_MAX + 0.02 for seg in s.camera.segments for k in range(4))
 
 

@@ -118,7 +118,12 @@ def _type_of(space, key: str, ev: dict[str, float]) -> str:
         return "kitchen" if kitchen >= living else "living_room"
     if ev["table"] >= DINING_TABLE_M2 and ev["chairs"] >= 3:
         return "dining_room"
-    if ev["office"] or (ev["table"] > 0 and ev["chairs"] >= 1):
+    if ev["office"]:                       # a desk, a computer or a monitor
+        return "home_office"
+    # a small table with a chair (the labels often call a desk a table) is an office only in a room
+    # of its own: in an open space it is a corner of its neighbour (the Home Scan's family room end,
+    # 2026-11-16) - "other_room", which merges into it
+    if ev["table"] > 0 and ev["chairs"] >= 1 and space.spaces.get(key, {key}) == {key}:
         return "home_office"
     mask = space.room_of == space.room_keys.index(key)
     if not mask.any():
