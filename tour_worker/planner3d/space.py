@@ -156,7 +156,13 @@ class Space:
 
     # ---- the floor plan -------------------------------------------------------------------------
     def _grid(self, model: SplatModel) -> None:
-        keep = (model.opacities > OPAQUE) & (model.scales.max(1) < MAX_SPLAT_M)
+        from tour_worker.scene.orient import opaque_cut
+        cut = opaque_cut(model, OPAQUE)
+        # a faint (compressed) scan is also a sparse one: one floor splat a cell counts, and its gaps
+        # close wider (the user's Krk scan, 2026-11-16: 11.6 m2 of free floor at the dense settings,
+        # 41.7 at these - a normal scan keeps the dense ones)
+        sparse = cut < OPAQUE
+        keep = (model.opacities > cut) & (model.scales.max(1) < MAX_SPLAT_M)
         P = self.local[keep].astype(np.float64)
         h = P[:, 2]
         self.lo = np.percentile(P[:, :2], 0.2, axis=0) - 0.5
@@ -172,7 +178,7 @@ class Space:
         floor = hist((h > -0.08) & (h < 0.08))
         obst = hist((h > BODY[0]) & (h < BODY[1]))
         obst_m = ndi.binary_opening(obst >= 4, iterations=1) | (obst >= 25)     # stray floaters are not walls
-        floor_m = ndi.binary_closing(floor >= 2, iterations=3)
+        floor_m = ndi.binary_closing(floor >= (1 if sparse else 2), iterations=5 if sparse else 3)
         inside = ndi.binary_fill_holes(ndi.binary_closing(floor_m | obst_m, iterations=6))
         free = floor_m & ~ndi.binary_dilation(obst_m, iterations=1) & inside
         lab, n = ndi.label(free)

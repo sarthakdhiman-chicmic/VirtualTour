@@ -31,7 +31,9 @@ MIN_PEAK_SCORE = 1.5         # weaker end peaks: no clear floor and ceiling (an 
 # no clear floor AND ceiling (scans often miss the ceiling: user's Home Scan 2026-11-16, a 25 x 15 m
 # house whose ceiling end held 0.7 % of the splats): up is then the scene's thin axis when one end of
 # it is a strong floor - a home is far wider than it is tall, and its floor is always captured
-FLOOR_ONLY_SCORE = 4.0       # the floor peak at least this x the median bin
+FLOOR_ONLY_THIN = 2.5        # the floor peak at least this x the median bin, on the scene's thin axis
+FAINT_SHARE = 0.25           # under this share of splats over the opacity cut: a faint (compressed) scan
+FAINT_CUT = 0.1
 FLAT_SHARE = 0.6             # the thin axis spans at most this share of the next-thinnest
 
 
@@ -53,8 +55,15 @@ class SceneFrame:
         return points @ self.up - self.floor
 
 
+def opaque_cut(model: SplatModel, default: float) -> float:
+    """The opacity above which a splat counts as surface: `default`, unless under FAINT_SHARE of the
+    scene clears it - a compressed ("mobile") scan carries its surfaces in faint splats (user's Krk
+    scan, 2026-11-16: median opacity 0.16, 12 % above 0.5, its floor nearly invisible) - then FAINT_CUT."""
+    return default if float((model.opacities > default).mean()) >= FAINT_SHARE else FAINT_CUT
+
+
 def _sample(model: SplatModel, seed: int = 0) -> np.ndarray:
-    keep = model.opacities > OPAQUE
+    keep = model.opacities > opaque_cut(model, OPAQUE)
     pts = model.means[keep] if keep.sum() >= 1000 else model.means
     if len(pts) < 100:
         raise SceneInvalid("the scene has too few opaque splats to find its floor")
@@ -170,7 +179,7 @@ def _spans(c: np.ndarray, axes) -> list[float]:
 
 def _floor_only(c: np.ndarray, candidates, vecs):
     """(axis, floor end "lo" / "hi") when the scene has a thin axis with a strong floor at one end
-    (FLOOR_ONLY_SCORE, FLAT_SHARE), else None."""
+    (FLOOR_ONLY_THIN, FLAT_SHARE), else None."""
     pcs = sorted(_spans(c, [vecs[:, i] for i in range(3)]))
     best = None
     for a in candidates:
@@ -182,7 +191,8 @@ def _floor_only(c: np.ndarray, candidates, vecs):
         med = np.median(hist) + 1e-9
         lo, hi = hist[i_lo] / med, hist[i_hi] / med
         peak, end = (lo, "lo") if lo >= hi else (hi, "hi")
-        if peak >= FLOOR_ONLY_SCORE and (best is None or peak > best[0]):
+        # the axis is already the scene's thin one (<= FLAT_SHARE of the next): a weaker floor will do
+        if peak >= FLOOR_ONLY_THIN and (best is None or peak > best[0]):
             best = (peak, a, end)
     return None if best is None else (best[1], best[2])
 
