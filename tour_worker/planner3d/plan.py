@@ -274,6 +274,36 @@ def plan_tour_3d(model, scene: dict, rooms: list[dict], listing_id: str, cfg: Pl
             wide[room] += 1
             prev = mv.last
         return prev
+    exits: list = []                              # the shots flying on toward the next room
+    after_exit: set = set()                       # rooms whose first shot picks an exit's flight up
+
+    def _exit_room(room: str, i: int, prev):
+        """The room's last shot flies on toward the next room along the walking route (user
+        2026-11-16: "use the floor plan ... moving toward the next room, a drone shot vibe"); the
+        next room's walk-in, when it is through a doorway, starts inside it on the same heading."""
+        import dataclasses
+        from tour_worker.planner.lengths import length_range
+        nxt = selected[i + 1] if i + 1 < len(selected) else None
+        if nxt is None or id(nxt) in links or nxt.kind == "detail":
+            return prev
+        r = space.route(room, nxt.room_key)
+        if not r:
+            return prev
+        dur = round(length_range("room", c3.pacing)[0], 2)
+        earlier_ = [p for k in sorted(space.spaces.get(room, {room})) for p in poses.get(k, [])]
+        mv, w = mover.exit(room, nxt.room_key, r, dur, prev, earlier_)
+        if mv is None:
+            warnings.extend(x for x in w if x not in warnings)
+            return prev
+        sel = dataclasses.replace(first_s[room], role="detail", kind="room", is_hero=False, is_lead=False,
+                                  final_duration=dur, raw_duration=dur)
+        poses.setdefault(room, []).append((mv.first, mv.last))
+        moves.append((sel, mv))
+        exits.append((sel, mv))
+        if id(nxt) in enters:
+            after_exit.add(id(nxt))
+        return mv.last
+
     for i, sel in enumerate(selected):
         # no repeats across the room's open-plan space: a hall and the living room it opens into
         # are one space, and a camera in one films the other
@@ -290,7 +320,7 @@ def plan_tour_3d(model, scene: dict, rooms: list[dict], listing_id: str, cfg: Pl
             mv, w = mover.best(sel.room_key, sel.final_duration, earlier=earlier, prev=prev,
                                piece_rank=len(poses.get(sel.room_key, [])), opening=i == 0,
                                closing=closing, kind=sel.kind, next_room=nxt,
-                               enter_route=enters.get(id(sel)),
+                               enter_route=enters.get(id(sel)), after_exit=id(sel) in after_exit,
                                follows_link=i > 0 and id(selected[i - 1]) in links)
         if mv is None and poses.get(sel.room_key) and sel.kind != "detail":
             w = [f"second_angle_dropped:{sel.room_key}"]      # no angle with room to breathe: the first keeps the time
@@ -315,6 +345,7 @@ def plan_tour_3d(model, scene: dict, rooms: list[dict], listing_id: str, cfg: Pl
         if last_of_room and sel.room_key in first_s and id(sel) not in links \
                 and canon(rtype.get(sel.room_key)) not in LOOK_BACK:
             prev = _cover_room(sel.room_key, i, prev)
+            prev = _exit_room(sel.room_key, i, prev)
     if not moves:
         raise ValueError("no room allows a camera move")
     # a room is never shown by a close-up alone: without a room shot its close-up goes too
@@ -334,6 +365,11 @@ def plan_tour_3d(model, scene: dict, rooms: list[dict], listing_id: str, cfg: Pl
             break
         moves = [m for m in moves if m is not pair]
         warnings.append(f"coverage_shot_dropped_for_length:{pair[0].room_key}")
+    for pair in exits[::-1]:                      # then the flights on, from the tour's end
+        if sum(s_.final_duration for s_, _ in moves) <= cap:
+            break
+        moves = [m for m in moves if m is not pair]
+        warnings.append(f"exit_dropped_for_length:{pair[0].room_key}")
     filmed = {s.room_key for s, _ in moves}
     warnings += [f"room_skipped:{k}" for k in sorted({s.room_key for s in selected} - filmed)]
     for sel, _ in moves:              # a dropped angle gives its time to the room's shot: the same move, slower
@@ -372,7 +408,8 @@ def plan_tour_3d(model, scene: dict, rooms: list[dict], listing_id: str, cfg: Pl
     # transitions: a fade into a new part of the home, cuts otherwise
     for a, b in zip(shots, shots[1:]):
         # (a link and the shots either side of it are one walk through the home: cuts)
-        if b.room_key != a.room_key and b.narrative_stage != a.narrative_stage and "link" not in (a.role, b.role):
+        if b.room_key != a.room_key and b.narrative_stage != a.narrative_stage and "link" not in (a.role, b.role) \
+                and a.camera.move != "exit":              # an exit cuts on its motion into the next room
             b.transition_in = TransitionParams(type="fade", duration_s=round(min(FADE_S, 0.5 * min(a.duration_s, b.duration_s)), 3))
     apply_captions(shots, cfg.output_room_labels is not None)
 
