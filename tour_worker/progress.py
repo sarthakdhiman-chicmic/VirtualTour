@@ -121,14 +121,17 @@ class Reporter:
         p = self._prog
         if p is None or p["total"] != total or done < p["done"]:
             p = self._prog = {"t0": now if done == 0 else self._stage_t0, "total": total, "done": -1,
-                              "pct": -STEP_PCT, "t": -1e9}
+                              "pct": -STEP_PCT, "t": -1e9, "first": (now, done)}
         pct = 100.0 * done / total
         if not (done == total or pct >= p["pct"] + STEP_PCT or now - p["t"] >= STEP_S) or done == p["done"]:
             return
         el = now - p["t0"]
         tail = f" · {dur(el)}"
-        if 0 < done < total:
-            tail += f" · ETA {dur(el / done * (total - done))}"
+        # the rate from the first item reported on, not the stage's start: the first item carries the
+        # warm-up (a scene_label run's first view said "ETA 46m" for a 35 s stage)
+        t1, d1 = p["first"]
+        if 0 < done < total and done > d1:
+            tail += f" · ETA {dur((now - t1) / (done - d1) * (total - done))}"
         w = len(str(total))
         self._emit(f"│   {bar(done / total)} {pct:3.0f}%  {done:>{w}}/{total} {unit}{tail}")
         p.update(done=done, pct=pct - pct % STEP_PCT, t=now)

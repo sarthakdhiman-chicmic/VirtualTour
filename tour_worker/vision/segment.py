@@ -82,7 +82,10 @@ class Segmenter:
         self.model_name, self.class_map = model, MODELS[model]["class_map"]
         d = ensure_model(model_dir, model)
         self.torch = torch
-        self.processor = Mask2FormerImageProcessor.from_pretrained(d)
+        import warnings
+        with warnings.catch_warnings():         # the checkpoint's processor config carries a retired key
+            warnings.filterwarnings("ignore", message=".*_max_size.*")
+            self.processor = Mask2FormerImageProcessor.from_pretrained(d)
         self.model = Mask2FormerForUniversalSegmentation.from_pretrained(d).eval()
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         self.model.to(self.device)
@@ -102,7 +105,10 @@ class Segmenter:
         inputs = self.processor(images=rgb, return_tensors="pt").to(self.device)
         with self.torch.no_grad():
             out = self.model(**inputs)
-        res = self.processor.post_process_panoptic_segmentation(out, target_sizes=[(sh, sw)])[0]
+        # label_ids_to_fuse: nothing fused (the default) - said explicitly, or transformers logs a
+        # line for every image (160 a scene_label run)
+        res = self.processor.post_process_panoptic_segmentation(out, target_sizes=[(sh, sw)],
+                                                                label_ids_to_fuse=set())[0]
         return bgr, res["segmentation"].cpu().numpy(), res["segments_info"]
 
     def segment(self, bgr: np.ndarray) -> tuple[list[dict], dict]:
