@@ -89,6 +89,16 @@ def _init(plan, images: str, splat=None, supersample: float = 1.5, photo_device=
     _STATE["overlays"] = overlays if overlays.active else None
 
 
+def _init_worker(plan, images: str, device: str | None = None) -> None:
+    """A render worker process: photo frames on `device` (a torch device name) when given."""
+    dev = None
+    if device:
+        import torch
+        torch.set_num_threads(1)               # the worker's CPU share is one core, as x264's
+        dev = torch.device(device)
+    _init(plan, images, photo_device=dev)
+
+
 _SHOTS_LOCK = threading.Lock()
 
 
@@ -101,11 +111,10 @@ def _shot(i: int):
         if got is not None:
             return got
         plan = _STATE["plan"]
-        # photo shots run in order in their process: keep the last two (a ShotWarp holds a prewarped
-        # photo); SplatShots, and photo shots on the GPU, are visited out of order by parallel
-        # threads: keep them all
+        # photo shots run in order in their process: keep the last two (a ShotWarp, and its GPU copy,
+        # holds a prewarped photo); SplatShots are visited out of order by parallel threads: keep them all
         dev = _STATE.get("photo_device")
-        for k in [k for k in cache if k < i - 1 and plan.shots[k].camera.type != "bezier_path" and dev is None]:
+        for k in [k for k in cache if k < i - 1 and plan.shots[k].camera.type != "bezier_path"]:
             del cache[k]
         n = _STATE["timeline"][i]["render_frames"]
         if plan.shots[i].camera.type == "bezier_path":
@@ -373,8 +382,8 @@ def render_direct(plan, workdir: str, warnings: list | None = None, music_path: 
     draw_encode, audio, join; info render_workers, chunks); progress(done, total): called as
     chunks finish. splat: the scene renderer for a plan 1.6 tour (render/splat_shot.make_renderer);
     its frames are drawn in this process, in order (one GPU), and fed to the same chunk encoders.
-    photo_device: a torch device (render/frames_gpu.photo_device) - photo frames are then drawn on it
-    in this process too, and the chunks encoded by threads, as for 3D tours."""
+    photo_device: a torch device (render/frames_gpu.photo_device) - each render worker process then
+    draws its photo frames on it (its own CUDA context); encoding is unchanged."""
     from contextlib import nullcontext
     stage = timings.stage if timings is not None else (lambda name: nullcontext())
     import multiprocessing as mp
@@ -403,10 +412,13 @@ def render_direct(plan, workdir: str, warnings: list | None = None, music_path: 
         parts = []
         with (timings.stage("draw_encode", f"{workers} workers, {len(tasks)} chunks, {n} frames")
               if timings is not None else nullcontext()):
-            in_process = three_d or photo_device is not None
-            if in_process or workers <= 1 or len(tasks) <= 1:
+            # 3D: the scene lives on one renderer in this process, so threads encode. Photo frames on
+            # the GPU keep the worker processes: each draws on the device with its own CUDA context, and
+            # the CPU work left (overlays, the sky, feeding x264) stays parallel - in one process the
+            # GIL serialised it (Turkey Trot 4K: 1355 s with threads vs 742 s on the CPU path)
+            if three_d or workers <= 1 or len(tasks) <= 1:
                 _init(plan, images, splat, splat_supersample, photo_device)
-                if in_process and workers > 1 and len(tasks) > 1:
+                if three_d and workers > 1 and len(tasks) > 1:
                     with ThreadPoolExecutor(max_workers=min(workers, len(tasks))) as pool:
                         for part in pool.map(_encode_chunk, tasks):
                             parts.append(part)
@@ -423,8 +435,9 @@ def render_direct(plan, workdir: str, warnings: list | None = None, music_path: 
                                         rasterise_s=round(st.get("rasterise_s", 0.0), 3),
                                         frames_rasterised=st.get("frames", 0))
             else:
+                dev = str(photo_device) if photo_device is not None else None
                 with ProcessPoolExecutor(max_workers=min(workers, len(tasks)), mp_context=mp.get_context("spawn"),
-                                         initializer=_init, initargs=(plan, images)) as pool:
+                                         initializer=_init_worker, initargs=(plan, images, dev)) as pool:
                     for part in pool.map(_encode_chunk, tasks):
                         parts.append(part)
                         if progress:

@@ -16,6 +16,8 @@ from __future__ import annotations
 import os
 import time
 
+import numpy as np
+
 from tour_worker import progress as report
 from tour_worker.config import Settings, get_settings
 from tour_worker.contract.jobs import SceneLabelRequest
@@ -49,12 +51,22 @@ def run_scene_label(request: dict, storage, workdir: str, settings: Settings | N
         os.remove(path)
     except SceneInvalid as e:
         return failure("scene_invalid", str(e))
-    report.note(f"scene: {len(model):,} splats; {len(req.rooms)} room(s)")
+    report.note(f"scene: {len(model):,} splats; " + (f"{len(req.rooms)} room(s)" if req.rooms else "no rooms given"))
     with sw.stage("floor_plan"):
         space = Space(model, sc.up_axis)
-        rooms = [r.model_dump() for r in req.rooms]
-        keys = room_keys(rooms)
-        warnings = space.set_rooms({k: space.to_local(r["point"])[:2] for k, r in zip(keys, rooms)})
+        warnings = list(space.warnings)
+        if req.rooms:
+            rooms = [r.model_dump() for r in req.rooms]
+            keys = room_keys(rooms)
+            warnings += space.set_rooms({k: space.to_local(r["point"])[:2] for k, r in zip(keys, rooms)})
+            found = None
+        else:                                   # no input: the rooms from the floor plan
+            from tour_worker.planner3d.discover import discover_rooms
+            found = discover_rooms(space)
+            if not found:
+                return failure("scene_invalid", "no room found: the scene has no open floor")
+            keys = list(found)
+            report.note(f"no rooms given: found {len(keys)} on the floor plan")
     if renderer is None:
         from tour_worker.render.splat_shot import make_renderer
         with sw.stage("renderer"):
@@ -81,5 +93,14 @@ def run_scene_label(request: dict, storage, workdir: str, settings: Settings | N
             storage.put(mpath, out["motion_uri"])
             stats["motion"] = motion.classes
     stats["warnings"] = warnings
+    if found is not None:                       # name them from what they hold
+        from tour_worker.planner3d.discover import room_types
+        types = room_types(space, labels.objects, found)
+        out["rooms"] = [{"room_key": k, "room_type": types[k],
+                         "point": [round(float(x), 4) for x in space.to_scene(np.array([*found[k], 1.0]))]}
+                        for k in keys]
+        report.note("rooms: " + ", ".join(f"{k} {types[k]}" for k in keys))
+    else:
+        out["rooms"] = rooms
     return {"status": "completed", **out, "objects": labels.objects, "stats": stats,
             "seconds": round(time.time() - t0, 2), "timings": sw.result()}

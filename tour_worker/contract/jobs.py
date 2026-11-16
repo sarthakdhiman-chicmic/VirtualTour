@@ -125,7 +125,9 @@ class SceneLabelRequest(_Request):
     labels (scene.labels_uri); tour_render the motion (scene.motion_uri)."""
     job_type: Literal["scene_label"]
     scene: PlanScene
-    rooms: list[PlanRoom] = Field(min_length=1)
+    # None / empty: no input - the rooms are found from the floor plan and named from the labels
+    # (planner3d/discover.py); the result's `rooms` then go to tour_plan
+    rooms: Optional[list[PlanRoom]] = None
     output_prefix: str = Field(min_length=1)
     image_urls: dict[str, str] = Field(default_factory=dict)   # optional: scene uri -> fetch URL
 
@@ -235,6 +237,8 @@ class SceneLabelResult(BaseModel):
     motion_sha256: Optional[str] = None
     objects: list[dict[str, Any]]             # each labelled object: class, centre, box, footprint, room
     stats: dict[str, Any]                     # views, rooms, labelled / seen Gaussians, per-class counts
+    # the rooms, as tour_plan takes them: the request's, or (no rooms given) the ones found
+    rooms: Optional[list[dict[str, Any]]] = None
     seconds: float
     timings: Optional[dict[str, Any]] = None
 

@@ -149,3 +149,37 @@ def test_the_scene_label_job_stores_labels_and_reports_objects(tmp_path, monkeyp
     assert res["labels_uri"] == "s3://b/scenes/home/scene_labels.npz" and res["labels_uri"] in st.puts
     assert "motion_uri" not in res                                       # nothing moves here
     assert {o["class"] for o in res["objects"]} == {"sofa", "bed"} and res["stats"]["views"] == 32
+
+
+def test_with_no_rooms_given_the_job_finds_and_names_them(tmp_path, monkeypatch):
+    """No input but the scene (user 2026-11-16): the rooms come from the floor plan and their
+    types from what they hold - the sofa's room is the living room, the bed's the primary bedroom -
+    returned as tour_plan takes them."""
+    from tests.scene_fixtures import write_splat
+    from tour_worker.contract.jobs import SceneLabelResult
+    from tour_worker.jobs.scene_label import run_scene_label
+    from tour_worker.render.splat_cpu import CpuSplatRenderer
+    from tour_worker.scene import semantics
+    from tour_worker.scene.cache import sha256_file
+    from tour_worker.scene.splat_io import load_scene
+    monkeypatch.setattr(semantics, "VIEW_W", 240)
+    monkeypatch.setattr(semantics, "VIEW_H", 136)
+    m, _, _ = coloured_home()
+    path = tmp_path / "home.splat"
+    write_splat(path, m)
+
+    class Disk:
+        def get(self, uri, dest):
+            open(dest, "wb").write(path.read_bytes())
+
+        def put(self, src, uri):
+            pass
+    req = {"job_type": "scene_label", "job_id": "sl2", "output_prefix": "s3://b/scenes/home/",
+           "scene": {"uri": "s3://b/home.splat", "sha256": sha256_file(str(path)), "format": "splat"}}
+    (tmp_path / "w").mkdir()
+    res = run_scene_label(req, Disk(), str(tmp_path / "w"), segmenter=ColourSegmenter(),
+                          renderer=CpuSplatRenderer(load_scene(str(path), "splat")))
+    SceneLabelResult.model_validate(res)
+    rooms = {r["room_type"]: r for r in res["rooms"]}
+    assert set(rooms) == {"living_room", "primary_bedroom"}
+    assert rooms["living_room"]["point"][0] < 6.0 < rooms["primary_bedroom"]["point"][0]     # the wall at x = 6

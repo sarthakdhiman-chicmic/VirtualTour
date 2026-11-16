@@ -25,6 +25,7 @@ from tour_worker.scene.orient import estimate_frame
 from tour_worker.scene.splat_io import SplatModel
 
 CELL = 0.05
+MIN_PART_M2 = 3.0            # free floor in a part of its own at least this big still counts
 OPAQUE, MAX_SPLAT_M = 0.35, 0.25       # splats that make the floor plan: opaque, not huge background blobs
 BODY = (0.15, 2.0)                     # heights a camera body could hit
 FURN_BODY, FURN_TALL = (0.30, 1.0), (1.3, 2.0)
@@ -178,7 +179,11 @@ class Space:
         if n == 0:
             raise ValueError("the scene has no free floor to stand on")
         sizes = ndi.sum(free, lab, range(1, n + 1))
-        self.free = lab == (1 + int(np.argmax(sizes)))                           # the connected interior
+        # the connected interior - and every other part of it big enough to be a room: a scan often
+        # reads a doorway as closed (a few stray splats in it; user's Home Scan 2026-11-16 lost a 15.5
+        # and an 8.7 m2 room that way). A room in its own part is filmed; no walk reaches it
+        keep = [k + 1 for k, a in enumerate(sizes) if a * CELL * CELL >= MIN_PART_M2] or [1 + int(np.argmax(sizes))]
+        self.free = np.isin(lab, keep)
         self.dt = ndi.distance_transform_edt(self.free) * CELL
         self.obst, self.inside = obst_m, inside
         self.shape = (H, W)
