@@ -9,6 +9,8 @@ import math
 import cv2
 import numpy as np
 
+from tour_worker.motion.xp import ns
+
 from tour_worker.motion.masks import crop_box, guard, leafiness
 from tour_worker.motion.wind import envelope_at
 
@@ -22,9 +24,10 @@ def feature_px(r) -> float:
 
 def displacement(r, u, v, t):
     """(dx, dy) in source px at source points (u, v), time t seconds."""
+    xp = ns(u)
     a, s = r.anchor_weight(v)
     A, f = r.amp * envelope_at(r, t), r.freq       # the shot's breeze sets how strongly it moves
-    sway = np.sin(2 * math.pi * f * t + r.phase + 0.5 * s)
+    sway = xp.sin(2 * math.pi * f * t + r.phase + 0.5 * s)
     n1 = r.noise_a(u / (0.35 * r.bw), v / (0.35 * r.bh), 0.6 * f * t)
     flutter = r.noise_b(u / 18.0, v / 18.0, 2.2 * f * t)
     dx = A * a * (0.7 * sway + 0.3 * n1 + 0.25 * flutter)

@@ -11,6 +11,8 @@ import math
 import cv2
 import numpy as np
 
+from tour_worker.motion.xp import ns
+
 from tour_worker.motion.masks import big_parts, crop_box, guard, leafiness
 
 SWAY_HZ = 0.22              # trees: the crown's sway (the plan's freq_hz drives the leaf shimmer)
@@ -57,10 +59,12 @@ def bend(r, u, v):
     """Trees: 0.3 at the crown's base .. 1 at its top, per column (col_bottom / col_span set
     by the loader; without them, 1)."""
     cb = getattr(r, "col_bottom", None)
+    xp = ns(u)
     if cb is None:
-        return np.ones_like(u)
-    i = np.clip(u.astype(np.int64), 0, cb.shape[0] - 1)
-    hh = np.clip((cb[i] - v) / np.maximum(r.col_span[i], 1.0), 0.0, 1.0)
+        return xp.ones_like(u)
+    i = xp.clip(xp.astype(u, xp.int64), 0, cb.shape[0] - 1)
+    cbd, csd = xp.on(cb, u, owner=r, key="cb"), xp.on(r.col_span, u, owner=r, key="cs")
+    hh = xp.clip((cbd[i] - v) / xp.maximum(csd[i], 1.0), 0.0, 1.0)
     return 0.3 + 0.7 * hh ** 1.5
 
 
@@ -90,12 +94,13 @@ def fields(r, u, v, t, irregular=None):
         smooth amount field) - variety in how FAR, never in when
       - neighbouring trees blend over a soft band (their weights), so leaves never tear
       - tiny leaf jitter and a light shimmer, brighter as a gust passes."""
+    xp = ns(u)
     lb, ll = branch_px(r), leaf_px(r)
     ab, al = canopy_amps(r)
     f = r.freq
     cs = 3.0 * lb
     reach = 1.0 + 0.35 * r.noise_a(u / cs + 60.0, v / cs, 0.0)
-    swing = np.zeros_like(u, dtype=np.float64)
+    swing = xp.zeros_like(u, dtype=xp.float64)
     gusty = 0.0
     for inst in instances_of(r):
         wgt = inst.weight_at(u, v)
@@ -103,7 +108,7 @@ def fields(r, u, v, t, irregular=None):
         w = getattr(r, "wind", None)
         if w is not None:
             gusty = max(gusty, w.gust(t - inst.delay))
-    rustle = np.clip(1.6 * (r.noise_a(u / (2.0 * lb) + 140.0, v / (2.0 * lb), 0.12 * t) + 0.1), 0.0, 1.0)
+    rustle = xp.clip(1.6 * (r.noise_a(u / (2.0 * lb) + 140.0, v / (2.0 * lb), 0.12 * t) + 0.1), 0.0, 1.0)
     jitter = al * (0.4 + 0.8 * rustle) * r.noise_b(u / ll, v / ll, f * t)   # leaves, tiny
     dx = ab * reach * swing + jitter
     dy = 0.4 * jitter
@@ -122,12 +127,13 @@ class TreeInstance:
         self.col_bottom, self.col_span = cols
 
     def weight_at(self, u, v):
+        xp = ns(u)
         if self.weight is None:
-            return np.ones_like(u, dtype=np.float64)
+            return xp.ones_like(u, dtype=xp.float64)
         from tour_worker.motion.masks import sample_bilinear
         y0, x0 = self.box
         w = sample_bilinear(self.weight, u - x0, v - y0)
-        return w.astype(np.float64)
+        return xp.astype(w, xp.float64)
 
 
 def instances_of(r) -> list[TreeInstance]:
@@ -143,11 +149,13 @@ def instances_of(r) -> list[TreeInstance]:
 
 def bend_of(inst: TreeInstance, u, v):
     """0.3 at a crown's base .. 1 at its top, per column of that tree (1 without columns)."""
+    xp = ns(u)
     cb = inst.col_bottom
     if cb is None:
-        return np.ones_like(u)
-    i = np.clip(u.astype(np.int64), 0, cb.shape[0] - 1)
-    hh = np.clip((cb[i] - v) / np.maximum(inst.col_span[i], 1.0), 0.0, 1.0)
+        return xp.ones_like(u)
+    i = xp.clip(xp.astype(u, xp.int64), 0, cb.shape[0] - 1)
+    cbd, csd = xp.on(cb, u, owner=inst, key="cb"), xp.on(inst.col_span, u, owner=inst, key="cs")
+    hh = xp.clip((cbd[i] - v) / xp.maximum(csd[i], 1.0), 0.0, 1.0)
     return 0.3 + 0.7 * hh ** 1.5
 
 

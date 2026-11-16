@@ -154,8 +154,13 @@ def run_tour(request: dict, storage, workdir: str, settings: Settings | None = N
             report.progress(done, total, "chunks")
             if progress:
                 progress(done, total)
+        from tour_worker.render.frames_gpu import photo_device
+        dev = None if plan.scene is not None else photo_device(settings.photo_backend)
+        if dev is None and settings.photo_backend == "gpu" and plan.scene is None:
+            warnings.append("photo_gpu_unavailable")
         out_path = render_direct(plan, workdir, warnings=warnings, music_path=music_path, voice_path=voice_path,
-                                 workers=settings.render_workers, timings=sw, progress=chunks_done, **three_d)
+                                 workers=settings.render_workers, timings=sw, progress=chunks_done,
+                                 photo_device=dev, **three_d)
 
         sw.lap()
         verify(out_path, plan)

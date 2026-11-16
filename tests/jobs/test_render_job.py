@@ -39,7 +39,7 @@ def no_render(monkeypatch, tmp_path):
     seen = {}
 
     def fake_render(plan, workdir, warnings=None, music_path=None, workers=None, voice_path=None, timings=None,
-                    progress=None):
+                    progress=None, photo_device=None):
         seen["music_path"] = music_path
         out = os.path.join(workdir, "out.mp4")
         open(out, "wb").close()

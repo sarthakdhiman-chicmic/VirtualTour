@@ -31,7 +31,44 @@ class GradientNoise3D:
         g = self.perm12[h]
         return _GX[g] * x + _GY[g] * y + _GZ[g] * z
 
+    def _torch_call(self, x, y, z):
+        """The same construction on torch tensors (render/frames_gpu.py): x is a tensor, y / z
+        tensors or scalars; float32 arithmetic, integer cells from float64 as on the CPU."""
+        import torch
+        ref = next(a for a in (x, y, z) if torch.is_tensor(a))
+        dev = ref.device
+        tabs = self.__dict__.setdefault("_dev", {})
+        if dev not in tabs:
+            tabs[dev] = (torch.as_tensor(self.perm, dtype=torch.int64, device=dev),
+                         torch.as_tensor(self.perm12, dtype=torch.int64, device=dev),
+                         *(torch.as_tensor(g, device=dev) for g in (_GX, _GY, _GZ)))
+        P, P12, GX, GY, GZ = tabs[dev]
+        x, y, z = (a.to(torch.float64) if torch.is_tensor(a) else torch.tensor(float(a), dtype=torch.float64, device=dev)
+                   for a in (x, y, z))
+        x, y, z = torch.broadcast_tensors(x, y, z)
+        fx, fy, fz = torch.floor(x), torch.floor(y), torch.floor(z)
+        xi, yi, zi = (fx.to(torch.int64) & 255), (fy.to(torch.int64) & 255), (fz.to(torch.int64) & 255)
+        xf, yf, zf = (x - fx).to(torch.float32), (y - fy).to(torch.float32), (z - fz).to(torch.float32)
+        u, v, w = self._fade(xf), self._fade(yf), self._fade(zf)
+        a, b = P[xi] + yi, P[xi + 1] + yi
+        aa, ab, ba, bb = P[a] + zi, P[a + 1] + zi, P[b] + zi, P[b + 1] + zi
+
+        def grad(h, x_, y_, z_):
+            g = P12[h]
+            return GX[g] * x_ + GY[g] * y_ + GZ[g] * z_
+
+        def lerp(t, p0, p1):
+            return p0 + t * (p1 - p0)
+
+        x1 = lerp(u, grad(aa, xf, yf, zf), grad(ba, xf - 1, yf, zf))
+        x2 = lerp(u, grad(ab, xf, yf - 1, zf), grad(bb, xf - 1, yf - 1, zf))
+        x3 = lerp(u, grad(aa + 1, xf, yf, zf - 1), grad(ba + 1, xf - 1, yf, zf - 1))
+        x4 = lerp(u, grad(ab + 1, xf, yf - 1, zf - 1), grad(bb + 1, xf - 1, yf - 1, zf - 1))
+        return lerp(w, lerp(v, x1, x2), lerp(v, x3, x4))
+
     def __call__(self, x, y, z):
+        if any(type(a).__module__.startswith("torch") for a in (x, y, z)):
+            return self._torch_call(x, y, z)
         # the integer cell from float64 (a large coordinate keeps its exact cell), the rest in float32
         x, y, z = np.asarray(x, np.float64), np.asarray(y, np.float64), np.asarray(z, np.float64)
         x, y, z = np.broadcast_arrays(x, y, z)

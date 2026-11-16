@@ -77,13 +77,14 @@ def total_frames(plan) -> int:
     return compute_timeline(plan)[-1]["nominal_end"] if plan.shots else 0
 
 
-def _init(plan, images: str, splat=None, supersample: float = 1.5) -> None:
+def _init(plan, images: str, splat=None, supersample: float = 1.5, photo_device=None) -> None:
     cv2.setNumThreads(1)
     _STATE.clear()
     timeline = compute_timeline(plan)
-    # splat: the scene's renderer for plan 1.6 3D shots (render/splat_shot.py), drawn in this process
+    # splat: the scene's renderer for plan 1.6 3D shots (render/splat_shot.py), drawn in this process;
+    # photo_device: photo shots drawn on that torch device (render/frames_gpu.py), in this process too
     _STATE.update(plan=plan, images=images, timeline=timeline, shots={}, splat=splat,
-                  supersample=supersample, splat_stats={})
+                  supersample=supersample, splat_stats={}, photo_device=photo_device)
     overlays = Overlays(plan, timeline, images)
     _STATE["overlays"] = overlays if overlays.active else None
 
@@ -101,8 +102,10 @@ def _shot(i: int):
             return got
         plan = _STATE["plan"]
         # photo shots run in order in their process: keep the last two (a ShotWarp holds a prewarped
-        # photo); SplatShots are small and parallel threads visit them out of order: keep them all
-        for k in [k for k in cache if k < i - 1 and plan.shots[k].camera.type != "bezier_path"]:
+        # photo); SplatShots, and photo shots on the GPU, are visited out of order by parallel
+        # threads: keep them all
+        dev = _STATE.get("photo_device")
+        for k in [k for k in cache if k < i - 1 and plan.shots[k].camera.type != "bezier_path" and dev is None]:
             del cache[k]
         n = _STATE["timeline"][i]["render_frames"]
         if plan.shots[i].camera.type == "bezier_path":
@@ -111,6 +114,9 @@ def _shot(i: int):
                             start_frame=_STATE["timeline"][i]["render_from"])
         else:
             got = ShotWarp(plan, plan.shots[i], n, _STATE["images"])
+            if dev is not None:
+                from tour_worker.render.frames_gpu import GpuShot
+                got = GpuShot(got, dev)
         cache[i] = got
         return got
 
@@ -360,13 +366,15 @@ def _segment_inputs(m, music_path: str, first_input: int, tail: str) -> tuple[li
 
 def render_direct(plan, workdir: str, warnings: list | None = None, music_path: str | None = None,
                   workers: int | None = None, voice_path: str | None = None, timings=None,
-                  progress=None, splat=None, splat_supersample: float = 1.5) -> str:
+                  progress=None, splat=None, splat_supersample: float = 1.5, photo_device=None) -> str:
     """Draw and encode the whole tour; returns <workdir>/out.mp4 (and writes <workdir>/out_hevc.mp4,
     the H.265 copy with the same audio, and <workdir>/out_mls.mp4, the MLS copy without the room
     labels, when the plan asks for them). timings: a tour_worker.timing.Stopwatch (stages
     draw_encode, audio, join; info render_workers, chunks); progress(done, total): called as
     chunks finish. splat: the scene renderer for a plan 1.6 tour (render/splat_shot.make_renderer);
-    its frames are drawn in this process, in order (one GPU), and fed to the same chunk encoders."""
+    its frames are drawn in this process, in order (one GPU), and fed to the same chunk encoders.
+    photo_device: a torch device (render/frames_gpu.photo_device) - photo frames are then drawn on it
+    in this process too, and the chunks encoded by threads, as for 3D tours."""
     from contextlib import nullcontext
     stage = timings.stage if timings is not None else (lambda name: nullcontext())
     import multiprocessing as mp
@@ -390,13 +398,15 @@ def render_direct(plan, workdir: str, warnings: list | None = None, music_path: 
     with tempfile.TemporaryDirectory(prefix="direct_", dir=workdir) as td:
         tasks = [(k, a, min(n, a + step), td) for k, a in enumerate(range(0, n, step))]
         if timings is not None:
-            timings.info.update(render_workers=workers, chunks=len(tasks), frames=n)
+            timings.info.update(render_workers=workers, chunks=len(tasks), frames=n,
+                                photo_draw="gpu" if photo_device is not None else "cpu")
         parts = []
         with (timings.stage("draw_encode", f"{workers} workers, {len(tasks)} chunks, {n} frames")
               if timings is not None else nullcontext()):
-            if three_d or workers <= 1 or len(tasks) <= 1:
-                _init(plan, images, splat, splat_supersample)
-                if three_d and workers > 1 and len(tasks) > 1:
+            in_process = three_d or photo_device is not None
+            if in_process or workers <= 1 or len(tasks) <= 1:
+                _init(plan, images, splat, splat_supersample, photo_device)
+                if in_process and workers > 1 and len(tasks) > 1:
                     with ThreadPoolExecutor(max_workers=min(workers, len(tasks))) as pool:
                         for part in pool.map(_encode_chunk, tasks):
                             parts.append(part)

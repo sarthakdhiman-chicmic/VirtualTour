@@ -62,6 +62,8 @@ def load_feather(mask_path: str, src_w: int, src_h: int, bbox_px) -> tuple[np.nd
 def sample_bilinear(img: np.ndarray, u: np.ndarray, v: np.ndarray) -> np.ndarray:
     """img at the points (u, v), bilinear, 0 outside. cv2.remap caps output sides at 32767, so the
     points are laid out as rows of 4096."""
+    if type(u).__module__.startswith("torch"):
+        return _sample_bilinear_torch(img, u, v)
     n = u.size
     if n == 0:
         return np.zeros(u.shape, np.float32)
@@ -72,6 +74,31 @@ def sample_bilinear(img: np.ndarray, u: np.ndarray, v: np.ndarray) -> np.ndarray
     mv = np.pad(v.astype(np.float32).ravel(), (0, pad)).reshape(rows, w)
     out = cv2.remap(img, mu, mv, cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT, borderValue=0)
     return out.ravel()[:n].reshape(u.shape)
+
+
+def _sample_bilinear_torch(img, u, v):
+    """sample_bilinear on torch points (render/frames_gpu.py): grid_sample, bilinear, zeros outside,
+    pixel centres at integers (align_corners=True), as cv2.remap's BORDER_CONSTANT."""
+    import torch
+    import torch.nn.functional as F
+    if u.numel() == 0:
+        return torch.zeros(u.shape, dtype=torch.float32, device=u.device)
+    k = (id(img), u.device)
+    got = _IMG_CACHE.get(k)
+    if got is None or got[0] is not img:          # keep the array itself: an id is reused once freed
+        if len(_IMG_CACHE) > 64:
+            _IMG_CACHE.clear()
+        got = _IMG_CACHE[k] = (img, torch.as_tensor(np.ascontiguousarray(img), device=u.device))
+    t = got[1]
+    h, w = t.shape[:2]
+    gx = (u.to(torch.float32).reshape(1, 1, -1) / max(w - 1, 1)) * 2 - 1
+    gy = (v.to(torch.float32).reshape(1, 1, -1) / max(h - 1, 1)) * 2 - 1
+    out = F.grid_sample(t.to(torch.float32)[None, None], torch.stack([gx, gy], -1), mode="bilinear",
+                        padding_mode="zeros", align_corners=True)
+    return out.reshape(u.shape)
+
+
+_IMG_CACHE: dict = {}   # device copies of the masks sampled per frame (flame, plume, tree weights)
 
 
 def leafiness(crop: np.ndarray, soften: bool = True) -> np.ndarray:

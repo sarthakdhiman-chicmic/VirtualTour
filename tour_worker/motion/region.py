@@ -24,6 +24,7 @@ import numpy as np
 
 from tour_worker.motion import canopy, fabric, fire, foliage, water
 from tour_worker.motion.noise import GradientNoise3D
+from tour_worker.motion.xp import ns
 
 
 class Effect(NamedTuple):
@@ -78,12 +79,13 @@ class Region:
         return EFFECTS.get(self.effect, _FALLBACK)
 
     def anchor_weight(self, v):
+        xp = ns(v)
         if self.anchor == "none":           # water: the whole surface moves
-            return np.ones_like(v), np.ones_like(v)
+            return xp.ones_like(v), xp.ones_like(v)
         if self.anchor == "top":            # hangs from a rod: still at the top, freest at the hem
-            s = np.clip((v - self.y0) / self.bh, 0.0, 1.0)
+            s = xp.clip((v - self.y0) / self.bh, 0.0, 1.0)
             return s ** 1.3, s
-        s = np.clip((self.y0 + self.bh - v) / self.bh, 0.0, 1.0)   # rooted: still at the base
+        s = xp.clip((self.y0 + self.bh - v) / self.bh, 0.0, 1.0)   # rooted: still at the base
         return s ** 1.5, s
 
     def fields(self, u, v, t, irregular=None):

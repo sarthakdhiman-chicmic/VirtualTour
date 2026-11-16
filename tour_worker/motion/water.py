@@ -17,6 +17,8 @@ import math
 import cv2
 import numpy as np
 
+from tour_worker.motion.xp import ns
+
 from tour_worker.motion.masks import big_parts, crop_box, touching
 
 # calm_water wave trains on the water plane: (direction from "toward the camera" deg, wavelength,
@@ -34,23 +36,25 @@ _SHADE_Z, _SHADE_X = 0.0009 * 0.6 * _SZ_MAX, 0.0009 * 0.4 * _SX_MAX
 
 def calm_irregular(r, u, v, t):
     """The slow (80-140 source px) variation of wave strength across the surface."""
-    d = np.maximum(v - r.v_h, 1.0)
+    xp = ns(u)
+    d = xp.maximum(v - r.v_h, 1.0)
     return 1.0 + 0.35 * r.noise_a((u - r.u_mid) / d * 9.0, r.ref / d * 2.5, 0.25 * t)
 
 
 def calm_slopes(r, u, v, t, irregular=None):
-    d = np.maximum(v - r.v_h, 1.0)
+    xp = ns(u)
+    d = xp.maximum(v - r.v_h, 1.0)
     x, z = (u - r.u_mid) / d, r.ref / d
-    sx, sz = np.zeros_like(u), np.zeros_like(u)
+    sx, sz = xp.zeros_like(u), xp.zeros_like(u)
     for k, (ang, lam, spd, amp) in enumerate(CALM_TRAINS):
         a = math.radians(ang)
         kx, kz = math.sin(a) * 2 * math.pi / lam, math.cos(a) * 2 * math.pi / lam
-        c = amp * np.cos(kx * x + kz * z - 2 * math.pi * spd / lam * t + 1.3 * k + r.phase)
+        c = amp * xp.cos(kx * x + kz * z - 2 * math.pi * spd / lam * t + 1.3 * k + r.phase)
         sx += c * kx
         sz += c * kz
     if irregular is None:
         irregular = 1.0 + 0.35 * r.noise_a(x * 9.0, z * 2.5, 0.25 * t)
-    near = np.clip((v - r.v_h) / r.ref, 0.0, 1.0)
+    near = xp.clip((v - r.v_h) / r.ref, 0.0, 1.0)
     return sx / _SX_MAX * irregular, sz / _SZ_MAX * irregular, near
 
 
@@ -73,10 +77,11 @@ def _calm_amp(r, t: float) -> float:
 
 def calm_fields(r, u, v, t, irregular=None):
     """(dx, dy, brightness); irregular: calm_irregular at these points when already known."""
+    xp = ns(u)
     sx, sz, near = calm_slopes(r, u, v, t, irregular)
     A = _calm_amp(r, t)
     return (A * near * sx / 1.35, 0.5 * A * near * sz / 1.35,
-            1.0 + CALM_BRIGHTNESS * np.tanh(_SHADE_Z * sz + _SHADE_X * sx))
+            1.0 + CALM_BRIGHTNESS * xp.tanh(_SHADE_Z * sz + _SHADE_X * sx))
 
 
 # ---- water_ripple ------------------------------------------------------------------------------
@@ -86,6 +91,7 @@ def ripple_feature_px(r) -> float:
 
 
 def ripple_displacement(r, u, v, t):
+    xp = ns(u)
     a, s = r.anchor_weight(v)
     A, f = r.amp, r.freq
     sx, sy = max(30.0, 0.08 * r.bw), max(10.0, 0.03 * r.bh)   # wide, flat ripples

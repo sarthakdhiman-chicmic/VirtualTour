@@ -13,6 +13,8 @@ import math
 import cv2
 import numpy as np
 
+from tour_worker.motion.xp import ns
+
 from tour_worker.motion.masks import sample_bilinear
 from tour_worker.vision.fire_detect import CAVITY_V, FLAME_HUE, FLAME_SAT, FLAME_VAL, flame_zone
 
@@ -45,11 +47,12 @@ def fields(r, u, v, t, irregular=None):
     flutter at the flame edges; brightness flicker rising through the flames, a quick
     sparkle, the fire's pulse, and a soft glow on its surroundings. Structure inside the
     fire's box (walls, glass frame, grate, glass reflections) is held still (tour_worker.motion.loader)."""
+    xp = ns(u)
     fw = sample_bilinear(r.flame, u, v)
     plume = getattr(r, "plume", None)
     pw = sample_bilinear(plume, u, v) if plume is not None else fw
     fh, fb = r.flame_h, r.flame_bottom
-    s = np.clip((fb - v) / max(fh, 1.0), 0.0, 1.0) ** 0.8          # still at the base (logs)
+    s = xp.clip((fb - v) / max(fh, 1.0), 0.0, 1.0) ** 0.8          # still at the base (logs)
     lam = flame_px(r)
     rise = 0.9 * fh * t                                             # tongues travel upward
     A = r.amp
