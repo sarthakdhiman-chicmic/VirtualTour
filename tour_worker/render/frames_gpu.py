@@ -151,14 +151,16 @@ class GpuShot:
             cache[key] = (k + (x - p[k]) / (p[k + 1] - p[k])).to(torch.float32)
         return cache[key]
 
-    def apply_regions(self, mx, my, t: float, origin, frame_shape):
+    def apply_regions(self, mx, my, t: float, origin, frame_shape, clk=None):
         """motion.region.apply_regions on device maps (in place); returns the gain or None."""
         torch = _t()
         gain = None
         k = self.k
         oy, ox = origin
+        tick = clk or (lambda name: None)
         for r in self.sw.regions:
             box, screen_per_src = self._screen_box(r, mx, my)
+            tick("screen_box")
             if box is None:
                 continue
             st = R.adaptive_step(r, R.field_step(r.effect, k), screen_per_src, k)
@@ -173,6 +175,7 @@ class GpuShot:
                                                gbox, origin, frame_shape)
             else:
                 Rs = (slice(box[0], box[1]), slice(box[2], box[3]))
+            tick("coarse_fields")
             u, v = mx[Rs], my[Rs]
             w = _sample(self.feathers[id(r)], u, v, "zeros")
             ww = torch.where(w > 1e-3, w, torch.zeros_like(w)).to(torch.float64)
@@ -190,6 +193,7 @@ class GpuShot:
                 gain[Rs] = gain[Rs] * (1.0 + ww * (b - 1.0)).to(torch.float32)
             mx[Rs] = (u64 - ww * dx).to(torch.float32)
             my[Rs] = (v64 - ww * dy).to(torch.float32)
+            tick("displace")
         return gain
 
     # ---- the frame ---------------------------------------------------------------------------
@@ -207,20 +211,25 @@ class GpuShot:
         t1 = time.perf_counter()
         with GPU_LOCK, torch.no_grad():
             t2 = time.perf_counter()
+            clk = _Clock(self.dev, stats)
             m = sw.homography(f)
             src = torch.as_tensor(sky, device=self.dev).to(torch.float32) if sky is not None else self.src
             mx, my = self.maps(m)
             img = _sample(src, mx, my, "border")                            # (oh, ow, 3)
+            clk("base")
             win = sw.window(m) if sw.regions else None
+            clk("window")
             if win is not None:
                 r0, r1, c0, c1 = win
                 wx, wy = mx[r0:r1, c0:c1].clone(), my[r0:r1, c0:c1].clone()
-                gain = self.apply_regions(wx, wy, f / sw.fps, (r0, c0), (sw.oh, sw.ow))
+                gain = self.apply_regions(wx, wy, f / sw.fps, (r0, c0), (sw.oh, sw.ow), clk)
                 patch = _sample(src, wx, wy, "border")
                 if gain is not None:
                     patch = patch * gain[..., None]
                 img[r0:r1, c0:c1] = patch
+                clk("patch")
             out = torch.round(img).clamp_(0, 255).to(torch.uint8)
+            clk("out")
         if stats is not None:
             t3 = time.perf_counter()
             _add(stats, sky_s=t1 - t0, gpu_wait_s=t2 - t1, gpu_draw_s=t3 - t2)
@@ -228,6 +237,26 @@ class GpuShot:
 
 
 _STATS_LOCK = threading.Lock()
+
+
+class _Clock:
+    """Per-step time inside a frame's GPU section: waits for the device before each reading (calls
+    are asynchronous - otherwise a step's time lands on whichever step syncs next)."""
+
+    def __init__(self, dev, stats):
+        import time
+        self.dev, self.stats, self.time = dev, stats, time
+        self.t = time.perf_counter()
+
+    def __call__(self, name: str) -> None:
+        if self.stats is None:
+            return
+        torch = _t()
+        if self.dev.type == "cuda":
+            torch.cuda.synchronize(self.dev)
+        now = self.time.perf_counter()
+        _add(self.stats, **{"draw_" + name: now - self.t})
+        self.t = now
 
 
 def _add(stats: dict, **kw) -> None:

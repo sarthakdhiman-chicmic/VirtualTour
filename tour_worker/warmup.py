@@ -21,7 +21,25 @@ MODULES = ("numpy", "cv2", "boto3", "botocore", "scipy.ndimage", "PIL.Image", "t
            "tour_worker.jobs.router", "transformers")
 
 
+_DONE = threading.Event()
+_DONE.set()                      # no warm-up started: nothing to wait for
+
+
+def wait(timeout: float = 900.0) -> None:
+    """Block until the warm-up has finished: a job importing a library while the warm-up thread is
+    importing the same one can see it half-loaded (2026-11-16: "cannot import name
+    Mask2FormerForUniversalSegmentation from transformers")."""
+    _DONE.wait(timeout)
+
+
 def warm() -> None:
+    try:
+        _warm()
+    finally:
+        _DONE.set()
+
+
+def _warm() -> None:
     t0 = time.time()
     for name in MODULES:
         try:
@@ -38,6 +56,7 @@ def warm() -> None:
 
 
 def start() -> threading.Thread:
+    _DONE.clear()
     t = threading.Thread(target=warm, name="warmup", daemon=True)
     t.start()
     return t

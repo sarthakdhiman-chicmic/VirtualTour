@@ -42,6 +42,8 @@ WEBHOOK_ATTEMPTS = 3
 
 
 def _default_runner(job_input: dict) -> dict:
+    from tour_worker import warmup
+    warmup.wait()                        # never import alongside the start-up warm-up (warmup.py)
     from tour_worker.jobs import router          # looked up per call: tests patch router.run_job
     return router.run_job(job_input)
 

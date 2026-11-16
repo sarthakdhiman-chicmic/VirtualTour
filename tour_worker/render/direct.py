@@ -21,6 +21,7 @@ from __future__ import annotations
 import math
 import os
 import subprocess
+import sys
 import tempfile
 import threading
 from concurrent.futures import ThreadPoolExecutor
@@ -457,6 +458,11 @@ def render_direct(plan, workdir: str, warnings: list | None = None, music_path: 
             # chunks encoded by threads. The frame stays on the device through composition and the
             # overlays; the CPU work left per frame (the sky) runs outside the GPU lock
             in_process = three_d or photo_device is not None
+            switch = sys.getswitchinterval()
+            if photo_device is not None:
+                # the drawer makes hundreds of small torch calls a frame, each giving up the GIL; at the
+                # default 5 ms switch interval the encoder threads' Python holds it in between
+                sys.setswitchinterval(0.0005)
             if in_process or workers <= 1 or len(tasks) <= 1:
                 _init(plan, images, splat, splat_supersample, photo_device)
                 if in_process and workers > 1 and len(tasks) > 1:
@@ -470,6 +476,7 @@ def render_direct(plan, workdir: str, warnings: list | None = None, music_path: 
                         parts.append(_encode_chunk(t))
                         if progress:
                             progress(len(parts), len(tasks))
+                sys.setswitchinterval(switch)
                 if photo_device is not None and timings is not None:
                     timings.info.update(photo_draw_parts={k: round(v, 1) for k, v in _STATE.get("draw_stats", {}).items()})
                 if three_d and timings is not None:
