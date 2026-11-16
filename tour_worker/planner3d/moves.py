@@ -90,6 +90,7 @@ ENTER_SHARE = 0.4             # of its first view on the room it enters
 FRONT_MIN = 2.2               # m to the nearest wall or tall thing across the middle third of the frame,
 FRONT_MIN_ENTER = 1.5         # at a room shot's start and end (an enter starts in a doorway)
 AIM_MIN = 2.0                 # m from what a room shot aims at, at its end
+OPEN_IN_W = 1.5               # the opening shot: score per m it closes in on its subject
 WIDE_W = 0.6                  # score per m the view opens up from start to end (pulling back)
 # coverage (user 2026-11-16: "each room should get up to 3 shots so all its walls get covered"):
 # a room's further shots must each show this share of its walls the earlier ones did not, and the
@@ -396,8 +397,17 @@ class RoomMoves:
         tiers = [t for t in tiers if t]
         if not tiers:
             return None, [f"room_no_move:{room}" if kind != "detail" else f"room_no_detail:{room}"]
-        for m in {id(m): m for t in tiers for m in t}.values():      # pulling back, the view widening
-            if m.kind != "detail" and "front_m" in m.why:
+        for m in {id(m): m for t in tiers for m in t}.values():
+            if m.kind == "detail" or "front_m" not in m.why:
+                continue
+            if opening:
+                # the tour's first shot moves into the home, toward what it shows (user 2026-11-16:
+                # "in the first shot we should pan in instead of zoom out")
+                d0 = float(np.linalg.norm(m.tgt[0][:2] - m.eye[0]))
+                d1 = float(np.linalg.norm(m.tgt[-1][:2] - m.eye[-1]))
+                m.score += OPEN_IN_W * float(np.clip(d0 - d1, -1.0, 1.5))
+                m.why["moves_in_m"] = round(d0 - d1, 2)
+            else:                                                     # pulling back, the view widening
                 f0, f1 = m.why["front_m"]
                 m.score += WIDE_W * float(np.clip(f1 - f0, -1.0, 1.5))
         if self.occ is not None:                      # occlusion renders work on this room's splats

@@ -150,6 +150,7 @@ def test_every_shot_keeps_the_rules(planned):
     # earlier ones did not; never a pan inside a room
     living = [r for r in rep["shots"] if r["room_key"] == "living"]
     assert living[0]["move"] == "walkway" and living[0]["piece"]["area_m2"] > 1.5
+    assert rep["shots"][0]["moves_in_m"] > 0                  # the tour opens moving in, not pulling back
     from tour_worker.planner3d.moves import COVER_NEW_MIN
     assert all(r.get("walls_new", 0) >= COVER_NEW_MIN for r in rep["shots"] if r.get("coverage_shot"))
     assert all(r["move"] != "pan" for r in rep["shots"][:-1])

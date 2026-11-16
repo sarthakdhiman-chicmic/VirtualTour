@@ -84,7 +84,9 @@ def discover_rooms(space) -> dict[str, np.ndarray]:
 KITCHEN = ("stove", "oven", "sink", "refrigerator", "dishwasher", "kitchen island", "countertop", "hood", "microwave")
 BATH = ("toilet", "bathtub", "shower")
 LIVING = ("sofa", "television receiver", "fireplace")
-OFFICE = ("desk", "computer", "monitor", "crt screen", "screen")
+# a desk, a computer or a monitor - not "screen" / "crt screen": the labels call a wall TV that
+# (user 2026-11-16: a family room's fireplace corner became a "Home Office" from its TV)
+OFFICE = ("desk", "computer", "monitor")
 BED_MIN_M2 = 1.2         # this much bed (all its pieces) makes a bedroom - a stray bath fixture does not
 DINING_TABLE_M2 = 1.2    # a dining table at least this big (a desk is smaller), with chairs
 CAPTURE_MIN = 0.75       # rooms whose survey views the scan covers less than this are not toured
