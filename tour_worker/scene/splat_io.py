@@ -25,6 +25,20 @@ from tour_worker.scene import SceneInvalid
 
 SH_C0 = 0.28209479177387814          # the degree-0 spherical-harmonic constant
 MAX_SPLATS = 20_000_000              # ~5 GB of float32 at degree 3; a house scan is 1-8 M
+# the real limit is the memory a scene takes once loaded: 20 M splats at degree 3 (59 floats each).
+# A scene with less colour per splat may hold more (a degree-0 scan: ~84 M) - user 2026-11-16: a
+# 21.5 M degree-0 scan (1.2 GB) was refused by the old count-only cap
+MAX_SCENE_FLOATS = MAX_SPLATS * 59
+
+
+def _floats_per_splat(deg: int) -> int:
+    return 3 + 3 + 4 + 1 + 3 * (deg + 1) ** 2
+
+
+def splat_cap(deg: int, max_splats: int | None) -> int:
+    """At most this many splats: max_splats when the caller sets one, else what MAX_SCENE_FLOATS
+    holds at this colour degree."""
+    return max_splats if max_splats is not None else MAX_SCENE_FLOATS // _floats_per_splat(deg)
 MAX_BAD_FRACTION = 0.01
 MIN_OPACITY = 1.0 / 255.0
 CHUNK_ROWS = 400_000
@@ -53,7 +67,7 @@ class SplatModel:
         return np.clip(0.5 + SH_C0 * self.sh[:, 0], 0.0, 1.0)
 
 
-def load_scene(path: str, fmt: str | None = None, max_sh_degree: int = 3, max_splats: int = MAX_SPLATS) -> SplatModel:
+def load_scene(path: str, fmt: str | None = None, max_sh_degree: int = 3, max_splats: int | None = None) -> SplatModel:
     """The scene file at path. fmt: "ply" | "splat" (default: from the extension).
     max_sh_degree: keep the colour up to this degree (a preview needs 0-1; memory)."""
     fmt = fmt or os.path.splitext(path)[1].lstrip(".").lower()
@@ -95,7 +109,7 @@ def _read_ply_header(f) -> tuple[int, list[tuple[str, str]], int]:
     return count, props, size
 
 
-def load_ply(path: str, max_sh_degree: int = 3, max_splats: int = MAX_SPLATS) -> SplatModel:
+def load_ply(path: str, max_sh_degree: int = 3, max_splats: int | None = None) -> SplatModel:
     with open(path, "rb") as f:
         count, props, header = _read_ply_header(f)
         names = [n for n, _ in props]
@@ -109,13 +123,14 @@ def load_ply(path: str, max_sh_degree: int = 3, max_splats: int = MAX_SPLATS) ->
         n_rest = sum(1 for n in names if n.startswith("f_rest_"))
         if n_rest not in _SH_REST:
             raise SceneInvalid(f"PLY has {n_rest} f_rest columns (expected 0, 9, 24 or 45)")
-        if not 0 < count <= max_splats:
-            raise SceneInvalid(f"PLY has {count} splats (1-{max_splats})")
+        file_deg = _SH_REST[n_rest]
+        deg = max(0, min(file_deg, max_sh_degree))
+        cap = splat_cap(deg, max_splats)
+        if not 0 < count <= cap:
+            raise SceneInvalid(f"PLY has {count} splats (1-{cap} at colour degree {deg})")
         stride = len(names)
         if os.path.getsize(path) < header + count * stride * 4:
             raise SceneInvalid("PLY body is truncated")
-        file_deg = _SH_REST[n_rest]
-        deg = max(0, min(file_deg, max_sh_degree))
         k = (deg + 1) ** 2
         col = {n: i for i, n in enumerate(names)}
         # f_rest is stored channel-major: 15 R coefficients, then 15 G, then 15 B (degree 3)
@@ -147,13 +162,14 @@ def load_ply(path: str, max_sh_degree: int = 3, max_splats: int = MAX_SPLATS) ->
     return _finish(means, scales, quats, opac, sh, deg, "ply", {"file_sh_degree": file_deg})
 
 
-def load_splat(path: str, max_splats: int = MAX_SPLATS) -> SplatModel:
+def load_splat(path: str, max_splats: int | None = None) -> SplatModel:
     size = os.path.getsize(path)
     if size == 0 or size % SPLAT_RECORD:
         raise SceneInvalid(f".splat size {size} is not a multiple of {SPLAT_RECORD} bytes")
     count = size // SPLAT_RECORD
-    if count > max_splats:
-        raise SceneInvalid(f".splat has {count} splats (at most {max_splats})")
+    cap = splat_cap(0, max_splats)
+    if count > cap:
+        raise SceneInvalid(f".splat has {count} splats (at most {cap})")
     rec = np.dtype([("pos", "<f4", 3), ("scale", "<f4", 3), ("rgba", "u1", 4), ("rot", "u1", 4)])
     data = np.fromfile(path, dtype=rec)
     rgba = data["rgba"].astype(np.float32) / 255.0

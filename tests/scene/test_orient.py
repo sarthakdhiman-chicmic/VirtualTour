@@ -54,3 +54,19 @@ def test_an_empty_box_falls_back_to_the_file_convention_and_says_so():
     m.means = (m.means @ _rot([1, 0, 0], 90).T).astype(np.float32)   # z up -> -y up (COLMAP-like)
     f = estimate_frame(m)
     assert np.allclose(f.up, [0, -1, 0], atol=1e-6) and f.source == "convention"
+
+
+def test_a_scan_without_its_ceiling_finds_up_from_its_floor():
+    """Scans often miss the ceiling (user's Home Scan 2026-11-16): the floor alone, at one end of
+    the scene's thin axis, gives up - here a two-room home without its ceiling, in COLMAP's axes."""
+    import numpy as np
+    from tests.planner3d.test_planner3d import home
+    from tour_worker.scene.orient import estimate_frame
+    from tour_worker.scene.splat_io import SplatModel
+    m = home()
+    keep = m.means[:, 2] < 2.55                                   # no ceiling
+    R = np.array([[1, 0, 0], [0, 0, -1], [0, 1, 0]], np.float32)  # z-up -> y-down
+    sub = SplatModel(m.means[keep] @ R.T, m.scales[keep], m.quats[keep], m.opacities[keep], m.sh[keep], 0, "ply", {})
+    f = estimate_frame(sub)
+    assert f.up @ np.array([0, -1.0, 0]) > 0.999 and f.source == "floor"
+    assert "scene_ceiling_missing" in f.warnings and abs(f.floor) < 0.05

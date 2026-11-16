@@ -14,6 +14,7 @@ With no scene.json, the worker finds up from the geometry:
 """
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -27,6 +28,11 @@ BINS = 100
 END_BINS = 20                # where the floor / ceiling peaks are looked for, at each end
 SIGN_RATIO = 1.1             # lower / upper mass (or its inverse) at least this: the sign is trusted
 MIN_PEAK_SCORE = 1.5         # weaker end peaks: no clear floor and ceiling (an exterior, a single wall)
+# no clear floor AND ceiling (scans often miss the ceiling: user's Home Scan 2026-11-16, a 25 x 15 m
+# house whose ceiling end held 0.7 % of the splats): up is then the scene's thin axis when one end of
+# it is a strong floor - a home is far wider than it is tall, and its floor is always captured
+FLOOR_ONLY_SCORE = 4.0       # the floor peak at least this x the median bin
+FLAT_SHARE = 0.6             # the thin axis spans at most this share of the next-thinnest
 
 
 @dataclass
@@ -68,15 +74,16 @@ def _profile(h: np.ndarray):
     return score, hist, i_lo, i_hi, centres
 
 
-def _refine_axis(c: np.ndarray, axis: np.ndarray, rounds: int = 4) -> np.ndarray:
+def _refine_axis(c: np.ndarray, axis: np.ndarray, rounds: int = 4, ends: str = "both") -> np.ndarray:
     """Tighten the up axis: the normal of planes fitted to the floor and ceiling points (the
-    smallest principal direction of each slab), averaged; repeated as the slabs sharpen."""
+    smallest principal direction of each slab), averaged; repeated as the slabs sharpen.
+    ends: "both", or "lo" / "hi" - only that end's slab (a scan without its ceiling)."""
     for _ in range(rounds):
         _, hist, i_lo, i_hi, centres = _profile(c @ axis)
         h = c @ axis
         tol = 1.5 * (centres[1] - centres[0])
         normals = []
-        for i in (i_lo, i_hi):
+        for i in {"both": (i_lo, i_hi), "lo": (i_lo,), "hi": (i_hi,)}[ends]:
             slab = c[np.abs(h - centres[i]) < tol]
             if len(slab) < 200:
                 continue
@@ -119,6 +126,13 @@ def estimate_frame(model: SplatModel, up_hint=None) -> SceneFrame:
             if best is None or prof[0] > best[0][0] + 1e-9:
                 best = (prof, a)
         (score, hist, i_lo, i_hi, centres), axis = best
+        # without a ceiling, the walls at both ends of a horizontal axis look like a floor and a
+        # ceiling: a thin axis with a strong floor wins whenever the two-peak axis is another one
+        floor_only = _floor_only(c, [vecs[:, i] for i in range(3)] + list(np.eye(3)), vecs)
+        if floor_only is not None:
+            a = axis / np.linalg.norm(axis)
+            if score < MIN_PEAK_SCORE or abs(float(a @ floor_only[0])) < math.cos(math.radians(20)):
+                return _floor_frame(c, centre, *floor_only, warnings)
         axis = _refine_axis(c, axis / np.linalg.norm(axis))
         score, hist, i_lo, i_hi, centres = _profile(c @ axis)
         # mass in the lower and upper halves between the planes, the same 6 % margin off each plane
@@ -148,3 +162,40 @@ def estimate_frame(model: SplatModel, up_hint=None) -> SceneFrame:
     base = float(centre @ up)
     return SceneFrame(up=up, floor=base + float(centres[i_lo]), ceiling=base + float(centres[i_hi]),
                       confident=confident, source=source, warnings=warnings)
+
+
+def _spans(c: np.ndarray, axes) -> list[float]:
+    return [float(np.subtract(*np.percentile(c @ a, [99.5, 0.5]))) for a in axes]
+
+
+def _floor_only(c: np.ndarray, candidates, vecs):
+    """(axis, floor end "lo" / "hi") when the scene has a thin axis with a strong floor at one end
+    (FLOOR_ONLY_SCORE, FLAT_SHARE), else None."""
+    pcs = sorted(_spans(c, [vecs[:, i] for i in range(3)]))
+    best = None
+    for a in candidates:
+        a = a / np.linalg.norm(a)
+        score, hist, i_lo, i_hi, centres = _profile(c @ a)
+        span = _spans(c, [a])[0]
+        if span > FLAT_SHARE * pcs[1]:
+            continue
+        med = np.median(hist) + 1e-9
+        lo, hi = hist[i_lo] / med, hist[i_hi] / med
+        peak, end = (lo, "lo") if lo >= hi else (hi, "hi")
+        if peak >= FLOOR_ONLY_SCORE and (best is None or peak > best[0]):
+            best = (peak, a, end)
+    return None if best is None else (best[1], best[2])
+
+
+def _floor_frame(c: np.ndarray, centre: np.ndarray, axis: np.ndarray, end: str, warnings: list) -> SceneFrame:
+    """Up away from the floor (the strong end), tightened on the floor plane alone; the ceiling at
+    the scene's far end (0.5 / 99.5 percentile)."""
+    axis = _refine_axis(c, axis, ends=end)
+    up = axis if end == "lo" else -axis
+    _, hist, i_lo, i_hi, centres = _profile(c @ up)
+    h = c @ up
+    floor_i = i_lo                                  # along up, the floor is now the low end
+    base = float(centre @ up)
+    warnings.append("scene_ceiling_missing")
+    return SceneFrame(up=up, floor=base + float(centres[floor_i]), ceiling=base + float(np.percentile(h, 99.5)),
+                      confident=True, source="floor", warnings=warnings)

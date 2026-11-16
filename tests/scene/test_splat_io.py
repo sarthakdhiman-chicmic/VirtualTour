@@ -96,3 +96,12 @@ def test_a_few_broken_or_faint_splats_are_dropped_and_many_are_fatal(tmp_path):
     p, _ = _ply(tmp_path, n=n, rest=0, means=means)
     with pytest.raises(SceneInvalid):
         load_scene(str(p))
+
+
+def test_the_splat_cap_is_the_memory_a_scene_takes():
+    """20 M splats at colour degree 3 (~4.7 GB); a degree-0 scan with the same memory may hold
+    ~84 M (a 21.5 M degree-0 scan was refused by the old count-only cap)."""
+    from tour_worker.scene.splat_io import MAX_SPLATS, splat_cap
+    assert splat_cap(3, None) == MAX_SPLATS
+    assert splat_cap(0, None) > 4 * MAX_SPLATS
+    assert splat_cap(0, 2) == 2
