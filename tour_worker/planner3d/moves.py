@@ -103,6 +103,7 @@ MIN_SCALE_PS = 0.035          # or a push's subject grows (ln of its distance ra
 MIN_TRAVEL_PS = 0.12         # m/s: a room shot travels at least this much for its length ...
 MIN_TURN_PS = 2.5            # ... or turns this much (deg/s) - else it reads as a still (user 2026-11-16, Krk)
 TILT_MAX = 22.0              # deg: a push may tilt down this far at its end to frame its subject with floor
+KEEP_PER_KIND = 40            # a room's arcs / pans judged further: the best by their own score
 OWN_POINTS = 16              # candidate points spread over a room's own floor, besides the space's
 DOOR_NEAR = 0.4             # m: a room shot never starts or ends this close to a doorway
 WALL_CLEAR = 0.2             # m: nor pressed against a wall
@@ -321,6 +322,14 @@ def frames_fully(eye2, target, box: np.ndarray, eye_z: float = EYE) -> bool:
     return bool(floor.max() <= (1.0 - FLOOR_MARGIN) * FRAME_H)
 
 
+def _keep_best(moves: list, n: int = None) -> list:
+    """The KEEP_PER_KIND best of a kind's candidates by their own score, before the rendered and
+    framing checks (a room's pans or arcs run to hundreds - 659 in the Home Scan's living room,
+    planning 6x slower, 2026-11-16)."""
+    n = KEEP_PER_KIND if n is None else n
+    return sorted(moves, key=lambda m: -m.score)[:n]
+
+
 def parallax(eye2: np.ndarray, tgt: np.ndarray) -> float:
     """1: the camera moves straight across its view; 0: along it."""
     mv = eye2[-1] - eye2[0]
@@ -466,6 +475,12 @@ class RoomMoves:
                 return out
             tiers = ([own_room(roomy(t)) for t in tiers] if strict
                      else [own_room(roomy(t)) for t in tiers] + [own_room(roomy(glides))])
+        # one pan a room: a room's later shots differ in kind (user 2026-11-16: a tour of pans) - a
+        # second pan only when nothing else will do
+        used = self.__dict__.setdefault("_kinds", {}).get(room, [])
+        if "room_pan" in used:
+            pans = [m for t in tiers for m in t if m.kind == "room_pan"]
+            tiers = [[m for m in t if m.kind != "room_pan"] for t in tiers] + [pans]
         tiers = [t for t in tiers if t]
         if not tiers:
             return None, [f"room_no_move:{room}" if kind != "detail" else f"room_no_detail:{room}"]
@@ -504,6 +519,7 @@ class RoomMoves:
                 least = low
             if best is not None:
                 best.why.update(candidates=len(cands), occlusion=round(best.occ, 3))
+                self._kinds.setdefault(room, []).append(best.kind)
                 return best, []
         if least is None:
             return None, [f"room_no_move:{room}"]
@@ -966,7 +982,7 @@ class RoomMoves:
                         score = 1.0 + 1.5 * core + 0.5 * sweep / ARC_SWEEP[-1] - 0.3 * abs(r - 2.7)
                         out.append(Move("arc", eye, tgt, score, PITCH_LADDER[0], piece, subject=piece_box(fp),
                                         why={"radius_m": r, "sweep_deg": sweep, "core": core}))
-        return out
+        return _keep_best(out)
 
     def _subjects(self, room: str) -> list[tuple[np.ndarray, np.ndarray, str]]:
         """What a pan of the room may show: its pieces and its low features - (aim point, box, name)."""
@@ -1014,7 +1030,7 @@ class RoomMoves:
                     score = 0.9 + 0.4 * ang / 55.0 + 0.05 * min(sp.view_depth(p, math.atan2(mid[1], mid[0]), HFOV), 5.0)
                     out.append(Move("room_pan", eye, tgt, score, subject=box_b,
                                     why={"from": na, "to": nb, "sweep_deg": round(ang)}))
-        return out
+        return _keep_best(out)
 
     def moves_enough(self, m: Move, dur: float) -> bool:
         """A room shot is seen to move: it travels MIN_TRAVEL_PS m/s, or turns MIN_TURN_PS deg/s."""
