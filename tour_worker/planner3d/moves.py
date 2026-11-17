@@ -136,8 +136,21 @@ EXIT_LEN = (1.2, 3.0)         # m an exit travels along the route
 EXIT_AHEAD = 2.5              # m ahead along the route it looks (where it is going)
 AFTER_EXIT = (0.5, 1.2)       # m into the next room its walk-in starts after an exit
 PRIOR_W = 0.6                 # score of a kind the room's profile asks for
-VARIETY_W = 0.8               # score lost repeating the previous shot's kind
 ROOM_REPEAT_W = 0.5           # score lost repeating a kind the room already had
+# the photo tours' sequence rules (planner/cinematic.py), on this planner's score scale (x0.4)
+# (user 2026-11-17: "a lot of camera rules from the 2d implementation ... would be true to this")
+SAME_KIND_W = 1.0             # the previous shot's kind again            (2D: -2.5)
+TWO_BACK_W = 0.4              # the kind of two shots back                (2D: -1.0)
+SAME_SIDE_W = 0.8             # sideways the same way as the previous shot (2D: -2.0, sides alternate)
+USED_DIR_W = 0.4              # per earlier use of the kind, same way      (2D: -1.0)
+OVERUSE_W = 0.6               # per use of a kind past its second          (2D: -1.5)
+DOLLY_KINDS = ("push", "pull", "rise", "enter")   # the moves led by moving in / out (2D: zoom-led)
+DOLLY_CAP_W = 2.0             # past a third of the tour's shots          (2D: -5.0)
+DOLLY_RUN_W = 0.8             # two in a row                              (2D: -2.0)
+HERO_TRAVEL_W = 0.2           # a hero shot that travels                  (2D: +0.5)
+TRAVELS = ("walkway", "truck", "arc", "rise", "exit", "enter", "push", "pull", "glide")
+MIN_KIND_S = {"room_pan": 3.8, "pan": 3.8, "truck": 3.5, "arc": 3.5, "rise": 2.8}   # shorter: a simpler move
+SINK_M = 0.3                  # a view may not drop this much past what it shows (the interest above it)
 # what a room's first shot (the one its label plays on) must show: what makes it that room (user
 # 2026-11-16: the Home Scan's kitchen opened on its dining table - "the camera shows the room its
 # mentioning in the frame")
@@ -150,6 +163,9 @@ TYPE_SIGNS = {"kitchen": ("stove", "oven", "sink", "refrigerator", "dishwasher",
 TYPE_WHOLE = ("bed", "sofa")    # ... framed whole, when the room has one
 TOP_VOID_MAX = 0.15           # at most this share of the frame's top fifth may be uncaptured (a missing ceiling; 0.3 let the Home Scan kitchen band through)
 TOP_TILT = (3.0, 6.0)         # deg a shot tilts down to clear it, before it is dropped
+BAND_MARGIN = 0.05            # m: the frame's top edge stays this far under where the scan's walls end
+BAND_TILT_MAX = 6.0           # deg a shot may tilt down to keep it there (no ceiling), else it goes
+WHOLE_GAP = 0.4               # m: labelled pieces of one bed / sofa this close are one piece
 FRAME_W, FRAME_H = 1920, 1080
 # what a view is worth showing (scene labels): a fireplace or a window beats a door
 FEATURES = {"fireplace": 1.0, "windowpane": 0.8, "kitchen island": 0.8, "bathtub": 0.8, "bed": 0.8,
@@ -387,7 +403,7 @@ class RoomMoves:
     def best(self, room: str, dur: float, *, earlier=(), prev=None, piece_rank: int = 0,
              opening: bool = False, closing: bool = False, kind: str = "room",
              next_room: str | None = None, enter_route=None, after_exit: bool = False,
-             follows_link: bool = False, covered: np.ndarray | None = None) -> tuple[Move | None, list[str]]:
+             final: bool = False, follows_link: bool = False, covered: np.ndarray | None = None) -> tuple[Move | None, list[str]]:
         """The best move for a shot of `room` lasting dur s. earlier: (first, last) poses of the
         room's earlier shots; prev: the previous shot's last pose; next_room: the tour's next room
         (an opening reveal turns onto it). Returns (move, warnings).
@@ -531,10 +547,15 @@ class RoomMoves:
         # what the room asks for (its profile) and variety (never the same kind twice running)
         prof = self.profile(room)
         used = self.__dict__.setdefault("_kinds", {}).get(room, [])
+        # moves that cannot play in the time (a pan under 3.8 s reads rushed), that sink past what
+        # they show, or (the tour's last room) close by pushing in: the 2D tours' rules
+        tiers = [[m for m in t if dur >= MIN_KIND_S.get(m.kind, 0.0) and not self.sinks(m)
+                  and not (final and m.kind in ("push", "exit"))] for t in tiers]
         for m in {id(m): m for t in tiers for m in t}.values():
             pr = PRIOR_W * prof["prior"].get(m.kind, 0.0)
-            vr = (VARIETY_W if m.kind == getattr(self, "_last_kind", None) else 0.0) \
-                + (ROOM_REPEAT_W if m.kind in used else 0.0)
+            vr = self.sequence_cost(m) + (ROOM_REPEAT_W if m.kind in used else 0.0)
+            if kind == "hero" and m.kind in TRAVELS:
+                pr += HERO_TRAVEL_W
             if pr or vr:
                 m.score += pr - vr
                 m.why["prior"] = round(pr - vr, 2)
@@ -583,14 +604,14 @@ class RoomMoves:
             if best is not None:
                 best.why.update(candidates=len(cands), occlusion=round(best.occ, 3))
                 self._kinds.setdefault(room, []).append(best.kind)
-                self._last_kind = best.kind
+                self.record(best)
                 return best, type_warn
         if least is None:
             return None, [f"room_no_move:{room}"]
         if covered is not None:                   # a further shot is a good one or none (user 2026-11-16:
             return None, [f"coverage_no_move:{room}"]     # a held view ended on a blur at the lens)
         hold = self._hold(least, room)
-        self._last_kind = hold.kind
+        self.record(hold)
         return hold, [f"view_partly_blocked:{room}"] + type_warn
 
     def front(self, e, t) -> float:
@@ -1133,19 +1154,103 @@ class RoomMoves:
             return False
         return sp.ray(np.asarray(eye2[:2]), math.atan2(v[1], v[0]), max_m=dist + 0.3) >= dist - 0.6
 
+    def whole_boxes(self, room: str) -> list:
+        """(8, 3) boxes of the room's beds / sofas, each its labelled pieces merged (WHOLE_GAP)."""
+        cache = self.__dict__.setdefault("_whole", {})
+        if room in cache:
+            return cache[room]
+        out = []
+        for cls in TYPE_WHOLE:
+            groups = [[o] for o in self.space.room_objects(room, (cls,))]
+            merged = True
+            while merged and len(groups) > 1:
+                merged = False
+                for a in range(len(groups)):
+                    for b in range(a + 1, len(groups)):
+                        la = np.min([o["min"] for o in groups[a]], 0); ha = np.max([o["max"] for o in groups[a]], 0)
+                        lb = np.min([o["min"] for o in groups[b]], 0); hb = np.max([o["max"] for o in groups[b]], 0)
+                        gap = np.maximum(0.0, np.maximum(la[:2] - hb[:2], lb[:2] - ha[:2])).max()
+                        if gap <= WHOLE_GAP:
+                            groups[a] += groups.pop(b)
+                            merged = True
+                            break
+                    if merged:
+                        break
+            out += [objects_box(g) for g in groups]
+        cache[room] = [b for b in out if b is not None]
+        return cache[room]
+
     def shows_type(self, room: str, m: Move, whole: bool = False) -> bool:
         """The move's middle or last frame shows something that makes the room what it is; whole:
         a bed or sofa (TYPE_WHOLE) among them is in the last frame whole, with floor under it."""
         signs = self.type_signs(room)
         zs = m.zs
         if whole:
-            big = [o for o in signs if o["class"] in TYPE_WHOLE]
-            hit = any(frames_fully(m.eye[-1], m.tgt[-1], objects_box([o]), float(zs[-1])) for o in big)
+            # the whole bed / sofa: its labelled pieces merged (user 2026-11-17: the primary bedroom
+            # passed on a fragment labelled "bed" while the frame showed a corner of the bed)
+            hit = any(frames_fully(m.eye[-1], m.tgt[-1], box, float(zs[-1])) for box in self.whole_boxes(room))
             m.why["frames_type"] = hit
             return hit
         hit = any(self.sees(m.eye[k], m.tgt[k], o, float(zs[k])) for k in (len(m.eye) // 2, len(m.eye) - 1) for o in signs)
         m.why["shows_type"] = hit
         return hit
+
+    # ---- the tour's sequence (the photo tours' rules, planner/cinematic.py) ---------------------
+    @staticmethod
+    def side(m: Move) -> int:
+        """Which way the view travels across the frame: +1 / -1 (sideways travel, else the turn), 0."""
+        k = len(m.eye) // 2
+        h = m.tgt[k][:2] - m.eye[k]
+        v = m.eye[-1] - m.eye[0]
+        if np.linalg.norm(v) >= 0.3 and parallax(m.eye, m.tgt) >= 0.35:
+            c = h[0] * v[1] - h[1] * v[0]
+        else:
+            d0, d1 = m.tgt[0][:2] - m.eye[0], m.tgt[-1][:2] - m.eye[-1]
+            c = d0[0] * d1[1] - d0[1] * d1[0]
+            if abs(math.degrees(math.atan2(c, float(d0 @ d1)))) < 8.0:
+                return 0
+        return 1 if c > 0 else -1
+
+    def record(self, m: Move) -> None:
+        """A shot the tour plays: its kind and side, for the next shots' sequence costs."""
+        self.__dict__.setdefault("_history", []).append((m.kind, self.side(m)))
+        self._last_kind = m.kind
+
+    def sequence_cost(self, m: Move) -> float:
+        """Score lost to the tour so far (2D: cinematic.py's beam search): the previous kind again,
+        two shots back, the same side as the previous shot (sides alternate), each earlier use of
+        the kind the same way, a kind past its second use, and moving in / out past a third of the
+        tour or twice running."""
+        hist = self.__dict__.get("_history", [])
+        if not hist:
+            return 0.0
+        sd = self.side(m)
+        cost = 0.0
+        if hist[-1][0] == m.kind:
+            cost += SAME_KIND_W
+        if len(hist) >= 2 and hist[-2][0] == m.kind:
+            cost += TWO_BACK_W
+        if sd and hist[-1][1] == sd:
+            cost += SAME_SIDE_W
+        cost += USED_DIR_W * sum(1 for k, d in hist if k == m.kind and d == sd)
+        cost += OVERUSE_W * max(0, sum(1 for k, _ in hist if k == m.kind) - 1)
+        if m.kind in DOLLY_KINDS:
+            cap = math.ceil(max(getattr(self, "tour_shots", 9), 1) / 3)
+            if sum(1 for k, _ in hist if k in DOLLY_KINDS) >= cap:
+                cost += DOLLY_CAP_W
+            if hist[-1][0] in DOLLY_KINDS:
+                cost += DOLLY_RUN_W
+        m.why["sequence_cost"] = round(cost, 2)
+        return cost
+
+    @staticmethod
+    def sinks(m: Move) -> bool:
+        """The view drops past what it shows (2D: never sink below the interest): its aim ends
+        SINK_M lower than it starts while the subject's top is above the end aim. A rise looks down
+        on purpose; a push may tilt onto its counter."""
+        if m.kind in ("rise", "push", "pull", "detail", "link") or m.subject is None:
+            return False
+        return bool(m.tgt[-1][2] < m.tgt[0][2] - SINK_M and float(m.subject[:, 2].max()) > m.tgt[-1][2])
 
     def profile(self, room: str) -> dict:
         """What the room is like, and the kinds of move that suits (prior per kind, 0..1)."""
@@ -1160,16 +1265,42 @@ class RoomMoves:
         prior = {}
         if open_plan or area >= RISE_AREA:
             prior["rise"] = 1.0                             # space to open up from above
-        if self.anchor(room) is not None or len(subjects) >= 3:
-            prior["truck"] = 1.0                            # a run of things along a wall: slide past it
+        # the photo tours' scene fit (planner/cinematic.py): a push only when one subject dominates
+        # the room's features; a truck / pan when they spread wide; a bathroom pulls back
+        dom, spread = self._dominance_spread(room)
+        prior["push"] = float(np.clip(2.0 * (dom - 0.3), -0.5, 1.0))
+        if self.anchor(room) is not None or spread >= 0.5:
+            prior["truck"] = max(1.0 if self.anchor(room) is not None else 0.0, min(1.0, spread))
+        prior["room_pan"] = -0.5 + 0.5 * min(1.0, spread)  # a pan only where nothing else will do
         if any(c in ("table", "kitchen island", "bed", "coffee table", "pool table") for c in pieces):
             prior["arc"] = 1.0                              # a piece with floor round it: circle it
-        if area < 12.0:
-            prior["push"] = prior["pull"] = 0.5             # small: move in and out, not across
-        prior["room_pan"] = -0.5                            # a pan only where nothing else will do
+        from tour_worker.scoring.rooms import canon
+        if canon(sp.room_types.get(room)) in ("bathroom", "primary_bathroom", "ensuite", "powder_room"):
+            prior["pull"], prior["push"] = 1.0, min(prior["push"], 0.0)
+        elif area < 12.0:
+            prior["pull"] = 0.5                             # small: move out, not across
         cache[room] = {"area": round(area, 1), "open_plan": open_plan, "pieces": pieces,
-                       "subjects": len(subjects), "prior": prior}
+                       "subjects": len(subjects), "dominance": round(dom, 2), "spread": round(spread, 2),
+                       "prior": prior}
         return cache[room]
+
+    def _dominance_spread(self, room: str) -> tuple[float, float]:
+        """(the largest labelled feature's share of the room's feature weight x size; how widely
+        the features spread - their extent across the room's longer side, 0..1). The photo tours
+        read these off the photo (scene_context.py dominance / h_extent); here off the labels."""
+        sp = self.space
+        objs = [o for o in sp.room_objects(room, FEATURES)]
+        if not objs:
+            return 0.0, 0.0
+        w = np.array([FEATURES[o["class"]] * max(0.05, float(np.prod(np.asarray(o["max"][:2]) - np.asarray(o["min"][:2]))))
+                      for o in objs])
+        dom = float(w.max() / w.sum())
+        c = np.array([o["centre"][:2] for o in objs], float)
+        mask = sp.room_of == sp.room_keys.index(room)
+        ys, xs = np.nonzero(mask)
+        side = max(np.ptp(xs), np.ptp(ys), 1) * 0.05
+        ext = float(max(np.ptp(c[:, 0]), np.ptp(c[:, 1]))) if len(c) > 1 else 0.0
+        return dom, min(1.0, ext / side)
 
     def _truck(self, room, rmin, dur, prev, earlier) -> list[Move]:
         """A truck: the camera slides sideways past one of the room's subjects (a counter run, a
@@ -1314,7 +1445,7 @@ class RoomMoves:
         if best is None:
             return None, [f"exit_blocked:{room}"]
         best.why.update(candidates=len(cands), occlusion=round(best.occ, 3))
-        self._last_kind = "exit"
+        self.record(best)
         return best, []
 
     def _enter_after_exit(self, room, piece, route, rmin, dur, earlier) -> list[Move]:
@@ -1552,12 +1683,55 @@ class RoomMoves:
                       "sweep_deg": HOLD_SWEEP})
         return m
 
+    def band_deficit(self, m: Move) -> float:
+        """Degrees the view's top edge rises past where the scan's walls end (Space.wall_top), at
+        its start, middle and end, across the frame - 0 when the scene has its ceiling."""
+        sp = self.space
+        top_map = getattr(sp, "wall_top", None)
+        if top_map is None or "scene_ceiling_missing" not in getattr(sp, "warnings", []):
+            return 0.0
+        half_v = math.atan(math.tan(math.radians(HFOV) / 2) * FRAME_H / FRAME_W)
+        offs = np.radians(np.array([-0.35, 0.0, 0.35]) * HFOV)
+        e3 = m.eye3
+        worst = 0.0
+        for k in (0, len(e3) // 2, len(e3) - 1):
+            e, t = e3[k], m.tgt[k]
+            d = t - e
+            hd = float(np.linalg.norm(d[:2]))
+            head, pitch = math.atan2(d[1], d[0]), math.atan2(-d[2], max(hd, 1e-6))
+            dist = sp.rays(e[:2], head + offs)
+            for a, D in zip(offs, dist):
+                hit = e[:2] + (D + 0.05) * np.array([math.cos(head + a), math.sin(head + a)])
+                i, j = sp.cell(hit)
+                if not (0 <= i < top_map.shape[0] and 0 <= j < top_map.shape[1]) or top_map[i, j] <= 0:
+                    continue
+                elev = math.atan(math.tan(half_v - pitch) * math.cos(a))
+                need = math.atan2(float(top_map[i, j]) - BAND_MARGIN - e[2], max(float(D), 0.3))
+                worst = max(worst, math.degrees(elev - need))
+        return worst
+
     def _void(self, m: Move) -> float:
         """The worst share of the view the scan never captured (start, middle, end). A black band
         across the top (a missing ceiling, TOP_VOID_MAX of its top fifth) tilts the move down
         TOP_TILT deg; if that does not clear it (or loses the subject's floor) the move fails."""
         e3 = m.eye3
         ks = (0, len(e3) // 2, len(e3) - 1)
+        # no ceiling: the frame's top edge stays under where the scan's walls end (geometric, the
+        # thinned void render misses a thin band); a few degrees down, else the move goes
+        deficit = self.band_deficit(m)
+        if deficit > 0:
+            if deficit > BAND_TILT_MAX or m.kind in ("detail", "link"):
+                m.why["band_deficit_deg"] = round(deficit, 1)
+                return 1.0
+            old = m.tgt
+            h = np.linalg.norm(m.tgt[:, :2] - m.eye, axis=1)
+            m.tgt = m.tgt.copy()
+            m.tgt[:, 2] -= h * math.tan(math.radians(deficit + 0.5))
+            if not self.framed(m) or self.band_deficit(m) > 0:
+                m.tgt = old
+                m.why["band_deficit_deg"] = round(deficit, 1)
+                return 1.0
+            m.why["tilt_for_band"] = round(deficit + 0.5, 1)
 
         def worst(tgt):
             r = [self.occ.void(e3[k], tgt[k], HFOV, top=True) for k in ks]

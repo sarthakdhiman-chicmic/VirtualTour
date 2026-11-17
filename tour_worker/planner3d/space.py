@@ -25,6 +25,7 @@ from tour_worker.scene.orient import estimate_frame
 from tour_worker.scene.splat_io import SplatModel
 
 CELL = 0.05
+WALL_TOP_MIN = 3                # splats in a 10 cm band of a cell for the wall to reach it
 MIN_PART_M2 = 3.0            # free floor in a part of its own at least this big still counts
 OPAQUE, MAX_SPLAT_M = 0.35, 0.25       # splats that make the floor plan: opaque, not huge background blobs
 BODY = (0.15, 2.0)                     # heights a camera body could hit
@@ -200,6 +201,14 @@ class Space:
         s = (h > 0.1) & (h < 1.25)
         np.maximum.at(top, (iy[s], ix[s]), h[s])
         self._top = top
+        # how high the scan captured each wall (the highest 10 cm band above 1.3 m with WALL_TOP_MIN
+        # splats): with no ceiling, a view whose top edge clears it shows the black background
+        # (user 2026-11-16: a black band across the top of the kitchen shots)
+        wall_top = np.full((H, W), -1.0, np.float32)
+        for z0 in np.arange(1.3, 3.4, 0.1):
+            band = hist((h >= z0) & (h < z0 + 0.1)) >= WALL_TOP_MIN
+            wall_top[band] = z0 + 0.1
+        self.wall_top = ndi.maximum_filter(wall_top, size=3)
 
     def _furniture(self) -> None:
         import cv2

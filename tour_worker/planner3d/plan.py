@@ -42,6 +42,7 @@ FADE_S = 0.5
 CONNECTORS = {"hallway", "corridor", "landing", "staircase", "stairs", "stairway"}
 LOOK_BACK = {"balcony", "patio", "outdoor_patio", "terrace", "deck", "porch", "garden", "backyard", "rooftop"}
 MAX_WIDE = 3                  # wide shots a room at most (coverage: user 2026-11-16)
+SYNC_REACH = 0.85            # with music: shots planned at this share of their lengths (the sync lengthens)
 SYNC_HEADROOM = 0.88          # the cap is met before the sync with this share of it
 COVER_ENOUGH = 0.85           # a room whose walls are this covered gets no further shot
 MAX_DETAILS = 0                # 3D close-ups off (user 2026-11-16, Home Scan: a painting rendered as a black
@@ -240,7 +241,17 @@ def plan_tour_3d(model, scene: dict, rooms: list[dict], listing_id: str, cfg: Pl
     selected, links, enters, link_w = _route_tour(space, selected, {k for k, t in toured if canon(t) in CONNECTORS}, c3)
     warnings += link_w
 
+    # with music, shots are planned short of their lengths (SYNC_REACH): the sync only lengthens, so
+    # this gives it room to land each cut on its moment instead of the next beat after a planned end
+    # (2026-11-17, Home Scan v8: cuts a beat after a strong hit, one between beats; offline at 0.85:
+    # none of either) - the moves are planned for these lengths, so the sync only slows them
+    reach = SYNC_REACH if music_track else 1.0
+    if reach != 1.0:
+        for s_ in selected:
+            s_.final_duration = round(s_.final_duration * reach, 3)
     mover = RoomMoves(space, Occlusion(model, space) if check_occlusion else None)
+    mover.tour_shots = len(selected)               # the moving-in cap: a third of the tour's shots
+    last_room = selected[-1].room_key if selected else None
     moves, plan_rows, prev = [], [], None
     poses: dict[str, list] = {}
     spare: dict[str, float] = {}
@@ -258,10 +269,11 @@ def plan_tour_3d(model, scene: dict, rooms: list[dict], listing_id: str, cfg: Pl
         lead = first_s[room]
         while wide.get(room, 0) < MAX_WIDE and len(walls) and len(covered.get(room, ())) / len(walls) < COVER_ENOUGH:
             kind = lead.kind if lead.kind in ("room", "hero") else "room"
-            dur = round(max(length_range("room", c3.pacing)[0], 0.85 * lead.final_duration), 2)
+            dur = round(max(length_range("room", c3.pacing)[0] * reach, 0.85 * lead.final_duration), 2)
             earlier_ = [p for k in sorted(space.spaces.get(room, {room})) for p in poses.get(k, [])]
             mv, _ = mover.best(room, dur, earlier=earlier_, prev=prev, piece_rank=wide.get(room, 0),
-                               kind=kind, covered=covered.get(room, np.zeros(0, np.int64)))
+                               kind=kind, covered=covered.get(room, np.zeros(0, np.int64)),
+                               final=room == last_room)
             if mv is None:
                 break
             sel = dataclasses.replace(lead, role="detail", kind="room", is_hero=False, is_lead=False,
@@ -289,7 +301,7 @@ def plan_tour_3d(model, scene: dict, rooms: list[dict], listing_id: str, cfg: Pl
         r = space.route(room, nxt.room_key)
         if not r:
             return prev
-        dur = round(length_range("room", c3.pacing)[1], 2)          # room to fly it at a walking pace
+        dur = round(length_range("room", c3.pacing)[1] * reach, 2)  # room to fly it at a walking pace
         earlier_ = [p for k in sorted(space.spaces.get(room, {room})) for p in poses.get(k, [])]
         mv, w = mover.exit(room, nxt.room_key, r, dur, prev, earlier_)
         if mv is None:
@@ -321,6 +333,7 @@ def plan_tour_3d(model, scene: dict, rooms: list[dict], listing_id: str, cfg: Pl
                                piece_rank=len(poses.get(sel.room_key, [])), opening=i == 0,
                                closing=closing, kind=sel.kind, next_room=nxt,
                                enter_route=enters.get(id(sel)), after_exit=id(sel) in after_exit,
+                               final=sel.room_key == last_room and i > 0,
                                follows_link=i > 0 and id(selected[i - 1]) in links)
         if mv is None and poses.get(sel.room_key) and sel.kind != "detail":
             w = [f"second_angle_dropped:{sel.room_key}"]      # no angle with room to breathe: the first keeps the time
