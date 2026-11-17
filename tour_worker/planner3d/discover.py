@@ -100,7 +100,9 @@ OFFICE = ("desk", "computer", "monitor")
 # a lamp by a table and chairs; a bed labelled "sofa"; a hall's built-ins labelled "refrigerator"
 BATH_SOFT = ("sink", "towel", "mirror")
 STUDY = ("book", "bookcase", "shelf", "lamp")
-COOKING = ("stove", "oven", "hood", "dishwasher", "microwave", "countertop", "kitchen island")
+COOKING = ("stove", "oven", "hood", "dishwasher", "microwave", "kitchen island")   # (a countertop may be a vanity)
+UTILITY_SIGNS = ("washer",)    # a washing machine: laundry, not toured (the green house's balcony nook)
+BED_CLOSED_M2 = 0.8      # in a room behind a door, this much bed is enough (labels often get only part of it)
 SMALL_ROOM_M2 = 7.0      # a closed room this small with a sink, towel or mirror is a bathroom
 BED_MIN_M2 = 1.2         # this much bed (all its pieces) makes a bedroom - a stray bath fixture does not
 DINING_TABLE_M2 = 1.2    # a dining table at least this big (a desk is smaller), with chairs
@@ -124,7 +126,8 @@ def _evidence(held: dict[str, list[dict]]) -> dict[str, float]:
             "bath_soft": float(sum(len(held.get(n, [])) for n in BATH_SOFT)),
             "study": float(sum(len(held.get(n, [])) for n in STUDY)),
             "cooking": float(sum(n in held for n in COOKING)),
-            "sofa": a(("sofa",)), "tv": float(sum(n in held for n in ("television receiver", "fireplace")))}
+            "sofa": a(("sofa",)), "tv": float(sum(n in held for n in ("television receiver", "fireplace"))),
+            "utility": float(sum(len(held.get(n, [])) for n in UTILITY_SIGNS))}
 
 
 def _type_of(space, key: str, ev: dict[str, float]) -> str:
@@ -135,11 +138,15 @@ def _type_of(space, key: str, ev: dict[str, float]) -> str:
         return "bedroom"
     mask_ = space.room_of == space.room_keys.index(key) if key in space.room_keys else None
     area_ = float(mask_.sum()) * CELL * CELL if mask_ is not None else 0.0
+    closed = not _open_neighbours(space, key)
+    if closed and ev["bed"] >= BED_CLOSED_M2:
+        return "bedroom"
+    if ev["utility"] and not ev["bed"] and ev["sofa"] < 0.8 and area_ < 10.0:
+        return "laundry_room"
     # a toilet / bath / shower: a bathroom - unless the room has a sofa (a stray label in the Home
     # Scan's family room)
     if ev["bath"] >= 1 and ev["bed"] < 0.5 and ev["sofa"] < 0.8:
         return "bathroom"
-    closed = not _open_neighbours(space, key)
     # a small closed room with a sink, towel or mirror and no cooking fitting: a bathroom
     if closed and area_ < SMALL_ROOM_M2 and ev["bath_soft"] >= 1 and not ev["cooking"] and ev["bed"] < 0.5:
         return "bathroom"
@@ -211,7 +218,11 @@ def room_types(space, objects: list[dict], points: dict[str, np.ndarray]) -> dic
     if beds:
         # the primary bedroom has the biggest bed (a double over a single - the Home Scan's kids'
         # room had more floor), then the most floor
-        out[max(beds, key=lambda k: (round(ev[k]["bed"] + 0.4 * ev[k]["sofa"], 1), area[k]))] = "primary_bedroom"
+        # (user 2026-11-17: "we are marking the smaller bedrooms as primary") - the room's whole
+        # footprint, under the furniture too: a big bed takes free floor away from the big room
+        foot = {k: float((space.room_fill == space.room_keys.index(k)).sum()) * CELL * CELL
+                if k in space.room_keys else 0.0 for k in beds}
+        out[max(beds, key=lambda k: (round(foot[k], 0), ev[k]["bed"]))] = "primary_bedroom"
     living = [k for k in out if out[k] == "living_room"]
     if len(living) > 1:
         best = max(living, key=lambda k: area[k])
@@ -231,6 +242,9 @@ ZONES = {"living": ("sofa", "armchair", "coffee table", "television receiver", "
 ZONE_GAP = 1.5           # m: objects of one purpose this close are one zone
 ZONE_MIN = {"living": 0.8, "kitchen": 1.0, "bed": 1.2, "office": 0.3, "bath": 0.1, "dining": 1.0}   # m2 of their furniture
 DINING_REACH = 1.2       # m from a table's edge its chairs stand (pulled out round a round table)
+WALL_END = 0.4           # m at each end of a line between two objects where a wall does not part them
+SEED_ROOM = 0.45         # m clear round where a zone's room starts
+SEED_APART = 1.5         # m between two zones' starts
 ZONE_NEAR = 2.0          # m: a room's centre this near a zone makes it that zone's kind of room
 ZONE_APART = 2.0         # m between zone centres for them to be two rooms
 ZONE_FLOOR_M2 = 3.0      # a zone's room needs this much free floor, else it joins its neighbour
@@ -247,8 +261,29 @@ def _gap(a, b) -> float:
     return float(np.maximum(0.0, np.maximum(la - hb, lb - ha)).max())
 
 
-def zones(objects: list[dict]) -> list[dict]:
-    """[{kind, centre (xy), weight, objects}] - the purposes the furniture shows, where it stands."""
+def _through_wall(space, a, b) -> bool:
+    """A wall (Space.walls) on the straight line between two floor points."""
+    if space is None or getattr(space, "walls", None) is None:
+        return False
+    from tour_worker.planner3d.space import CELL
+    a, b = np.asarray(a, float)[:2], np.asarray(b, float)[:2]
+    L = float(np.linalg.norm(b - a))
+    n = max(2, int(L / CELL))
+    for q in np.linspace(a, b, n)[1:-1]:
+        # a fitting stands against (or in) its wall - a hood, tall units: only a wall well between
+        # the two counts, not within WALL_END of either
+        if min(np.linalg.norm(q - a), np.linalg.norm(q - b)) < WALL_END:
+            continue
+        i, j = space.cell(q)
+        if 0 <= i < space.walls.shape[0] and 0 <= j < space.walls.shape[1] and space.walls[i, j]:
+            return True
+    return False
+
+
+def zones(objects: list[dict], space=None) -> list[dict]:
+    """[{kind, centre (xy), weight, objects}] - the purposes the furniture shows, where it stands.
+    Objects of one purpose join only on the same side of every wall (space given): the green house's
+    hall built-ins and bathroom basin chained into its kitchen through the walls."""
     out = []
     # a dining table: at table height (a coffee table is lower), 3+ chairs pulled up round it
     tables = [o for o in objects if o["class"] == "table" and _area(o) >= 0.4 and float(o.get("top", 0.75)) >= 0.6]
@@ -265,7 +300,8 @@ def zones(objects: list[dict]) -> list[dict]:
         items = [o for k, o in groups if k == kind]
         clusters: list[list[dict]] = []
         for o in items:
-            near = [c for c in clusters if any(_gap(_box(o), _box(x)) <= ZONE_GAP for x in c)]
+            near = [c for c in clusters if any(_gap(_box(o), _box(x)) <= ZONE_GAP
+                                               and not _through_wall(space, o["centre"], x["centre"]) for x in c)]
             merged = [o] + [x for c in near for x in c]
             clusters = [c for c in clusters if c not in near] + [merged]
         for c in clusters:
@@ -284,20 +320,31 @@ def zones(objects: list[dict]) -> list[dict]:
     return sorted(out, key=lambda z: -z["weight"])
 
 
-def _zone_seed(space, c: np.ndarray, radius: float = 2.0) -> np.ndarray:
-    """Where a zone's room starts: the most open free floor within radius of the zone (its centre
-    is usually on the sofa or the table - snapped to the nearest floor it lands behind it)."""
+def _zone_seed(space, c: np.ndarray, radius: float = 2.0, avoid=(), others=()) -> np.ndarray:
+    """Where a zone's room starts: beside the zone's own furniture - the nearest free floor with
+    some room round it (SEED_ROOM m clear) that is nearer this zone than any other and SEED_APART
+    from the zones placed already; failing that, the most open floor within radius."""
     from tour_worker.planner3d.space import CELL
     i, j = space.cell(c)
     k = int(radius / CELL)
     H, W = space.shape
     a0, a1, b0, b1 = max(0, i - k), min(H, i + k + 1), max(0, j - k), min(W, j + k + 1)
     yy, xx = np.mgrid[a0:a1, b0:b1]
-    win = np.where(space.free[a0:a1, b0:b1] & (np.hypot(yy - i, xx - j) * CELL <= radius), space.dt[a0:a1, b0:b1], -1.0)
-    if win.max() <= 0:
-        return c
-    y, x = np.unravel_index(int(np.argmax(win)), win.shape)
-    return space.centre_of(a0 + y, b0 + x)
+    pts = np.stack([space.lo[0] + (xx + .5) * CELL, space.lo[1] + (yy + .5) * CELL], -1)
+    d_own = np.hypot(yy - i, xx - j) * CELL
+    ok = space.free[a0:a1, b0:b1] & (d_own <= radius)
+    for o in others:                                  # nearer this zone than the others
+        ok &= d_own < np.linalg.norm(pts - np.asarray(o)[:2], axis=-1)
+    for s in avoid:                                   # apart from the rooms started already
+        ok &= np.linalg.norm(pts - np.asarray(s)[:2], axis=-1) >= SEED_APART
+    good = ok & (space.dt[a0:a1, b0:b1] >= SEED_ROOM)
+    if good.any():
+        y, x = np.unravel_index(int(np.argmin(np.where(good, d_own, np.inf))), good.shape)
+        return space.centre_of(a0 + y, b0 + x)
+    if ok.any():
+        y, x = np.unravel_index(int(np.argmax(np.where(ok, space.dt[a0:a1, b0:b1], -1.0))), ok.shape)
+        return space.centre_of(a0 + y, b0 + x)
+    return c
 
 
 def split_by_zones(space, points: dict[str, np.ndarray], objects: list[dict]):
@@ -317,7 +364,7 @@ def split_by_zones(space, points: dict[str, np.ndarray], objects: list[dict]):
             groups.append(sorted(g))
     out, warnings, kinds, owner = dict(points), [], {}, {}
     for g in groups:
-        zs = zones([o for o in objects if o.get("room") in g])
+        zs = zones([o for o in objects if o.get("room") in g], space)
         if any(z["kind"] == "bed" for z in zs):                 # a bedroom's desk is not a room
             zs = [z for z in zs if z["kind"] not in ("office",)]
         keep: list[dict] = []
@@ -343,8 +390,12 @@ def split_by_zones(space, points: dict[str, np.ndarray], objects: list[dict]):
                     nm, n = f"{home}_{z['kind']}{n}", n + 1
                 names.append(nm)
                 used.add(nm)
+            seeds: list[np.ndarray] = []
             for nm, z in zip(names, keep):
-                trial[nm] = _zone_seed(space, z["centre"])
+                # (v11: the living and dining rooms both started in the same open aisle, 0.7 m apart)
+                trial[nm] = _zone_seed(space, z["centre"], avoid=seeds,
+                                       others=[y["centre"] for y in keep if y is not z])
+                seeds.append(trial[nm])
             space.set_rooms(trial)
             area = {nm: float((space.room_of == space.room_keys.index(nm)).sum()) * CELL * CELL
                     if nm in space.room_keys else 0.0 for nm in names}
@@ -371,7 +422,7 @@ def zone_types(space, objects, points: dict, types: dict) -> dict:
     from tour_worker.planner3d.space import CELL
     out = dict(types)
     zk = getattr(space, "zone_kinds", {})
-    every = [z for z in zones(objects) if z["kind"] in ZONE_TYPE]     # the whole home's: chairs round a
+    every = [z for z in zones(objects, space) if z["kind"] in ZONE_TYPE]     # the whole home's: chairs round a
     for k, p in points.items():                                        # table may stand in the next room
         kind = zk.get(k)
         if kind is None:
@@ -425,8 +476,8 @@ def finalize_rooms(space, points: dict[str, np.ndarray], objects: list[dict],
                 continue                                   # a doorway between them: two rooms
             ta, tb = types[a], types[b]
             zk = getattr(space, "zone_kinds", {})
-            if (a in zk) != (b in zk) and "other_room" not in (ta, tb):
-                continue                                   # a zone's room is not folded into a non-zone room
+            # (a non-zone room may fold INTO a zone room - the green house's living end became a
+            # "family room" of its own - never the other way)
             same = ta == tb or {ta, tb} <= {"living_room", "family_room"}
             if same or "other_room" in (ta, tb):
                 pairs.append((d, i, j))
@@ -434,6 +485,9 @@ def finalize_rooms(space, points: dict[str, np.ndarray], objects: list[dict],
             break
         _, i, j = max(pairs)
         keep, drop = (keys[i], keys[j]) if clear[i] >= clear[j] else (keys[j], keys[i])
+        zk = getattr(space, "zone_kinds", {})
+        if drop in zk and keep not in zk:
+            keep, drop = drop, keep
         if types[drop] != "other_room" and types[keep] == "other_room":
             keep, drop = drop, keep
         merged = {**{k: (keep if v == drop else v) for k, v in merged.items()}, drop: keep}
@@ -450,6 +504,8 @@ def finalize_rooms(space, points: dict[str, np.ndarray], objects: list[dict],
         toured = c is None or c >= CAPTURE_MIN
         if types[k] == "other_room" and len(keys) > 1:
             toured = False                                 # nothing a viewer would recognise
+        if types[k] in ("laundry_room", "utility_room"):
+            toured = False                                 # a washing machine is not a room to tour
         if not toured:
             warnings.append(f"room_not_toured:{k}:" + ("other_room" if types[k] == "other_room" else f"capture_{c:.2f}"))
         out.append((k, types[k], points[k], toured))

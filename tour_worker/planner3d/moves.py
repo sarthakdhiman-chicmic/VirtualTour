@@ -109,6 +109,9 @@ DOOR_NEAR = 0.4             # m: a room shot never starts or ends this close to 
 WALL_CLEAR = 0.2             # m: nor pressed against a wall
 DOOR_CLEAR = 0.45            # m: a room shot never starts or ends in a doorway (clearance under this)
 EDGE_NEAR, EDGE_MAX = 0.8, 0.12   # anything within EDGE_NEAR m covering EDGE_MAX of the whole frame blocks it
+NEAR_ANY = 1.2                # m: anything this close to the lens ...
+NEAR_ANY_MAX = 0.15           # ... over this share of the frame, at any of NEAR_ANY_POSES, fails a move
+NEAR_ANY_POSES = 5
 VOID_MAX = 0.12              # at most this share of a view may be what the scan never captured
 CEIL_PITCH = 0.0             # deg the aim drops when the scan has no ceiling (its black band stays out)
 ANCHOR_HALF = 0.8           # m: the working area a push / pull must show whole
@@ -189,6 +192,7 @@ FEATURES = {"fireplace": 1.0, "windowpane": 0.8, "kitchen island": 0.8, "bathtub
             "cabinet": 0.15}
 # of a view's middle on the shot's own room: under this the shot loses score (OWN_W)
 OWN_SHARE = {"corner_sweep": 0.5, "panorama": 0.5, "descend": 0.35, "truck": 0.5, "rise": 0.35, "walkway": 0.35, "arc": 0.35, "room_pan": 0.5, "push": 0.5, "pull": 0.5, "glide": 0.5}
+CONFIDENT_M2 = 0.5            # m2 of a room's own furniture for its rules to be eased
 RELAX = 0.8                   # the second try: room to breathe x this ...
 OWN_MIN_RELAXED = 0.35        # ... and this much of its own room in view
 OWN_MIN = 0.5                 # a room shot's view is at least half its own room
@@ -423,7 +427,7 @@ class RoomMoves:
         room skipped is worse than a room shown a little closer (v10: the green house's dining
         room, study and hall had no shot)."""
         mv, w = self._best(room, dur, **kw)
-        if mv is None and kw.get("covered") is None and kw.get("kind", "room") != "detail":
+        if mv is None and kw.get("covered") is None and kw.get("kind", "room") != "detail" and self.confident(room):
             self.relaxed = True
             try:
                 mv, w2 = self._best(room, dur, **kw)
@@ -433,6 +437,17 @@ class RoomMoves:
                 mv.why["relaxed"] = True
                 return mv, [f"room_rules_relaxed:{room}"] + [x for x in w2 if not x.startswith("room_no")]
         return mv, w
+
+    def confident(self, room: str) -> bool:
+        """The scan shows what the room is: a main piece, or CONFIDENT_M2 of what makes it that room
+        (TYPE_SIGNS) - only then may its rules be eased for a view (green house v11: a laundry nook
+        typed "family room" off 0.05 m2 of "sofa" got a relaxed glide at the washing machines)."""
+        if self.space.main_pieces(room):
+            return True
+        a = 0.0
+        for o in self.type_signs(room):
+            a += float(np.prod(np.asarray(o["max"][:2]) - np.asarray(o["min"][:2])))
+        return a >= CONFIDENT_M2
 
     def _best(self, room: str, dur: float, *, earlier=(), prev=None, piece_rank: int = 0,
              opening: bool = False, closing: bool = False, kind: str = "room",
@@ -1511,7 +1526,8 @@ class RoomMoves:
             if least is None:
                 why = "speed"
             else:
-                why = (f"edge{least.why['edge_cover']}" if "edge_cover" in least.why
+                why = (f"near{least.why['near_lens']}" if "near_lens" in least.why
+                       else f"edge{least.why['edge_cover']}" if "edge_cover" in least.why
                        else f"band{least.why['band_deficit_deg']}" if "band_deficit_deg" in least.why
                        else f"void{least.why['void']}" if least.why.get("void", 0) > VOID_MAX
                        else f"occ{round(least.occ, 2)}")
@@ -1973,5 +1989,14 @@ class RoomMoves:
                 edge = self.occ.cover(e, t, HFOV, m.piece, EDGE_NEAR, region="full")
                 if edge > EDGE_MAX:
                     m.why["edge_cover"] = round(edge, 3)
+                    return 1.0
+        # anything big right at the lens, anywhere in the frame, all through the move - every kind,
+        # exits included (green house v11: a fridge over a third of a rise, a TV over half an exit,
+        # a sculpture in a pan)
+        if m.kind != "detail":
+            for k in np.linspace(0, len(e3) - 1, NEAR_ANY_POSES).astype(int):
+                near = self.occ.cover(e3[k], m.tgt[k], HFOV, None, NEAR_ANY, region="full")
+                if near > NEAR_ANY_MAX:
+                    m.why["near_lens"] = round(near, 3)
                     return 1.0
         return worst

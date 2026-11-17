@@ -43,6 +43,8 @@ VOCAB = (
     # surroundings
     "wall", "floor", "ceiling", "sky", "tree", "palm", "grass", "water", "swimming pool", "house", "building",
     "fence",
+    # appended (ids above stay as they were): a laundry nook is not a room to tour (2026-11-17)
+    "washer",
 )
 INDEX = {n: k + 1 for k, n in enumerate(VOCAB)}           # 0: unlabelled
 VIEW_HEADINGS = 8
