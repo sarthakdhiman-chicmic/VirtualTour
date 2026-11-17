@@ -74,3 +74,16 @@ def test_the_tour_follows_the_walk_and_never_closes_in_a_bathroom():
     out = _walk_order(space, sel, stage, rtype, cfg)
     assert [s.room_key for s in out] == ["living", "kitchen", "far_family", "bath", "bed"]
     assert out[-1].final_duration == 8.0                                 # the closing length moved with the close
+
+
+def test_an_open_plan_splits_where_its_furniture_stands():
+    """One open space (no wall between) with a sofa group at one end and a dining table with its
+    chairs at the other is two rooms - each typed by the zone at its centre (user 2026-11-17: "a
+    better idea of the room boundary when the layout is a bit open, using the objects")."""
+    sp, pts = _space(door=2.4)                                           # one open space
+    objs = [_o("sofa", "a", 1.0, 0.4, 3.2, 1.3), _o("television receiver", "a", 1.5, 4.6, 2.5, 4.9),
+            _o("table", "b", 7.6, 2.0, 8.8, 3.0), _o("chair", "b", 7.0, 2.2, 7.4, 2.6),
+            _o("chair", "b", 9.0, 2.2, 9.4, 2.6), _o("chair", "b", 8.0, 3.2, 8.4, 3.6)]
+    rooms, warn = finalize_rooms(sp, {"a": pts["a"]}, [dict(o) for o in objs], None)   # one centre for it all
+    assert sorted(t for _, t, _, toured in rooms if toured) == ["dining_room", "living_room"]
+    assert any(w.startswith("open_plan_split:") for w in warn)
