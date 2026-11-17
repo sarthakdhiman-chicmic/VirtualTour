@@ -135,9 +135,10 @@ def _walk_order(space, selected: list, stage: dict[str, str], rtype: dict[str, s
         # each stage opens on its narrative first room - the living room, the primary bedroom
         # (user 2026-11-16: the primary bedroom came after the other bedrooms, by walking distance)
         lead = 0
-        if not out:                              # the tour opens in THE living room (user 2026-11-17: the
-            lead = next((n for n, (k, _) in enumerate(group)    # Home Scan opened on its family room)
-                         if canon(rtype.get(k)) == "living_room"), 0)
+        # the tour opens in THE living room (user 2026-11-17: the Home Scan opened on its family room)
+        # - the first stage with a room that is not a hallway (an entry hall is a link, not a stop)
+        if not any(canon(rtype.get(k)) not in CONNECTORS for k, _ in out):
+            lead = next((n for n, (k, _) in enumerate(group) if canon(rtype.get(k)) == "living_room"), 0)
         ordered, prev = [group[lead]], group[lead][0]
         group = group[:lead] + group[lead + 1:]
         while group:

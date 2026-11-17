@@ -51,7 +51,7 @@ MAX_TURN_DPS, MAX_MOVE_MPS = 10.0, 0.8
 # moves are planned to this share of the limits: the beat sync only lengthens room and hero shots
 # (planner/lengths.SYNC_BOUNDS), but may shorten a close-up to 0.7x
 PRE_SYNC_SHARE = {"room": 0.9, "hero": 0.9, "detail": 0.65}   # 0.9: the planner's 91-sample check vs per frame
-PITCH_LADDER = (10.0, 13.0, 16.0)
+PITCH_LADDER = (10.0, 12.0)     # (13 / 16 read as looking at the floor - Home Scan v11)
 JUMP_ANGLE, JUMP_DIST = 30.0, 1.5
 RMIN_LADDER = (0.28, 0.22)    # camera body clearance, a little less in small rooms
 MOVE_LEN = (0.6, 2.6)
@@ -102,7 +102,7 @@ FLOOR_MARGIN = 0.04          # ... and the floor under it this far above the fra
 MIN_SCALE_PS = 0.035          # or a push's subject grows (ln of its distance ratio) this much a second
 MIN_TRAVEL_PS = 0.12         # m/s: a room shot travels at least this much for its length ...
 MIN_TURN_PS = 2.5            # ... or turns this much (deg/s) - else it reads as a still (user 2026-11-16, Krk)
-TILT_MAX = 22.0              # deg: a push may tilt down this far at its end to frame its subject with floor
+TILT_MAX = 12.0              # deg: a push may tilt down this far at its end to frame its subject with floor
 KEEP_PER_KIND = 40            # a room's arcs / pans judged further: the best by their own score
 OWN_POINTS = 16              # candidate points spread over a room's own floor, besides the space's
 DOOR_NEAR = 0.4             # m: a room shot never starts or ends this close to a doorway
@@ -110,7 +110,7 @@ WALL_CLEAR = 0.2             # m: nor pressed against a wall
 DOOR_CLEAR = 0.45            # m: a room shot never starts or ends in a doorway (clearance under this)
 EDGE_NEAR, EDGE_MAX = 0.8, 0.12   # anything within EDGE_NEAR m covering EDGE_MAX of the whole frame blocks it
 VOID_MAX = 0.12              # at most this share of a view may be what the scan never captured
-CEIL_PITCH = 6.0             # deg the aim drops when the scan has no ceiling (its black band stays out)
+CEIL_PITCH = 0.0             # deg the aim drops when the scan has no ceiling (its black band stays out)
 ANCHOR_HALF = 0.8           # m: the working area a push / pull must show whole
 ARC_R = (2.3, 2.7, 3.1, 3.5)
 ARC_SWEEP = (30.0, 40.0, 50.0, 65.0)     # an orbit: wider sweeps where the speed limit allows
@@ -175,6 +175,8 @@ TYPE_SIGNS = {"kitchen": ("stove", "oven", "sink", "refrigerator", "dishwasher",
 TYPE_WHOLE = ("bed", "sofa")    # ... framed whole, when the room has one
 TOP_VOID_MAX = 0.15           # at most this share of the frame's top fifth may be uncaptured (a missing ceiling; 0.3 let the Home Scan kitchen band through)
 TOP_TILT = (3.0, 6.0)         # deg a shot tilts down to clear it, before it is dropped
+PITCH_MAX_ROOM = 12.0         # deg down at most, every tilt included (user 2026-11-17: Home Scan v11 "angles too low" - 16-30 deg)
+PITCH_MAX_RISE = 20.0         # a rise / descend at its steepest
 BAND_MARGIN = 0.05            # m: the frame's top edge stays this far under where the scan's walls end
 BAND_TILT_MAX = 6.0           # deg a shot may tilt down to keep it there (no ceiling), else it goes
 WHOLE_GAP = 0.4               # m: labelled pieces of one bed / sofa this close are one piece
@@ -603,8 +605,8 @@ class RoomMoves:
         # the tour's caps are hard (v10: three rises past a cap of two): a kind at its cap only when
         # nothing else will do
         capped = [m for t in tiers for m in t if self.at_cap(m.kind)]
-        if capped:
-            tiers = [[m for m in t if not self.at_cap(m.kind)] for t in tiers] + [capped]
+        if capped:                                 # (a further shot is dropped rather than repeat one)
+            tiers = [[m for m in t if not self.at_cap(m.kind)] for t in tiers] + ([capped] if covered is None else [])
         tiers = [t for t in tiers if t]
         if not tiers:
             return None, [f"room_no_move:{room}" if kind != "detail" else f"room_no_detail:{room}"]
@@ -679,6 +681,8 @@ class RoomMoves:
         sp = self.space
         ends = (m.eye[-1],) if m.kind == "enter" else (m.eye[0], m.eye[-1])
         if any(sp.clearance(q) < WALL_CLEAR or self.in_doorway(q) for q in ends):
+            return False
+        if self.pitch_room(m) < -0.5:            # never steeper than the cap (PITCH_MAX_ROOM / _RISE)
             return False
         return self.moves_enough(m, dur) and (self.framed(m) or getattr(self, "relaxed", False))
 
@@ -1500,9 +1504,18 @@ class RoomMoves:
             pts_ = np.concatenate([m.eye for m in cands])
             c = pts_.mean(0)
             self.occ.focus(c, float(np.linalg.norm(pts_ - c, axis=1).max()) + OCC_NEAR + EXIT_AHEAD)
-        best, _ = self._check(room, cands, dur)
+        best, least = self._check(room, cands, dur)
         if best is None:
-            return None, [f"exit_blocked:{room}"]
+            # why (2026-11-17: every exit "blocked", no reason): too fast, clutter at the lens, the
+            # frame's edge, the scan's black, the band under a missing ceiling
+            if least is None:
+                why = "speed"
+            else:
+                why = (f"edge{least.why['edge_cover']}" if "edge_cover" in least.why
+                       else f"band{least.why['band_deficit_deg']}" if "band_deficit_deg" in least.why
+                       else f"void{least.why['void']}" if least.why.get("void", 0) > VOID_MAX
+                       else f"occ{round(least.occ, 2)}")
+            return None, [f"exit_blocked:{room}:{why}:{len(cands)}"]
         best.why.update(candidates=len(cands), occlusion=round(best.occ, 3))
         self.record(best)
         return best, []
@@ -1860,6 +1873,16 @@ class RoomMoves:
                       "sweep_deg": HOLD_SWEEP})
         return m
 
+    def pitch_room(self, m: Move) -> float:
+        """Degrees the move may still tilt down before PITCH_MAX_ROOM (PITCH_MAX_RISE for a rise /
+        descend): its steepest look so far, against the cap."""
+        e3 = m.eye3
+        d = m.tgt - e3
+        h = np.linalg.norm(d[:, :2], axis=1)
+        steepest = float(np.degrees(np.arctan2(-d[:, 2], np.maximum(h, 1e-6))).max())
+        cap = PITCH_MAX_RISE if m.kind in ("rise", "descend") else PITCH_MAX_ROOM
+        return cap - steepest
+
     def band_deficit(self, m: Move) -> float:
         """Degrees the view's top edge rises past where the scan's walls end (Space.wall_top), at
         its start, middle and end, across the frame - 0 when the scene has its ceiling."""
@@ -1897,7 +1920,7 @@ class RoomMoves:
         # thinned void render misses a thin band); a few degrees down, else the move goes
         deficit = self.band_deficit(m)
         if deficit > 0:
-            if deficit > BAND_TILT_MAX or m.kind in ("detail", "link"):
+            if deficit + 0.5 > min(BAND_TILT_MAX, self.pitch_room(m)) or m.kind in ("detail", "link"):
                 m.why["band_deficit_deg"] = round(deficit, 1)
                 return 1.0
             old = m.tgt
@@ -1918,7 +1941,10 @@ class RoomMoves:
         if top <= TOP_VOID_MAX or m.kind in ("detail", "link"):
             return whole
         h = np.linalg.norm(m.tgt[:, :2] - m.eye, axis=1)
+        room = self.pitch_room(m)
         for deg in TOP_TILT:
+            if deg > room:                       # never past the tilt cap: the move fails instead
+                break
             tgt = m.tgt.copy()
             tgt[:, 2] -= h * math.tan(math.radians(deg))
             w2, t2 = worst(tgt)
