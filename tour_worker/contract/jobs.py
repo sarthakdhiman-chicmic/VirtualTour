@@ -23,6 +23,7 @@ class TourRenderRequest(_Request):
     plan: dict[str, Any]                      # the plan JSON as the backend sent it (hashed as-is)
     output_prefix: str = Field(min_length=1)  # where master.mp4 goes, e.g. s3://bucket/tours/<id>/
     image_urls: dict[str, str] = Field(default_factory=dict)   # optional: plan URI -> fetch URL
+    stills: bool = False                      # SOW EX-03: Instagram feed JPEGs, one a room (<output_prefix>stills/)
 
 
 class SegmentImage(BaseModel):
@@ -187,6 +188,7 @@ class TourRenderResult(BaseModel):
     warnings: list[Any]
     hevc_uri: Optional[str] = None            # the H.265 copy, when the plan asked for one
     mls_uri: Optional[str] = None             # the MLS copy (no captions), when the plan asked for one
+    stills: Optional[list[dict[str, Any]]] = None   # SOW EX-03: [{uri, room_key, room_type, t}] when asked
     timings: Optional[dict[str, Any]] = None  # tour_worker.timing: seconds per stage, total, host
     error: None = None
 

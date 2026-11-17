@@ -181,6 +181,19 @@ def run_tour(request: dict, storage, workdir: str, settings: Settings | None = N
         if wants_mls(plan):
             mls_uri = output_prefix + "master_mls.mp4"
             storage.put(mls_path, mls_uri)
+        stills = None
+        if request.get("stills"):                  # SOW EX-03: Instagram feed stills, one a room
+            from tour_worker.render.stills import feed_stills
+            try:
+                made = feed_stills(mls_path if wants_mls(plan) else out_path, plan, os.path.join(workdir, "stills"))
+                stills = []
+                for st in made:
+                    uri = output_prefix + "stills/" + st["name"]
+                    storage.put(st["path"], uri)
+                    stills.append({"uri": uri, "room_key": st["room_key"], "room_type": st["room_type"], "t": st["t"]})
+            except Exception as e:                 # stills never fail a tour
+                warnings.append(f"stills_failed:{type(e).__name__}")
+                stills = None
         sw.lap("upload")
         if warnings:
             report.note("warnings: " + ", ".join(sorted(set(map(str, warnings))))[:300])
@@ -199,6 +212,7 @@ def run_tour(request: dict, storage, workdir: str, settings: Settings | None = N
             "warnings": warnings,
             "hevc_uri": hevc_uri,
             "mls_uri": mls_uri,
+            "stills": stills,
             "timings": sw.result(),
             "error": None
         }
