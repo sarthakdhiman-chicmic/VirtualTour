@@ -216,6 +216,10 @@ def run_plan(request: dict, storage, workdir: str) -> dict:
         fallback = [f"scene_fallback:{out['error']['code']}"]   # the photos instead
     inputs, assets, warnings, dusk = _fetch_photos(req, storage, workdir)
     warnings = fallback + warnings
+    if req.scenes:                                 # SOW IN-04: untyped photos named from what they show
+        from tour_worker.scoring.autoroom import fill_room_types
+        inputs, auto = fill_room_types(inputs, req.scenes)
+        warnings += auto
     sw.lap("fetch")
     if not inputs:
         return failure("image_fetch_failed",
