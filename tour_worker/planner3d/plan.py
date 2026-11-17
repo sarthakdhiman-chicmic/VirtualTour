@@ -134,8 +134,12 @@ def _walk_order(space, selected: list, stage: dict[str, str], rtype: dict[str, s
         group = blocks[i:j]
         # each stage opens on its narrative first room - the living room, the primary bedroom
         # (user 2026-11-16: the primary bedroom came after the other bedrooms, by walking distance)
-        ordered, prev = [group[0]], group[0][0]
-        group = group[1:]
+        lead = 0
+        if not out:                              # the tour opens in THE living room (user 2026-11-17: the
+            lead = next((n for n, (k, _) in enumerate(group)    # Home Scan opened on its family room)
+                         if canon(rtype.get(k)) == "living_room"), 0)
+        ordered, prev = [group[lead]], group[lead][0]
+        group = group[:lead] + group[lead + 1:]
         while group:
             k = min(range(len(group)), key=lambda n: dist(prev, group[n][0]))
             ordered.append(group.pop(k))

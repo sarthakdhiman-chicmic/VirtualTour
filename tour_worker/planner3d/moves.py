@@ -63,7 +63,7 @@ OPENING_GLIDE = 1.5          # the tour opens by moving into the home
 # front of it; a glide or pan looks down a room, where walls 1.2 m+ away are the room itself
 # (user 2026-11-16, Home Scan: shots closing in on walls the floor plan does not hold - a poorly
 # captured wall is no "tall" cell - so the rendered check looks 1.8 m out for every room move)
-OCC_NEAR_KIND = {"corner_sweep": 1.8, "panorama": 1.5, "descend": 1.8, "truck": 2.0, "rise": 1.8, "exit": 1.5, "walkway": 2.0, "arc": 2.0, "room_pan": 1.8, "hold_pan": 1.8, "push": 1.8, "pull": 1.8, "reveal": 1.8, "link": 1.2, "enter": 1.5, "glide": 1.8, "pan": 1.2, "detail": 0.7}
+OCC_NEAR_KIND = {"corner_sweep": 1.8, "panorama": 1.5, "descend": 1.8, "truck": 2.0, "rise": 1.8, "exit": 0.9, "walkway": 2.0, "arc": 2.0, "room_pan": 1.8, "hold_pan": 1.8, "push": 1.8, "pull": 1.8, "reveal": 1.8, "link": 1.2, "enter": 1.5, "glide": 1.8, "pan": 1.2, "detail": 0.7}
 PAN_SWEEP = 50.0
 AIM_Z_MAX = EYE - 0.10        # a room shot never looks up: not at a ceiling, not at upper cabinets
 LOW_TOP = 1.4                 # m: an object whose top is below this is a surface a room shot may aim at
@@ -187,6 +187,8 @@ FEATURES = {"fireplace": 1.0, "windowpane": 0.8, "kitchen island": 0.8, "bathtub
             "cabinet": 0.15}
 # of a view's middle on the shot's own room: under this the shot loses score (OWN_W)
 OWN_SHARE = {"corner_sweep": 0.5, "panorama": 0.5, "descend": 0.35, "truck": 0.5, "rise": 0.35, "walkway": 0.35, "arc": 0.35, "room_pan": 0.5, "push": 0.5, "pull": 0.5, "glide": 0.5}
+RELAX = 0.8                   # the second try: room to breathe x this ...
+OWN_MIN_RELAXED = 0.35        # ... and this much of its own room in view
 OWN_MIN = 0.5                 # a room shot's view is at least half its own room
 OWN_FREE = ("enter", "reveal", "link", "pan", "detail", "exit")   # they look in from outside it, or back over the home
 COVER_OWN_MIN = 0.6           # a room's further shot shows mostly that room (not the hallway beyond)
@@ -413,7 +415,24 @@ class RoomMoves:
     def __init__(self, space, occlusion=None):
         self.space, self.occ = space, occlusion
 
-    def best(self, room: str, dur: float, *, earlier=(), prev=None, piece_rank: int = 0,
+    def best(self, room: str, dur: float, **kw) -> tuple[Move | None, list[str]]:
+        """_best; a room with no view under the full rules gets a second try with the softest ones
+        eased (room to breathe x RELAX, own-room share OWN_MIN_RELAXED, framing not required) - a
+        room skipped is worse than a room shown a little closer (v10: the green house's dining
+        room, study and hall had no shot)."""
+        mv, w = self._best(room, dur, **kw)
+        if mv is None and kw.get("covered") is None and kw.get("kind", "room") != "detail":
+            self.relaxed = True
+            try:
+                mv, w2 = self._best(room, dur, **kw)
+            finally:
+                self.relaxed = False
+            if mv is not None:
+                mv.why["relaxed"] = True
+                return mv, [f"room_rules_relaxed:{room}"] + [x for x in w2 if not x.startswith("room_no")]
+        return mv, w
+
+    def _best(self, room: str, dur: float, *, earlier=(), prev=None, piece_rank: int = 0,
              opening: bool = False, closing: bool = False, kind: str = "room",
              next_room: str | None = None, enter_route=None, after_exit: bool = False,
              final: bool = False, follows_link: bool = False, covered: np.ndarray | None = None) -> tuple[Move | None, list[str]]:
@@ -542,7 +561,7 @@ class RoomMoves:
                     k = len(m.eye) // 2
                     o = sp.own_share(room, m.eye[k], math.atan2(*(m.tgt[k][:2] - m.eye[k])[::-1]), HFOV)
                     m.why["own_share"] = round(o, 2)
-                    if o >= OWN_MIN:
+                    if o >= (OWN_MIN_RELAXED if getattr(self, "relaxed", False) else OWN_MIN):
                         out.append(m)
                 return out
             tiers = ([own_room(roomy(t)) for t in tiers] if strict
@@ -581,6 +600,11 @@ class RoomMoves:
         if used:                                   # (any kind: a room is not two trucks either)
             again = [m for t in tiers for m in t if m.kind in used]
             tiers = [[m for m in t if m.kind not in used] for t in tiers] + [again]
+        # the tour's caps are hard (v10: three rises past a cap of two): a kind at its cap only when
+        # nothing else will do
+        capped = [m for t in tiers for m in t if self.at_cap(m.kind)]
+        if capped:
+            tiers = [[m for m in t if not self.at_cap(m.kind)] for t in tiers] + [capped]
         tiers = [t for t in tiers if t]
         if not tiers:
             return None, [f"room_no_move:{room}" if kind != "detail" else f"room_no_detail:{room}"]
@@ -644,7 +668,8 @@ class RoomMoves:
             m.why["front_m"] = (round(self.front(m.eye[0], m.tgt[0]), 2), round(self.front(m.eye[-1], m.tgt[-1]), 2))
         f0, f1 = m.why["front_m"]
         aim = float(np.linalg.norm(m.tgt[-1][:2] - m.eye[-1]))
-        return f0 >= (FRONT_MIN_ENTER if m.kind == "enter" else FRONT_MIN) and f1 >= FRONT_MIN and aim >= AIM_MIN
+        k = RELAX if getattr(self, "relaxed", False) else 1.0
+        return f0 >= k * (FRONT_MIN_ENTER if m.kind == "enter" else FRONT_MIN) and f1 >= k * FRONT_MIN and aim >= k * AIM_MIN
 
     def _good(self, m: Move, dur: float) -> bool:
         """A room shot is seen to move, never starts or ends in a doorway (a walk-in may start in
@@ -655,7 +680,7 @@ class RoomMoves:
         ends = (m.eye[-1],) if m.kind == "enter" else (m.eye[0], m.eye[-1])
         if any(sp.clearance(q) < WALL_CLEAR or self.in_doorway(q) for q in ends):
             return False
-        return self.moves_enough(m, dur) and self.framed(m)
+        return self.moves_enough(m, dur) and (self.framed(m) or getattr(self, "relaxed", False))
 
     def _points(self, room: str, mask: np.ndarray) -> np.ndarray:
         """Where shots may start and end: spread over the whole space a shot may move through, and
@@ -1263,6 +1288,14 @@ class RoomMoves:
                 cost += DOLLY_RUN_W
         m.why["sequence_cost"] = round(cost, 2)
         return cost
+
+    def at_cap(self, kind: str) -> bool:
+        if kind in FLIGHT:
+            return False
+        hist = self.__dict__.get("_history", [])
+        uses = sum(1 for k, _ in hist if k == kind)
+        n_tour = max(getattr(self, "tour_shots", 9), 1)
+        return uses >= KIND_CAP.get(kind, 2) or uses + 1 > max(1, math.ceil(KIND_SHARE * n_tour))
 
     @staticmethod
     def sinks(m: Move) -> bool:
@@ -1908,7 +1941,7 @@ class RoomMoves:
             worst = max(worst, self.occ.cover(e, t, HFOV, m.piece, OCC_NEAR_KIND.get(m.kind, OCC_NEAR)))
             if worst > MAX_OCC:                       # already out: the other poses cannot bring it back
                 break
-            if m.kind not in ("link", "detail"):
+            if m.kind not in ("link", "detail", "exit"):     # (an exit flies past door frames)
                 # a door frame or a wall at the frame's edge, right at the lens (user 2026-11-16, Krk:
                 # the bedroom shot ended with the door frame over a quarter of the frame)
                 edge = self.occ.cover(e, t, HFOV, m.piece, EDGE_NEAR, region="full")
