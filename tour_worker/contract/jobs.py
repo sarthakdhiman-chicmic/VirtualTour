@@ -56,6 +56,24 @@ class MusicTrackInput(BaseModel):
     s3_uri: str
     sha256: str
     analysis: dict[str, Any]
+    licence: Optional["MusicLicence"] = None    # SOW MU-06: kept per track, echoed per plan (not in the plan)
+
+
+class MusicLicence(BaseModel):
+    """SOW MU-06: "every track cleared for commercial use inside an automated video product, with
+    licence proof stored per track". What the music library holds about a track's licence; the
+    plan job echoes it with the plan it was used in (music_licence), so every tour that used a
+    track can be traced to its proof."""
+    model_config = ConfigDict(extra="allow")
+    licence_id: str                           # the library's / provider's licence reference
+    provider: str                             # who licensed it (Artlist, Epidemic, an artist, ...)
+    licence_type: str                         # e.g. "commercial_automated_video"
+    commercial_use: bool                      # cleared for use inside an automated video product
+    proof_uri: Optional[str] = None           # where the licence document / receipt is stored
+    expires: Optional[str] = None             # ISO date, when the licence lapses
+
+
+MusicTrackInput.model_rebuild()
 
 
 class PlanOptions(BaseModel):
@@ -219,6 +237,7 @@ class TourPlanResult(BaseModel):
     seconds: float
     timings: Optional[dict[str, Any]] = None  # tour_worker.timing: seconds per stage, total, host
     planner_3d: Optional[dict[str, Any]] = None   # a 3D tour: the scene as read, rooms, why each shot
+    music_licence: Optional[dict[str, Any]] = None   # SOW MU-06: the licence of the track the plan used
 
 
 class SegmentRegion(BaseModel):

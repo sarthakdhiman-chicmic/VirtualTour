@@ -155,7 +155,22 @@ def _run_plan_3d(req: TourPlanRequest, storage, workdir: str, sw, t0: float) -> 
     summary["photos"] = 0
     return {"status": "completed", "plan": plan_dict, "plan_hash": plan.provenance.plan_hash,
             "scoring": summary, "warnings": label_warnings, "planner_3d": rep,
-            "seconds": round(time.time() - t0, 2), "timings": sw.result()}
+            "music_licence": _licence(req, plan), "seconds": round(time.time() - t0, 2), "timings": sw.result()}
+
+
+def _licence(req, plan) -> dict | None:
+    """SOW MU-06: the licence of the track the plan uses (None: no music, or the library sent none).
+    Unlicensed use of a track is warned, never silent."""
+    mt = getattr(req, "music_track", None)
+    if mt is None or getattr(plan, "music", None) is None:
+        return None
+    if mt.licence is None:
+        return {"track_id": mt.track_id, "licence": None, "warning": "music_licence_missing"}
+    lic = mt.licence.model_dump()
+    out = {"track_id": mt.track_id, "licence": lic}
+    if not lic.get("commercial_use"):
+        out["warning"] = "music_not_cleared_for_commercial_use"
+    return out
 
 
 def _scoring_summary(report) -> dict:
@@ -224,4 +239,4 @@ def run_plan(request: dict, storage, workdir: str) -> dict:
 
     return {"status": "completed", "plan": plan_dict, "plan_hash": plan.provenance.plan_hash,
             "scoring": _scoring_summary(report), "warnings": warnings,
-            "seconds": round(time.time() - t0, 2), "timings": sw.result()}
+            "music_licence": _licence(req, plan), "seconds": round(time.time() - t0, 2), "timings": sw.result()}
