@@ -7,6 +7,8 @@ for both: only the base URL and the key differ.
   POST /run           {"input": {...}, "webhook"?: url}  -> {"id", "status": "IN_QUEUE"}
   POST /runsync       same body; waits up to RUNSYNC_TIMEOUT_S -> the /status body
   GET  /status/{id}   -> {"id", "status", "delayTime"?, "executionTime"?, "output"?, "error"?}
+                      ?wait=<s>: held open until the job ends (at most STATUS_WAIT_MAX_S), so a
+                      client gets the result the moment it is ready (a long poll)
   POST /cancel/{id}   -> {"id", "status"} (only a queued job can be cancelled)
   GET  /health        -> {"jobs": {...}, "workers": {...}, "version", ...} (no key needed)
 
@@ -143,7 +145,9 @@ def create_app(settings: Settings | None = None, store: JobStore | None = None) 
         return store.wait(job.id, settings.runsync_timeout_s)
 
     @router.get("/status/{job_id}", dependencies=[Depends(require_key)])
-    def status(job_id: str):
+    def status(job_id: str, wait: float = 0.0):
+        if wait > 0:
+            return _status_or_404(job_id, store.wait(job_id, min(wait, settings.status_wait_max_s)))
         return _status_or_404(job_id, store.status(job_id))
 
     @router.post("/cancel/{job_id}", dependencies=[Depends(require_key)])

@@ -148,7 +148,7 @@ TYPE_SIGNS = {"kitchen": ("stove", "oven", "sink", "refrigerator", "dishwasher",
               "living_room": ("sofa", "television receiver", "fireplace"), "family_room": ("sofa", "television receiver", "fireplace"),
               "dining_room": ("table",), "home_office": ("desk", "computer", "monitor", "table")}
 TYPE_WHOLE = ("bed", "sofa")    # ... framed whole, when the room has one
-TOP_VOID_MAX = 0.3            # at most this share of the frame's top fifth may be uncaptured (a missing ceiling)
+TOP_VOID_MAX = 0.15           # at most this share of the frame's top fifth may be uncaptured (a missing ceiling; 0.3 let the Home Scan kitchen band through)
 TOP_TILT = (3.0, 6.0)         # deg a shot tilts down to clear it, before it is dropped
 FRAME_W, FRAME_H = 1920, 1080
 # what a view is worth showing (scene labels): a fireplace or a window beats a door

@@ -104,6 +104,24 @@ def test_a_failed_job(make_client):
     assert body["status"] == "FAILED" and body["error"] == err and "output" not in body
 
 
+def test_status_wait_holds_until_the_job_ends(make_client):
+    """GET /status?wait=: the answer comes the moment the job finishes (a long poll), never later
+    than STATUS_WAIT_MAX_S; without wait it answers at once, as before."""
+    gate = threading.Event()
+    c = make_client(settings=Settings(api_key=KEY, status_wait_max_s=0.4),
+                    runner=lambda inp: gate.wait(10) and {"status": "completed"})
+    job_id = c.post("/run", headers=AUTH, json={"input": SEGMENT}).json()["id"]
+    assert c.get(f"/status/{job_id}", headers=AUTH).json()["status"] in ("IN_QUEUE", "IN_PROGRESS")
+    t0 = time.monotonic()
+    body = c.get(f"/status/{job_id}?wait=60", headers=AUTH).json()          # capped at 0.4 s
+    assert body["status"] == "IN_PROGRESS" and 0.3 <= time.monotonic() - t0 < 5
+    threading.Timer(0.2, gate.set).start()
+    t0 = time.monotonic()
+    body = c.get(f"/status/{job_id}?wait=60", headers=AUTH).json()
+    assert body["status"] == "COMPLETED" and time.monotonic() - t0 < 0.4 + 0.3
+    assert c.get("/status/nope?wait=1", headers=AUTH).status_code == 404
+
+
 def test_runsync_waits_and_times_out(make_client):
     gate = threading.Event()
     c = make_client(settings=Settings(api_key=KEY, runsync_timeout_s=0.3),

@@ -32,6 +32,8 @@ The HTTP service (python -m tour_worker.service; handler.py, the RunPod entry, i
                                   survive a restart; unset: in memory only
   JOB_TTL_S            86400      how long a finished job's status is kept (seconds)
   RUNSYNC_TIMEOUT_S    300        how long POST /runsync waits before returning the job's status
+  STATUS_WAIT_MAX_S    85         the longest GET /status?wait= holds a request open (under the
+                                  RunPod proxy's ~100 s limit): the result returns as the job ends
   HOST                 127.0.0.1  address the service listens on (the Docker images set 0.0.0.0)
   PORT                 8000       its port
   SERVICE_PREFIXES     (unset)    extra path prefixes the routes also answer under, comma
@@ -66,6 +68,7 @@ class Settings:
     jobs_dir: str | None = None
     job_ttl_s: float = 86400.0
     runsync_timeout_s: float = 300.0
+    status_wait_max_s: float = 85.0
     host: str = "127.0.0.1"
     port: int = 8000
     service_prefixes: tuple[str, ...] = ()
@@ -96,6 +99,7 @@ class Settings:
             jobs_dir=env.get("JOBS_DIR") or None,
             job_ttl_s=max(0.0, float(env.get("JOB_TTL_S") or 86400)),
             runsync_timeout_s=max(0.0, float(env.get("RUNSYNC_TIMEOUT_S") or 300)),
+            status_wait_max_s=max(0.0, float(env.get("STATUS_WAIT_MAX_S") or 85)),
             host=env.get("HOST") or "127.0.0.1",
             port=int(env.get("PORT") or 8000),
             service_prefixes=tuple("/" + p.strip().strip("/") for p in (env.get("SERVICE_PREFIXES") or "").split(",")
