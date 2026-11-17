@@ -91,3 +91,29 @@ Tests: 476 pass, 4 skipped (`pytest -q`; heavy suites under `tools/safe_run.py`)
 - Photo-tour 4K timing run on the A100 from a cold cache (the client's next-pass ask) not yet done.
 - Renderer design doc, cloud shadows, drone video, social exports (vertical framing parked).
 - Camera feel / motion blur: on by default or not.
+
+## 2026-11-17 — SOW specification sheet: every item started
+
+Against "Articulait Video Tour — SOW Specification Sheet" (Remotion and 2.5D parallax excluded by
+the user). Audit + the work of this pass:
+
+| ID | Status | Where |
+|---|---|---|
+| IN-04 auto room classification | started (untyped photos named from Mask2Former scene summary, flagged room_auto) | scoring/autoroom.py |
+| PS-07 calibration | started (tool; needs 20-30 listings with human hero picks) | tools/scoring/calibrate.py |
+| CM-04 drone clips | started (ClipShot frame source; plan version + planner + uploads next) | render/clip.py |
+| PM-04 shadows | built, off (cloud shadows in sky_drift; user: "lets not do shadows") | motion/sky.py |
+| MU-06 licence per track | started (track licence echoed per plan; backend keeps it per job) | contract/jobs.py MusicLicence |
+| OR-08 render cache | backend: a completed render with the same plan hash is reused | backend virtual_tour/service.py |
+| EX-03 Instagram stills | done (4:5 JPEG a room from each render) | render/stills.py |
+| EX-02 Stories 20 s | fixed (the 60 s floor never passes the tour's ceiling) | planner/allocate.py |
+| EL-02 static gallery | started (every plan carries its gallery; backend delivers it when a render fails) | jobs/plan.py _gallery |
+| BR-03 MLS | started (neutral container metadata on the MLS copy; watermark rules open) | render/direct.py mls_metadata |
+| PT-01/02 player + timeline | backend timeline endpoint from the rendered plan | backend GET /virtual-tour/{id}/timeline |
+| PT-03 timeline edits | started (re-render with reorder / labels / branding / pacing / preset / trim / music) | backend POST /virtual-tour/{id}/rerender |
+| IN-01 / EL-01 / MU-02 backend wiring (3D scene, budget, music library) | not yet | — |
+| CM-09 easings on keyframe / compound paths, TR-01 room adjacency for photos | not yet | — |
+
+Deliberate departures from the sheet (earlier user / client decisions): 3 s music fade (MU-04),
+2.5 s sync drift (MU-03), 0.8 s fades at <= 0.5x the shorter shot (TR-06), detail shots 0.85x
+(TM-06).
