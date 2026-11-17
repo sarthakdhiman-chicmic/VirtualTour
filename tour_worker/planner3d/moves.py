@@ -63,7 +63,7 @@ OPENING_GLIDE = 1.5          # the tour opens by moving into the home
 # front of it; a glide or pan looks down a room, where walls 1.2 m+ away are the room itself
 # (user 2026-11-16, Home Scan: shots closing in on walls the floor plan does not hold - a poorly
 # captured wall is no "tall" cell - so the rendered check looks 1.8 m out for every room move)
-OCC_NEAR_KIND = {"truck": 2.0, "rise": 1.8, "exit": 1.5, "walkway": 2.0, "arc": 2.0, "room_pan": 1.8, "hold_pan": 1.8, "push": 1.8, "pull": 1.8, "reveal": 1.8, "link": 1.2, "enter": 1.5, "glide": 1.8, "pan": 1.2, "detail": 0.7}
+OCC_NEAR_KIND = {"corner_sweep": 1.8, "panorama": 1.5, "descend": 1.8, "truck": 2.0, "rise": 1.8, "exit": 1.5, "walkway": 2.0, "arc": 2.0, "room_pan": 1.8, "hold_pan": 1.8, "push": 1.8, "pull": 1.8, "reveal": 1.8, "link": 1.2, "enter": 1.5, "glide": 1.8, "pan": 1.2, "detail": 0.7}
 PAN_SWEEP = 50.0
 AIM_Z_MAX = EYE - 0.10        # a room shot never looks up: not at a ceiling, not at upper cabinets
 LOW_TOP = 1.4                 # m: an object whose top is below this is a surface a room shot may aim at
@@ -113,7 +113,7 @@ VOID_MAX = 0.12              # at most this share of a view may be what the scan
 CEIL_PITCH = 6.0             # deg the aim drops when the scan has no ceiling (its black band stays out)
 ANCHOR_HALF = 0.8           # m: the working area a push / pull must show whole
 ARC_R = (2.3, 2.7, 3.1, 3.5)
-ARC_SWEEP = (30.0, 40.0, 50.0)
+ARC_SWEEP = (30.0, 40.0, 50.0, 65.0)     # an orbit: wider sweeps where the speed limit allows
 HOLD_SWEEP = 25.0
 NO_AIM = ("door", "curtain", "windowpane", "blind")   # never what a room shot ends on
 REVEAL_SWING = 40.0           # deg: the most a reveal turns (from down its path onto the next room)
@@ -144,12 +144,24 @@ TWO_BACK_W = 0.4              # the kind of two shots back                (2D: -
 SAME_SIDE_W = 0.8             # sideways the same way as the previous shot (2D: -2.0, sides alternate)
 USED_DIR_W = 0.4              # per earlier use of the kind, same way      (2D: -1.0)
 OVERUSE_W = 0.6               # per use of a kind past its second          (2D: -1.5)
-DOLLY_KINDS = ("push", "pull", "rise", "enter")   # the moves led by moving in / out (2D: zoom-led)
+DOLLY_KINDS = ("push", "pull", "rise", "descend", "enter")   # the moves led by moving in / out (2D: zoom-led)
 DOLLY_CAP_W = 2.0             # past a third of the tour's shots          (2D: -5.0)
 DOLLY_RUN_W = 0.8             # two in a row                              (2D: -2.0)
 HERO_TRAVEL_W = 0.2           # a hero shot that travels                  (2D: +0.5)
-TRAVELS = ("walkway", "truck", "arc", "rise", "exit", "enter", "push", "pull", "glide")
-MIN_KIND_S = {"room_pan": 3.8, "pan": 3.8, "truck": 3.5, "arc": 3.5, "rise": 2.8}   # shorter: a simpler move
+TRAVELS = ("walkway", "truck", "arc", "rise", "descend", "corner_sweep", "exit", "enter", "push", "pull", "glide")
+MIN_KIND_S = {"room_pan": 3.8, "pan": 3.8, "panorama": 4.5, "truck": 3.5, "arc": 3.5, "rise": 2.8, "descend": 2.8,
+              "corner_sweep": 3.5}
+# the move library mixes (user 2026-11-17: "we need like 10 15 camera moves we mix and match. not all
+# camera moves need to be in every tour"): no kind more than KIND_CAP times a tour (rise / descend
+# once or twice), nor more than KIND_SHARE of its shots - the flight between rooms is exempt
+KIND_CAP = {"rise": 2, "descend": 1, "panorama": 2, "corner_sweep": 2, "truck": 2, "arc": 2, "walkway": 3,
+            "room_pan": 1, "push": 2, "pull": 2, "glide": 2, "hold_pan": 1}
+KIND_SHARE = 0.25
+CAP_W = 3.0                   # past its cap
+FLIGHT = ("exit", "enter", "link", "reveal")      # the moves between rooms (not capped)
+SWEEP_LEN = (1.0, 1.4, 1.8)   # m a corner sweep travels toward the room's middle ...
+SWEEP_TURN = (25.0, 35.0)     # ... turning this much across it
+PANO_SWEEP = (45.0, 80.0)     # deg a panorama turns (the speed limit decides within)   # shorter: a simpler move
 SINK_M = 0.3                  # a view may not drop this much past what it shows (the interest above it)
 # what a room's first shot (the one its label plays on) must show: what makes it that room (user
 # 2026-11-16: the Home Scan's kitchen opened on its dining table - "the camera shows the room its
@@ -174,11 +186,11 @@ FEATURES = {"fireplace": 1.0, "windowpane": 0.8, "kitchen island": 0.8, "bathtub
             "curtain": 0.3, "door": 0.2, "sink": 0.5, "hood": 0.5, "oven": 0.4, "refrigerator": 0.3,
             "cabinet": 0.15}
 # of a view's middle on the shot's own room: under this the shot loses score (OWN_W)
-OWN_SHARE = {"truck": 0.5, "rise": 0.35, "walkway": 0.35, "arc": 0.35, "room_pan": 0.5, "push": 0.5, "pull": 0.5, "glide": 0.5}
+OWN_SHARE = {"corner_sweep": 0.5, "panorama": 0.5, "descend": 0.35, "truck": 0.5, "rise": 0.35, "walkway": 0.35, "arc": 0.35, "room_pan": 0.5, "push": 0.5, "pull": 0.5, "glide": 0.5}
 OWN_MIN = 0.5                 # a room shot's view is at least half its own room
 OWN_FREE = ("enter", "reveal", "link", "pan", "detail", "exit")   # they look in from outside it, or back over the home
 COVER_OWN_MIN = 0.6           # a room's further shot shows mostly that room (not the hallway beyond)
-COMPOSED = ("walkway", "arc", "room_pan", "push", "pull", "truck", "rise")    # the kinds a room's further shots may be
+COMPOSED = ("walkway", "arc", "room_pan", "push", "pull", "truck", "rise", "corner_sweep", "panorama", "descend")    # the kinds a room's further shots may be
 OWN_W = 4.0                                                # score lost per missing share
 FEATURE_W = 0.4
 # close-ups (detail shots, 1.5-2.5 s): fixtures, finishes, decor
@@ -205,6 +217,7 @@ class Move:
     eye_z: float = EYE           # detail moves sit lower / higher than the room eye height
     subject: np.ndarray | None = None   # (8, 3) box of what the shot ends on (planner coords), floor to top
     z: np.ndarray | None = None  # (n,) eye height along the move (a rise); None: eye_z throughout
+    easing: str = "ease_in_out"  # a fly-out speeds up into the cut (ease_in), the fly-in settles (ease_out)
 
     @property
     def zs(self) -> np.ndarray:
@@ -295,9 +308,9 @@ def speeds_of(segments: list[dict], duration_s: float, easing: str = "ease_in_ou
     return float(turn.max()), float(move.max())
 
 
-def trial_speeds(eye2: np.ndarray, tgt: np.ndarray, dur: float, z=EYE) -> tuple[float, float]:
+def trial_speeds(eye2: np.ndarray, tgt: np.ndarray, dur: float, z=EYE, easing: str = "ease_in_out") -> tuple[float, float]:
     segs, _ = fit_pair(np.c_[eye2, np.broadcast_to(np.asarray(z, float), (len(eye2),))], tgt)
-    return speeds_of([{"eye": e, "target": t} for e, t in segs], dur, samples=91)
+    return speeds_of([{"eye": e, "target": t} for e, t in segs], dur, easing=easing, samples=91)
 
 
 def cap_pitch(eye2: np.ndarray, tgt: np.ndarray, pitch_max: float) -> np.ndarray:
@@ -465,6 +478,9 @@ class RoomMoves:
             composed += self._room_pan(room, [pts[k] for k in sorted(own)], rmin, dur, prev, earlier)
             composed += self._truck(room, rmin, dur, prev, earlier)
             composed += self._rise(room, [pts[k] for k in sorted(own)], rmin, dur, prev, earlier)
+            composed += self._descend(room, [pts[k] for k in sorted(own)], rmin, dur, prev, earlier)
+            composed += self._corner_sweep(room, [pts[k] for k in sorted(own)], rmin, dur, prev, earlier)
+            composed += self._panorama(room, [pts[k] for k in sorted(own)], rmin, dur, prev, earlier)
             if composed:
                 found["walkway"].append(composed)
             if anchor is not None:
@@ -719,7 +735,7 @@ class RoomMoves:
                 if best is not None and m.score <= best.score - OCC_W * best.occ:
                     continue
             if "turn_dps" not in m.why:
-                turn, move = trial_speeds(m.eye, m.tgt, dur, m.zs)
+                turn, move = trial_speeds(m.eye, m.tgt, dur, m.zs, m.easing)
                 m.why.update(turn_dps=round(turn, 1), move_mps=round(move, 2))
             if m.why["turn_dps"] > self.turn_budget or m.why["move_mps"] > self.move_budget:
                 continue
@@ -1234,6 +1250,11 @@ class RoomMoves:
             cost += SAME_SIDE_W
         cost += USED_DIR_W * sum(1 for k, d in hist if k == m.kind and d == sd)
         cost += OVERUSE_W * max(0, sum(1 for k, _ in hist if k == m.kind) - 1)
+        if m.kind not in FLIGHT:                  # the library mixes: caps per kind and share
+            uses = sum(1 for k, _ in hist if k == m.kind)
+            n_tour = max(getattr(self, "tour_shots", 9), 1)
+            if uses >= KIND_CAP.get(m.kind, 2) or uses + 1 > max(1, math.ceil(KIND_SHARE * n_tour)):
+                cost += CAP_W
         if m.kind in DOLLY_KINDS:
             cap = math.ceil(max(getattr(self, "tour_shots", 9), 1) / 3)
             if sum(1 for k, _ in hist if k in DOLLY_KINDS) >= cap:
@@ -1248,7 +1269,7 @@ class RoomMoves:
         """The view drops past what it shows (2D: never sink below the interest): its aim ends
         SINK_M lower than it starts while the subject's top is above the end aim. A rise looks down
         on purpose; a push may tilt onto its counter."""
-        if m.kind in ("rise", "push", "pull", "detail", "link") or m.subject is None:
+        if m.kind in ("rise", "descend", "push", "pull", "detail", "link") or m.subject is None:
             return False
         return bool(m.tgt[-1][2] < m.tgt[0][2] - SINK_M and float(m.subject[:, 2].max()) > m.tgt[-1][2])
 
@@ -1274,6 +1295,11 @@ class RoomMoves:
         prior["room_pan"] = -0.5 + 0.5 * min(1.0, spread)  # a pan only where nothing else will do
         if any(c in ("table", "kitchen island", "bed", "coffee table", "pool table") for c in pieces):
             prior["arc"] = 1.0                              # a piece with floor round it: circle it
+        prior["corner_sweep"] = 0.6                         # shows two or three walls in one move
+        if area < 14.0 or spread >= 0.6:
+            prior["panorama"] = 0.5                         # a small room, or things all round it
+        if (open_plan or area >= RISE_AREA) and any(c in ("table", "bed", "kitchen island", "sofa") for c in pieces):
+            prior["descend"] = 0.8                          # come down onto the table / bed
         from tour_worker.scoring.rooms import canon
         if canon(sp.room_types.get(room)) in ("bathroom", "primary_bathroom", "ensuite", "powder_room"):
             prior["pull"], prior["push"] = 1.0, min(prior["push"], 0.0)
@@ -1414,7 +1440,7 @@ class RoomMoves:
                     L = s_[ke] - s_[ks]
                     if not EXIT_LEN[0] <= L <= EXIT_LEN[1] or (ks % 3) or at[ks] not in mine:
                         continue
-                    if L / dur * 1.6 > self.move_budget:          # eased: its peak ~1.5x its mean speed
+                    if L / dur * 2.1 > self.move_budget:          # eased in: its peak ~2x its mean speed
                         continue
                     seg = poly[ks:ke + 1]
                     if min(sp.clearance(q) for q in seg) < rmin * 0.9:
@@ -1430,7 +1456,7 @@ class RoomMoves:
                     if jump_cut(prev, first) or repeats(first, last, earlier):
                         continue
                     score = 1.0 + 0.3 * L + 0.1 * min(sp.view_depth(path[-1], math.atan2(*(tgt[-1][:2] - path[-1])[::-1]), HFOV), 6.0)
-                    cands.append(Move("exit", path, tgt, score, why={"toward": nxt, "travel_m": round(L, 2),
+                    cands.append(Move("exit", path, tgt, score, easing="ease_in", why={"toward": nxt, "travel_m": round(L, 2),
                                                                       "stops_before_m": round(float(s_[k_out] - s_[ke]), 2)}))
             if cands:
                 break
@@ -1489,8 +1515,126 @@ class RoomMoves:
                 core = next((c for c in CORES if fp is not None and in_frame(path[-1], tgt[-1], fp, c)), 0.0)
                 score = 1.5 + 0.3 * plen + 1.0 * core
                 out.append(Move("enter", path, tgt, score, piece=piece, subject=piece_box(fp) if fp is not None else None,
+                                easing="ease_out",
                                 why={"travel_m": round(plen, 2), "after_exit": True, "core_end": core}))
         return out
+
+    def _room_centre(self, room: str) -> np.ndarray:
+        sp = self.space
+        ys, xs = np.nonzero(sp.room_of == sp.room_keys.index(room))
+        return np.array([sp.lo[0] + (xs.mean() + .5) * 0.05, sp.lo[1] + (ys.mean() + .5) * 0.05])
+
+    def _look(self, eye: np.ndarray, heads: np.ndarray) -> np.ndarray:
+        """Targets for headings from eye (one per sample): as far as the room goes (2-6 m), a level look."""
+        sp = self.space
+        out = np.zeros((len(eye), 3))
+        for k, (e, h) in enumerate(zip(eye, heads)):
+            r = float(np.clip(sp.ray(e, h, max_m=6.0), 2.0, 6.0))
+            out[k] = (e[0] + r * math.cos(h), e[1] + r * math.sin(h), EYE - LOOK_DROP)
+        return out
+
+    def _corner_sweep(self, room, pts, rmin, dur, prev, earlier) -> list[Move]:
+        """A corner sweep: from near a corner the camera dollies toward the room's middle while its
+        view turns across it (SWEEP_TURN) - two or three walls in one move (coverage)."""
+        sp = self.space
+        c = self._room_centre(room)
+        mine = sp.spaces.get(room, {room})
+        u = np.linspace(0, 1, SAMPLES)
+        w = u * u * (3 - 2 * u)
+        out = []
+        for p in sorted(pts, key=lambda q: -float(np.linalg.norm(q - c)))[:12]:
+            to = c - p
+            dist = float(np.linalg.norm(to))
+            if dist < 2.0:
+                continue
+            hc = math.atan2(to[1], to[0])
+            for L in SWEEP_LEN:
+                if L > dist - 0.8:
+                    continue
+                p1 = p + L * to / dist
+                eye = np.outer(1 - w, p) + np.outer(w, p1)
+                if any(sp.clearance(q) < rmin or sp.room_at(q) not in mine for q in eye[::7]):
+                    continue
+                for turn in SWEEP_TURN:
+                    for side in (1, -1):
+                        heads = hc + side * math.radians(turn) * (0.5 - w)
+                        tgt = self._look(eye, heads)
+                        first, last = (eye[0], tgt[0]), (eye[-1], tgt[-1])
+                        if jump_cut(prev, first) or repeats(first, last, earlier):
+                            continue
+                        score = 1.0 + 0.25 * L + 0.3 * turn / SWEEP_TURN[-1]
+                        out.append(Move("corner_sweep", eye, tgt, score, why={"travel_m": L, "turn_deg": turn}))
+        return _keep_best(out, 20)
+
+    def _panorama(self, room, pts, rmin, dur, prev, earlier) -> list[Move]:
+        """A panorama: from an open spot near the room's edge, a slow pan across the room
+        (PANO_SWEEP, as wide as the turn limit allows in the time), drifting 0.2 m in."""
+        sp = self.space
+        c = self._room_centre(room)
+        sweep = min(PANO_SWEEP[1], 0.6 * self.turn_budget * dur)
+        if sweep < PANO_SWEEP[0]:
+            return []
+        u = np.linspace(0, 1, SAMPLES)
+        w = u * u * (3 - 2 * u)
+        out = []
+        for p in sorted(pts, key=lambda q: -float(np.linalg.norm(q - c)))[:8]:
+            to = c - p
+            dist = float(np.linalg.norm(to))
+            if dist < 1.5 or sp.clearance(p) < max(rmin, 0.45):
+                continue
+            hc = math.atan2(to[1], to[0])
+            p1 = p + 0.2 * to / dist
+            eye = np.outer(1 - w, p) + np.outer(w, p1)
+            for side in (1, -1):
+                heads = hc + side * math.radians(sweep) * (w - 0.5)
+                tgt = self._look(eye, heads)
+                first, last = (eye[0], tgt[0]), (eye[-1], tgt[-1])
+                if jump_cut(prev, first) or repeats(first, last, earlier):
+                    continue
+                out.append(Move("panorama", eye, tgt, 1.0 + 0.4 * sweep / PANO_SWEEP[1], why={"sweep_deg": round(sweep)}))
+        return _keep_best(out, 12)
+
+    def _descend(self, room, pts, rmin, dur, prev, earlier) -> list[Move]:
+        """A descend: the rise played the other way - from RISE_Z down to eye height while drifting
+        toward a low subject (a dining table, a bed), the tilt easing from RISE_PITCH to level. It
+        comes down ONTO what it shows, never past it."""
+        sp = self.space
+        if "descend" not in self.profile(room)["prior"]:
+            return []
+        top = RISE_Z
+        if "scene_ceiling_missing" not in getattr(sp, "warnings", []):
+            top = min(RISE_Z, float(sp.room_height) - RISE_HEADROOM)
+        if top < EYE + 0.35:
+            return []
+        low = [(np.array([*(pc.frame or pc).centre, (pc.frame or pc).top]), piece_box(pc.frame or pc), pc.cls)
+               for pc in sp.main_pieces(room) if (pc.frame or pc).top <= 1.0]
+        if not low:
+            return []
+        u = np.linspace(0, 1, SAMPLES)
+        w = u * u * (3 - 2 * u)
+        z = top + (EYE - top) * w
+        out = []
+        for p in sorted(pts, key=lambda q: -sp.clearance(q))[:10]:
+            for ta, box, name in low:
+                v = ta[:2] - p
+                d = float(np.linalg.norm(v))
+                if not RISE_DIST[0] <= d <= RISE_DIST[1]:
+                    continue
+                for drift in RISE_DRIFT:
+                    p1 = p + drift * v / d
+                    if sp.clearance(p1) < rmin or sp.room_at(p1) not in sp.spaces.get(room, {room}):
+                        continue
+                    eye = np.outer(1 - w, p) + np.outer(w, p1)
+                    h = np.linalg.norm(ta[:2] - eye, axis=1)
+                    pitch = np.radians(RISE_PITCH + (PITCH_LADDER[0] - RISE_PITCH) * w)
+                    look = np.minimum(np.tan(pitch), (z - 0.2) / np.maximum(h, 0.1))
+                    tgt = np.c_[np.repeat(ta[None, :2], SAMPLES, 0), z - h * look]
+                    first, last = (eye[0], tgt[0]), (eye[-1], tgt[-1])
+                    if jump_cut(prev, first) or repeats(first, last, earlier):
+                        continue
+                    out.append(Move("descend", eye, tgt, 1.1 + 0.2 * drift, subject=box, z=z,
+                                    why={"from_m": round(top, 2), "onto": name, "drift_m": drift}))
+        return _keep_best(out, 12)
 
     def moves_enough(self, m: Move, dur: float) -> bool:
         """A room shot is seen to move: it travels MIN_TRAVEL_PS m/s, or turns MIN_TURN_PS deg/s."""

@@ -267,7 +267,11 @@ def plan_tour_3d(model, scene: dict, rooms: list[dict], listing_id: str, cfg: Pl
         from tour_worker.planner.lengths import length_range
         walls = space.wall_cells(room)
         lead = first_s[room]
-        while wide.get(room, 0) < MAX_WIDE and len(walls) and len(covered.get(room, ())) / len(walls) < COVER_ENOUGH:
+        # a room that flies on to the next (an exit) keeps a shot of its MAX_WIDE for it
+        nxt = selected[i + 1] if i + 1 < len(selected) else None
+        flies = nxt is not None and id(nxt) not in links and nxt.kind != "detail"
+        limit = MAX_WIDE - (1 if flies else 0)
+        while wide.get(room, 0) < limit and len(walls) and len(covered.get(room, ())) / len(walls) < COVER_ENOUGH:
             kind = lead.kind if lead.kind in ("room", "hero") else "room"
             dur = round(max(length_range("room", c3.pacing)[0] * reach, 0.85 * lead.final_duration), 2)
             earlier_ = [p for k in sorted(space.spaces.get(room, {room})) for p in poses.get(k, [])]
@@ -399,7 +403,7 @@ def plan_tour_3d(model, scene: dict, rooms: list[dict], listing_id: str, cfg: Pl
         shots.append(Shot(shot_id=f"s{n:02d}", order=n, asset_id="scene", room_key=sel.room_key,
                           room_type=rtype[sel.room_key], narrative_stage=stage[sel.room_key], role=role,
                           duration_s=round(sel.final_duration, 3),
-                          camera=CameraParams(type="bezier_path", easing="ease_in_out", move=mv.kind, segments=bz,
+                          camera=CameraParams(type="bezier_path", easing=mv.easing, move=mv.kind, segments=bz,
                                               hfov_deg=[HFOV, HFOV]),
                           transition_in=TransitionParams(type="cut", duration_s=0.0)))
         plan_rows.append({"shot_id": f"s{n:02d}", "room_key": sel.room_key, "move": mv.kind,
@@ -428,7 +432,7 @@ def plan_tour_3d(model, scene: dict, rooms: list[dict], listing_id: str, cfg: Pl
 
     # the speed limits on the shots as they will play (after the sync)
     for s, row in zip(shots, plan_rows):
-        turn, move = speeds_of([x.model_dump() for x in s.camera.segments], s.duration_s, "ease_in_out", fps=cfg.fps)
+        turn, move = speeds_of([x.model_dump() for x in s.camera.segments], s.duration_s, s.camera.easing, fps=cfg.fps)
         row.update(played_s=s.duration_s, played_turn_dps=round(turn, 1), played_move_mps=round(move, 2))
         if turn > MAX_TURN_DPS + 0.05 or move > MAX_MOVE_MPS + 0.005:
             warnings.append(f"camera_speed:{s.shot_id}")

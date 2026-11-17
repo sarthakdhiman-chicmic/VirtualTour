@@ -247,7 +247,8 @@ def test_a_kitchen_with_no_piece_pushes_toward_its_counter():
     moves = [s.camera.move for s, _ in kit]
     # reached through a doorway: it may open walking in; its own shots push / pull on the counter.
     # No close-ups in 3D tours (2026-11-16: a scan rarely holds detail at 1 m)
-    assert moves and set(moves) <= {"enter", "push", "pull"} and not [s for s, _ in kit if s.role == "close"]
+    from tour_worker.planner3d.moves import COMPOSED
+    assert moves and set(moves) <= {"enter", "exit", *COMPOSED} and not [s for s, _ in kit if s.role == "close"]
     # a push on the counter is offered with every rule kept (out of the doorways, seen to move, the
     # counter whole with floor in front of it) - a further shot is taken only when it shows walls the
     # walk-in did not (up to 3 a room, by coverage)
@@ -288,7 +289,8 @@ def test_a_hallway_is_a_link_between_two_rooms_not_a_stop():
     assert set(keys[:h]) == {"living"} and keys[h + 1:] and set(keys[h + 1:]) == {"bed"}
     # the bedroom opens walking in when that walk ends with the bed whole and floor under it, else
     # on its best fully framed shot (user 2026-11-16: the subject seen fully)
-    assert plan.shots[h].camera.move == "link" and plan.shots[h + 1].camera.move in ("enter", "walkway", "arc")
+    from tour_worker.planner3d.moves import COMPOSED
+    assert plan.shots[h].camera.move == "link" and plan.shots[h + 1].camera.move in ("enter", *COMPOSED)
     link = rep["shots"][h]
     assert link["from"] == "living" and link["toward"] == "bed" and link["hall_share"] >= 0.3   # through it, the bedroom
     seg = plan.shots[h].camera.segments
