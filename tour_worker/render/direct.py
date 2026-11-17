@@ -501,7 +501,24 @@ def render_direct(plan, workdir: str, warnings: list | None = None, music_path: 
             if wants_mls(plan):
                 _join(plan, [_mls_part(p) for p in parts], os.path.join(td, "parts_mls.txt"), audio,
                       os.path.join(workdir, MLS_NAME))
+                mls_metadata(plan, os.path.join(workdir, MLS_NAME))
     return out_path
+
+
+MLS_COMMENT = "Unbranded MLS copy: no agent branding, contact details or logos"
+
+
+def mls_metadata(plan, path: str) -> None:
+    """SOW BR-03 (started): the MLS copy carries neutral container metadata only - any inherited tags
+    dropped, a title from the listing and a comment saying what the copy is - with the master's mux
+    flags (no edit lists, negative composition offsets: the same sync) and bit-exact muxing (the
+    same bytes every run). The MLS rules themselves (watermark, required fields) are an open client
+    decision."""
+    tmp = path + ".meta.mp4"
+    _run(["ffmpeg", "-y", "-loglevel", "error", "-i", path, "-map", "0", "-c", "copy", "-map_metadata", "-1",
+          "-metadata", f"title={plan.listing_id} (MLS)", "-metadata", f"comment={MLS_COMMENT}",
+          "-fflags", "+bitexact", "-use_editlist", "0", "-movflags", "+faststart+negative_cts_offsets", tmp])
+    os.replace(tmp, path)
 
 
 def _join(plan, parts: list[str], listing: str, audio: str, out_path: str) -> None:

@@ -258,3 +258,9 @@ def test_the_mls_copy_has_no_room_label_and_the_master_does(tmp_path):
     d = np.abs(a - b)
     assert d[300:, :200].max() > 60                         # the label is written in the master only
     assert d[:200].max() <= 3                               # the rest of the frame is the same
+    # SOW BR-03 (started): the MLS copy carries neutral metadata only, and stays in sync (no edit list)
+    import json
+    tags = json.loads(subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format_tags", "-of", "json", mls],
+                                     capture_output=True, check=True).stdout)["format"].get("tags", {})
+    assert tags.get("title") == "bench (MLS)" and "Unbranded MLS copy" in tags.get("comment", "")
+    assert "creation_time" not in tags                      # nothing that changes from run to run
