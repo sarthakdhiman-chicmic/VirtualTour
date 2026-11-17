@@ -49,6 +49,7 @@ VIEW_HEADINGS = 8
 VIEW_HFOV, VIEW_W, VIEW_H = 90.0, 1280, 720
 VIEW_PITCH = 10.0                                         # degrees below level
 SPOTS_PER_ROOM, SPOT_MIN_GAP = 2, 1.2
+SPOT_M2, SPOTS_MIN, SPOTS_MAX = 3.0, 10, 40     # one survey spot per 3 m2 of open floor
 OPAQUE = 0.5
 ZBUF_DOWN = 4
 DEPTH_TOL = (0.03, 0.04)
@@ -117,17 +118,23 @@ def survey_views(space, rooms: list[str], eye_h: float = 1.5) -> list[SurveyView
     VIEW_HEADINGS headings each, looking VIEW_PITCH below level."""
     out = []
     drop = math.tan(math.radians(VIEW_PITCH))
-    for room in rooms:
-        if room not in space.room_keys:
-            continue
-        mask = space.space_mask(room, 0.25) & (space.room_of == space.room_keys.index(room))
-        pts = space.spread_points(mask, n=SPOTS_PER_ROOM, min_gap=SPOT_MIN_GAP)
-        for p in pts:
-            for k in range(VIEW_HEADINGS):
-                a = 2 * math.pi * k / VIEW_HEADINGS
-                d = np.array([math.cos(a), math.sin(a)])
-                out.append(SurveyView(room, np.array([p[0], p[1], eye_h]),
-                                      np.array([p[0] + 2.5 * d[0], p[1] + 2.5 * d[1], eye_h - 2.5 * drop])))
+    # spots spread over the whole open floor, not per room found (2026-11-17: the green house's
+    # labels changed run to run - 218 vs 163 objects - as room discovery moved the spots, and a
+    # bathroom with no open floor got no view at all): the same views every run, close enough
+    # (SPOT_MIN_GAP) that a doorway looks into the small room behind it. Each view keeps the room it
+    # stands in (the per-room capture stats)
+    from tour_worker.planner3d.space import CELL
+    mask = space.free & (space.dt >= 0.25)
+    n = int(np.clip(mask.sum() * CELL * CELL / SPOT_M2, SPOTS_MIN, SPOTS_MAX))
+    pts = space.spread_points(mask, n=n, min_gap=SPOT_MIN_GAP)
+    for p in pts:
+        room = space.room_at(p) if getattr(space, "room_keys", None) else None
+        room = room or (rooms[0] if rooms else "scene")
+        for k in range(VIEW_HEADINGS):
+            a = 2 * math.pi * k / VIEW_HEADINGS
+            d = np.array([math.cos(a), math.sin(a)])
+            out.append(SurveyView(room, np.array([p[0], p[1], eye_h]),
+                                  np.array([p[0] + 2.5 * d[0], p[1] + 2.5 * d[1], eye_h - 2.5 * drop])))
     return out
 
 

@@ -95,6 +95,13 @@ LIVING = ("sofa", "television receiver", "fireplace")
 # a desk, a computer or a monitor - not "screen" / "crt screen": the labels call a wall TV that
 # (user 2026-11-16: a family room's fireplace corner became a "Home Office" from its TV)
 OFFICE = ("desk", "computer", "monitor")
+# what the green house's labels showed in the rooms the user marked (2026-11-17): bathrooms with no
+# toilet / bath / shower labelled - a sink, a towel, a mirror; a study with no desk - books, shelves,
+# a lamp by a table and chairs; a bed labelled "sofa"; a hall's built-ins labelled "refrigerator"
+BATH_SOFT = ("sink", "towel", "mirror")
+STUDY = ("book", "bookcase", "shelf", "lamp")
+COOKING = ("stove", "oven", "hood", "dishwasher", "microwave", "countertop", "kitchen island")
+SMALL_ROOM_M2 = 7.0      # a closed room this small with a sink, towel or mirror is a bathroom
 BED_MIN_M2 = 1.2         # this much bed (all its pieces) makes a bedroom - a stray bath fixture does not
 DINING_TABLE_M2 = 1.2    # a dining table at least this big (a desk is smaller), with chairs
 OPEN_WIDE = 1.3          # m: an opening this wide joins two rooms into one open plan (a door is ~0.8-1.0)
@@ -113,7 +120,11 @@ def _evidence(held: dict[str, list[dict]]) -> dict[str, float]:
             "kitchen": a(KITCHEN), "kitchen_kinds": float(sum(n in held for n in KITCHEN)),
             "living": a(("sofa",)) + 0.5 * a(("armchair",)) + 0.6 * sum(n in held for n in ("television receiver", "fireplace")),
             "table": max((_area(o) for o in held.get("table", [])), default=0.0),
-            "chairs": float(len(held.get("chair", []))), "office": float(sum(n in held for n in OFFICE))}
+            "chairs": float(len(held.get("chair", []))), "office": float(sum(n in held for n in OFFICE)),
+            "bath_soft": float(sum(len(held.get(n, [])) for n in BATH_SOFT)),
+            "study": float(sum(len(held.get(n, [])) for n in STUDY)),
+            "cooking": float(sum(n in held for n in COOKING)),
+            "sofa": a(("sofa",)), "tv": float(sum(n in held for n in ("television receiver", "fireplace")))}
 
 
 def _type_of(space, key: str, ev: dict[str, float]) -> str:
@@ -122,10 +133,27 @@ def _type_of(space, key: str, ev: dict[str, float]) -> str:
     from tour_worker.planner3d.space import CELL
     if ev["bed"] >= BED_MIN_M2:
         return "bedroom"
-    if ev["bath"] >= 1 and ev["bed"] < 0.5:
+    mask_ = space.room_of == space.room_keys.index(key) if key in space.room_keys else None
+    area_ = float(mask_.sum()) * CELL * CELL if mask_ is not None else 0.0
+    # a toilet / bath / shower: a bathroom - unless the room has a sofa (a stray label in the Home
+    # Scan's family room)
+    if ev["bath"] >= 1 and ev["bed"] < 0.5 and ev["sofa"] < 0.8:
         return "bathroom"
-    kitchen = ev["kitchen"] if ev["kitchen_kinds"] >= 2 else 0.0
+    closed = not _open_neighbours(space, key)
+    # a small closed room with a sink, towel or mirror and no cooking fitting: a bathroom
+    if closed and area_ < SMALL_ROOM_M2 and ev["bath_soft"] >= 1 and not ev["cooking"] and ev["bed"] < 0.5:
+        return "bathroom"
+    # a kitchen cooks: two kinds of fitting, one of them for cooking or washing up (a fridge and a
+    # sink alone are a hall's built-ins and a bathroom's basin)
+    kitchen = ev["kitchen"] if ev["kitchen_kinds"] >= 2 and ev["cooking"] >= 1 else 0.0
     living = ev["living"] if ev["living"] >= 0.8 else 0.0
+    # a sofa alone in a closed room, no TV or fireplace: a bed the labels called a sofa
+    if closed and ev["sofa"] >= BED_MIN_M2 and not ev["tv"] and not kitchen and area_ < 16.0:
+        return "bedroom"
+    # a table and chairs with books / shelves / a lamp, off the open plan: a study
+    if ev["table"] > 0 and ev["chairs"] >= 1 and ev["study"] >= 2 and ev["sofa"] < 0.8 \
+            and not (_open_neighbours(space, key) & set(getattr(space, "zone_kinds", {}))):
+        return "home_office"
     if kitchen or living:
         return "kitchen" if kitchen >= living else "living_room"
     if ev["table"] >= DINING_TABLE_M2 and ev["chairs"] >= 3:
@@ -181,7 +209,9 @@ def room_types(space, objects: list[dict], points: dict[str, np.ndarray]) -> dic
     area = {k: float((space.room_of == space.room_keys.index(k)).sum()) * CELL * CELL for k in points}
     beds = [k for k in out if out[k] == "bedroom"]
     if beds:
-        out[max(beds, key=lambda k: area[k] + 2.0 * ev[k]["bed"])] = "primary_bedroom"
+        # the primary bedroom has the biggest bed (a double over a single - the Home Scan's kids'
+        # room had more floor), then the most floor
+        out[max(beds, key=lambda k: (round(ev[k]["bed"] + 0.4 * ev[k]["sofa"], 1), area[k]))] = "primary_bedroom"
     living = [k for k in out if out[k] == "living_room"]
     if len(living) > 1:
         best = max(living, key=lambda k: area[k])
@@ -197,7 +227,7 @@ def room_types(space, objects: list[dict], points: dict[str, np.ndarray]) -> dic
 # an open plan; its furniture does: a sofa group is the living room, a table with chairs round it the
 # dining room, the sink / hob / fridge run the kitchen
 ZONES = {"living": ("sofa", "armchair", "coffee table", "television receiver", "fireplace"),
-         "kitchen": KITCHEN, "bed": ("bed",), "office": OFFICE, "bath": BATH}
+         "kitchen": KITCHEN, "bed": ("bed",), "office": OFFICE}      # (a bathroom is never part of an open plan)
 ZONE_GAP = 1.5           # m: objects of one purpose this close are one zone
 ZONE_MIN = {"living": 0.8, "kitchen": 1.0, "bed": 1.2, "office": 0.3, "bath": 0.1, "dining": 1.0}   # m2 of their furniture
 DINING_REACH = 1.2       # m from a table's edge its chairs stand (pulled out round a round table)
@@ -223,7 +253,11 @@ def zones(objects: list[dict]) -> list[dict]:
     # a dining table: at table height (a coffee table is lower), 3+ chairs pulled up round it
     tables = [o for o in objects if o["class"] == "table" and _area(o) >= 0.4 and float(o.get("top", 0.75)) >= 0.6]
     chairs = [o for o in objects if o["class"] == "chair"]
-    dining = [t for t in tables if sum(_gap(_box(t), _box(c)) <= DINING_REACH for c in chairs) >= 3]
+    books = [o for o in objects if o["class"] in ("book", "bookcase")]
+    # a table with books beside it is a desk (the green house's study), not dining (shelves and
+    # lamps stand by dining tables too)
+    dining = [t for t in tables if sum(_gap(_box(t), _box(c)) <= DINING_REACH for c in chairs) >= 3
+              and sum(_gap(_box(t), _box(o)) <= 1.5 for o in books) < 2]
     groups = [("dining", o) for o in dining]
     for kind, classes in ZONES.items():
         groups += [(kind, o) for o in objects if o["class"] in classes]
@@ -236,7 +270,8 @@ def zones(objects: list[dict]) -> list[dict]:
             clusters = [c for c in clusters if c not in near] + [merged]
         for c in clusters:
             w = np.array([max(_area(o), 0.05) for o in c])
-            if w.sum() < ZONE_MIN[kind] or (kind == "kitchen" and len({o["class"] for o in c}) < 2):
+            if w.sum() < ZONE_MIN[kind] or (kind == "kitchen" and (len({o["class"] for o in c}) < 2
+                                                                     or not any(o["class"] in COOKING for o in c))):
                 continue
             if kind == "living" and not any(o["class"] in LIVING for o in c):
                 continue                          # armchairs alone are a reading corner, not a living room
@@ -343,7 +378,7 @@ def zone_types(space, objects, points: dict, types: dict) -> dict:
             zs = [z for z in every if (space.room_at(z["centre"]) or space.room_near(z["centre"], 1.0)) == k]
             near = min(zs, key=lambda z: float(np.linalg.norm(z["centre"] - p)), default=None)
             if near is not None and np.linalg.norm(near["centre"] - p) <= ZONE_NEAR \
-                    and out[k] not in ("bedroom", "primary_bedroom", "hallway", "bathroom"):
+                    and out[k] not in ("bedroom", "primary_bedroom", "hallway", "bathroom", "home_office"):
                 kind = near["kind"]
         if kind in ZONE_TYPE:
             out[k] = ZONE_TYPE[kind]

@@ -59,7 +59,10 @@ def monkeypatch_module():
 
 def test_the_classes_land_on_the_right_splats(labelled):
     m, sp, lab, stats, seen, sofa, bed = labelled
-    assert stats["views"] == 2 * 2 * 8 and stats["rooms"] == 2
+    # spots spread over the whole open floor (one per SPOT_M2, at least SPOTS_MIN), 8 headings each -
+    # the same views however the rooms are found; each view counts for the room it stands in
+    from tour_worker.scene.semantics import SPOTS_MIN, VIEW_HEADINGS
+    assert stats["views"] >= SPOTS_MIN * VIEW_HEADINGS and stats["views"] % VIEW_HEADINGS == 0 and stats["rooms"] == 2
     top_sofa = sofa & (m.means[:, 2] > 0.75)                 # its top: seen from every spot
     assert lab.mask("sofa")[top_sofa].mean() > 0.8 and lab.mask("bed")[bed & (m.means[:, 2] > 0.55)].mean() > 0.8
     assert lab.mask("sofa")[~sofa].mean() < 0.002 and lab.mask("bed")[~bed].mean() < 0.002
@@ -148,7 +151,8 @@ def test_the_scene_label_job_stores_labels_and_reports_objects(tmp_path, monkeyp
     SceneLabelResult.model_validate(res)
     assert res["labels_uri"] == "s3://b/scenes/home/scene_labels.npz" and res["labels_uri"] in st.puts
     assert "motion_uri" not in res                                       # nothing moves here
-    assert {o["class"] for o in res["objects"]} == {"sofa", "bed"} and res["stats"]["views"] == 32
+    from tour_worker.scene.semantics import SPOTS_MIN, VIEW_HEADINGS
+    assert {o["class"] for o in res["objects"]} == {"sofa", "bed"} and res["stats"]["views"] >= SPOTS_MIN * VIEW_HEADINGS
 
 
 def test_with_no_rooms_given_the_job_finds_and_names_them(tmp_path, monkeypatch):
