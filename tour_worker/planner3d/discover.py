@@ -102,6 +102,7 @@ BATH_SOFT = ("sink", "towel", "mirror")
 STUDY = ("book", "bookcase", "shelf", "lamp")
 COOKING = ("stove", "oven", "hood", "dishwasher", "microwave", "kitchen island")   # (a countertop may be a vanity)
 UTILITY_SIGNS = ("washer",)    # a washing machine: laundry, not toured (the green house's balcony nook)
+LIVING_APART = 4.0       # m: two living rooms this far apart are two; nearer, one seen from two sides
 BED_CLEAR = 1.15         # one bed this much bigger than the next makes its room the primary
 BED_CLOSED_M2 = 0.8      # in a room behind a door, this much bed is enough (labels often get only part of it)
 SMALL_ROOM_M2 = 7.0      # a closed room this small with a sink, towel or mirror is a bathroom
@@ -495,9 +496,10 @@ def finalize_rooms(space, points: dict[str, np.ndarray], objects: list[dict],
         pairs = []
         for (i, j), d in sad.items():
             a, b = keys[i], keys[j]
-            if b not in space.spaces.get(a, {a}):
-                continue                                   # a doorway between them: two rooms
             ta, tb = types[a], types[b]
+            living_pair = {ta, tb} <= {"living_room", "family_room"}
+            if b not in space.spaces.get(a, {a}) and not (living_pair and b in _open_neighbours(space, a)):
+                continue                                   # a doorway between them: two rooms
             zk = getattr(space, "zone_kinds", {})
             # (a non-zone room may fold INTO a zone room - the green house's living end became a
             # "family room" of its own - never the other way)
@@ -506,7 +508,10 @@ def finalize_rooms(space, points: dict[str, np.ndarray], objects: list[dict],
                 # each with its own sofa group and a TV or fireplace: two living rooms, not one (the
                 # Home Scan's wood-stove living room was folded into its family room)
                 ea, eb = (_evidence(_held(objects, [x])[x]) for x in (a, b))
-                if min(ea["sofa"], eb["sofa"]) >= 0.8 and min(ea["tv"], eb["tv"]) >= 1:
+                # ... far apart: two rooms. Near (one open area seen from two sides - the green house's
+                # living room was captioned "Family Room" from its other end, user 2026-11-17): one
+                if min(ea["sofa"], eb["sofa"]) >= 0.8 and min(ea["tv"], eb["tv"]) >= 1 \
+                        and float(np.linalg.norm(points[a] - points[b])) >= LIVING_APART:
                     continue
             if same or "other_room" in (ta, tb):
                 pairs.append((d, i, j))
