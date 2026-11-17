@@ -367,3 +367,10 @@ def test_a_scene_that_fails_falls_back_to_the_photos_or_fails(tmp_path):
     res = run_job({**bad, "photos": photos}, storage=FakeStorage({**PHOTOS, **files}))
     assert res["status"] == "completed" and res["plan"]["mode"] != "cinematic_3d"
     assert "scene_fallback:scene_invalid" in res["warnings"]
+
+
+def test_a_short_platform_tour_fits_its_ceiling():
+    """A 20 s Facebook Stories tour (SOW EX-02) stays within 20 s: the 60 s floor never stretches a
+    tour past its own ceiling."""
+    res = run_job(_request(options={"max_total_s": 20}), storage=FakeStorage())
+    assert res["status"] == "completed" and res["plan"]["total_duration_s"] <= 20.0 + 1e-6

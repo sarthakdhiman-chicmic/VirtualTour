@@ -135,7 +135,9 @@ def allocate_content(
 
     # a standard listing lands at 60 s or more; Fast pacing keeps its pace (its floor is 0.75 x 60):
     # room and hero shots stretch, up to their range's ceiling; detail shots stay short
-    floor = cfg.min_total_s * min(1.0, pace)
+    # (never past the tour's own ceiling: a 20 s Facebook Stories tour was trimmed to 20 s, then
+    # stretched back toward 60 - SOW EX-02)
+    floor = min(cfg.min_total_s * min(1.0, pace), cfg.max_total_s)
     if shots and total() < floor:
         # every room / hero shot grows by the same factor (up to its range's ceiling, a boosted
         # exterior's x its boost): heroes stay longer than rooms, the tour does not even out
