@@ -63,7 +63,7 @@ OPENING_GLIDE = 1.5          # the tour opens by moving into the home
 # front of it; a glide or pan looks down a room, where walls 1.2 m+ away are the room itself
 # (user 2026-11-16, Home Scan: shots closing in on walls the floor plan does not hold - a poorly
 # captured wall is no "tall" cell - so the rendered check looks 1.8 m out for every room move)
-OCC_NEAR_KIND = {"backout": 0.8, "wall_pan": 1.5, "corner_sweep": 1.8, "panorama": 1.5, "descend": 1.8, "truck": 2.0, "rise": 1.8, "exit": 0.9, "walkway": 2.0, "arc": 2.0, "room_pan": 1.8, "hold_pan": 1.8, "push": 1.8, "pull": 1.8, "reveal": 1.8, "link": 1.2, "enter": 1.5, "glide": 1.8, "pan": 1.2, "detail": 0.7}
+OCC_NEAR_KIND = {"backout": 0.5, "wall_pan": 1.5, "corner_sweep": 1.8, "panorama": 1.5, "descend": 1.8, "truck": 2.0, "rise": 1.8, "exit": 0.9, "walkway": 2.0, "arc": 2.0, "room_pan": 1.8, "hold_pan": 1.8, "push": 1.8, "pull": 1.8, "reveal": 1.8, "link": 1.2, "enter": 1.5, "glide": 1.8, "pan": 1.2, "detail": 0.7}
 PAN_SWEEP = 50.0
 AIM_Z_MAX = EYE - 0.10        # a room shot never looks up: not at a ceiling, not at upper cabinets
 LOW_TOP = 1.4                 # m: an object whose top is below this is a surface a room shot may aim at
@@ -867,13 +867,13 @@ class RoomMoves:
     def ends_on_something(self, room: str, eye2, tgt) -> bool:
         """The frame shows something beyond a door, a window or a curtain (a further angle onto a bare
         wall and a door frame - the green house study, v13 - is no shot)."""
-        return self.features_seen(room, eye2, tgt, skip=("door", "windowpane", "curtain", "blind")) >= COVER_FEATURE_MIN
+        return self.features_seen(room, eye2, tgt, skip=("door", "windowpane", "curtain", "blind"), own=True) >= COVER_FEATURE_MIN
 
-    def features_seen(self, room: str, eye2, tgt, skip=()) -> float:
+    def features_seen(self, room: str, eye2, tgt, skip=(), own=False) -> float:
         """Sum of FEATURES weights of the room's (and its open plan's) labelled features in the
         middle 70% of the frame, in front within 8 m."""
         sp = self.space
-        rooms = sp.spaces.get(room, {room})
+        rooms = {room} if own else sp.spaces.get(room, {room})     # own: not things seen through a door
         d = np.asarray(tgt[:2]) - np.asarray(eye2[:2])
         head = math.atan2(d[1], d[0])
         half = math.radians(HFOV) * 0.35
@@ -1660,6 +1660,19 @@ class RoomMoves:
             out[k] = (e[0] + r * math.cos(h), e[1] + r * math.sin(h), EYE - LOOK_DROP)
         return out
 
+    def _room_subject(self, room: str):
+        """(point, box) a shot of the room turns onto: its bed / sofa whole (TYPE_WHOLE), else its
+        main piece, else its middle (no box)."""
+        boxes = self.whole_boxes(room)
+        if boxes:
+            b = max(boxes, key=lambda b: float(np.ptp(b[:, 0]) * np.ptp(b[:, 1])))
+            return b[:, :2].mean(0), b
+        pieces = self.space.main_pieces(room)
+        if pieces:
+            fp = pieces[0].frame or pieces[0]
+            return np.asarray(fp.centre, float), piece_box(fp)
+        return self._room_centre(room), None
+
     def _room_door(self, room: str):
         """Where the room is left for the rest of the home: on the walking route to its nearest
         other room, the last point inside it."""
@@ -1735,19 +1748,39 @@ class RoomMoves:
                 d = d / max(float(np.linalg.norm(d)), 1e-6)       # toward the deep end (no turning)
                 # it stops where the way out still has room in front (a wardrobe or a wall jog by the
                 # door - the green house's primary bedroom ended 0.25 m from one)
-                ok_k = [k for k in range(len(eye)) if self.front(eye[k], eye[k] + 3.0 * d) >= BACKOUT_FRONT[1]]
+                # (and where it turns onto the room's subject, that view is open too - the green
+                # house's bedroom door sits in a corner, a wall stub 0.2-0.5 m off toward the bed)
+                subj_pt, subj_box = self._room_subject(room)
+                ok_k = [k for k in range(len(eye)) if self.front(eye[k], eye[k] + 3.0 * d) >= BACKOUT_FRONT[1]
+                        and self.front(eye[k], np.array([*subj_pt, EYE - 0.25])) >= BACKOUT_FRONT[1]]
                 if not ok_k:
                     continue
                 kk = ok_k[-1]
                 e_ = resample(eye[:kk + 1], SAMPLES) if kk >= 2 else None
                 if e_ is None or float(np.linalg.norm(np.diff(e_, axis=0), axis=1).sum()) < 0.5:
                     continue
-                tgt = np.c_[e_ + 3.0 * d[None, :], np.full(SAMPLES, EYE - 0.25)]
+                # ... and on the way the view turns from the deep end onto the room's subject - its bed
+                # (whole) or its middle (user 2026-11-17: "the camera hugged the left wall and went
+                # back, when all it had to do was pan in between that motion to see the room")
+                h0 = math.atan2(d[1], d[0])
+                h1 = math.atan2(subj_pt[1] - e_[-1][1], subj_pt[0] - e_[-1][0])
+                dh = (h1 - h0 + math.pi) % (2 * math.pi) - math.pi
+                lim = math.radians(0.55 * self.turn_budget * dur)
+                dh = float(np.clip(dh, -lim, lim))
+                ww = np.linspace(0, 1, SAMPLES)
+                ww = ww * ww * (3 - 2 * ww)
+                heads = h0 + dh * ww
+                tgt = np.c_[e_ + 3.0 * np.c_[np.cos(heads), np.sin(heads)], np.full(SAMPLES, EYE - 0.25)]
                 first, last = (e_[0], tgt[0]), (e_[-1], tgt[-1])
                 if jump_cut(prev, first) or repeats(first, last, earlier):
                     continue
                 travel = float(np.linalg.norm(np.diff(e_, axis=0), axis=1).sum())
-                out.append(Move("backout", e_, tgt, 1.2 + 0.3 * travel, why={"travel_m": round(travel, 2), "swing_deg": swing}))
+                mid = float(np.mean([sp.clearance(q) for q in e_[::5]]))       # the open middle, not a wall
+                whole = subj_box is not None and frames_fully(e_[-1], tgt[-1], subj_box, EYE)
+                piece = next(iter(self.space.main_pieces(room)), None)       # what it turns onto is no blockage
+                out.append(Move("backout", e_, tgt, 1.2 + 0.3 * travel + 1.5 * mid + (1.5 if whole else 0.0), piece=piece,
+                                why={"travel_m": round(travel, 2), "swing_deg": swing, "turn_onto_deg": round(math.degrees(dh)),
+                                     "clear_m": round(mid, 2), "subject_whole": whole}))
         return out
 
     def _wall_views(self, room, pts, rmin, dur, prev, earlier, covered) -> list[Move]:
