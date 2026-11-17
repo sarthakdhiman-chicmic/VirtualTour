@@ -20,16 +20,18 @@ from scipy import ndimage as ndi
 
 SEED_CLEAR = 0.6         # m: a room centre is at least this far from anything
 SEED_GAP = 2.0           # m between room centres
-MERGE_SADDLE = 0.7       # neighbours merge when their widest shared opening is this share of their open floor
+MERGE_SADDLE = 0.92      # neighbours merge when their widest opening is nearly as wide as their open floor (one room): an open plan's zones merge later, by type (finalize_rooms)
 MIN_ROOM_M2 = 3.0
 
 
 def room_seeds(space) -> list[np.ndarray]:
     """Room centres: clearance maxima (planner xy), the most open first."""
     from tour_worker.planner3d.space import CELL
-    dt = space.dt
+    dt = _clear(space)
     peak = ndi.maximum_filter(dt, size=max(3, int(1.6 / CELL))) == dt
-    ys, xs = np.nonzero(peak & (dt >= SEED_CLEAR) & space.free)
+    # a centre on the room's floor (under its bed is fine): set_rooms snaps it to free floor
+    near_free = ndi.binary_dilation(space.free, iterations=int(1.5 / CELL))
+    ys, xs = np.nonzero(peak & (dt >= SEED_CLEAR) & near_free)
     out: list[np.ndarray] = []
     for k in np.argsort(-dt[ys, xs], kind="stable"):
         p = np.array([space.lo[0] + (xs[k] + .5) * CELL, space.lo[1] + (ys[k] + .5) * CELL])
@@ -38,9 +40,15 @@ def room_seeds(space) -> list[np.ndarray]:
     return out
 
 
+def _clear(space) -> np.ndarray:
+    """Clearance to the walls (Space.room_dt: furniture is not a wall), else to anything."""
+    return np.maximum(getattr(space, "room_dt", space.dt), space.dt)
+
+
 def _saddles(space, n: int) -> dict[tuple[int, int], float]:
-    """The widest opening (clearance, m) on the boundary between each pair of neighbouring rooms."""
-    lab, dt = space.room_of, space.dt
+    """The widest opening (clearance to the walls, m) on the boundary between each pair of
+    neighbouring rooms."""
+    lab, dt = space.room_of, _clear(space)
     out: dict[tuple[int, int], float] = {}
     for a, b, da, db in ((lab[:, :-1], lab[:, 1:], dt[:, :-1], dt[:, 1:]), (lab[:-1], lab[1:], dt[:-1], dt[1:])):
         m = (a >= 0) & (b >= 0) & (a != b)
@@ -61,7 +69,7 @@ def discover_rooms(space) -> dict[str, np.ndarray]:
         pts = {f"room_{k + 1}": p for k, p in enumerate(seeds)}
         space.set_rooms(pts)
         keys = space.room_keys
-        clear = {i: float(space.dt[space.cell(pts[k])]) for i, k in enumerate(keys)}
+        clear = {i: float(_clear(space)[space.cell(pts[k])]) for i, k in enumerate(keys)}
         area = {i: float((space.room_of == i).sum()) * CELL * CELL for i in range(len(keys))}
         sad = _saddles(space, len(keys))
         merge = [(d / min(clear[i], clear[j]), i, j) for (i, j), d in sad.items()
@@ -89,6 +97,7 @@ LIVING = ("sofa", "television receiver", "fireplace")
 OFFICE = ("desk", "computer", "monitor")
 BED_MIN_M2 = 1.2         # this much bed (all its pieces) makes a bedroom - a stray bath fixture does not
 DINING_TABLE_M2 = 1.2    # a dining table at least this big (a desk is smaller), with chairs
+HALL_WIDE = 1.8          # m wall to wall: a long room this narrow (with nothing else in it) is a hallway
 CAPTURE_MIN = 0.75       # rooms whose survey views the scan covers less than this are not toured
 
 
@@ -101,7 +110,7 @@ def _evidence(held: dict[str, list[dict]]) -> dict[str, float]:
     a = lambda names: sum(_area(o) for n in names for o in held.get(n, []))      # noqa: E731
     return {"bed": a(("bed",)), "bath": float(sum(len(held.get(n, [])) for n in BATH)),
             "kitchen": a(KITCHEN), "kitchen_kinds": float(sum(n in held for n in KITCHEN)),
-            "living": a(("sofa",)) + 0.6 * sum(n in held for n in ("television receiver", "fireplace")),
+            "living": a(("sofa",)) + 0.5 * a(("armchair",)) + 0.6 * sum(n in held for n in ("television receiver", "fireplace")),
             "table": max((_area(o) for o in held.get("table", [])), default=0.0),
             "chairs": float(len(held.get("chair", []))), "office": float(sum(n in held for n in OFFICE))}
 
@@ -131,9 +140,11 @@ def _type_of(space, key: str, ev: dict[str, float]) -> str:
     if not mask.any():
         return "other_room"
     ys, xs = np.nonzero(mask)
-    narrow = float(space.dt[mask].max())
+    narrow = float(_clear(space)[mask].max())
     long_side = max(np.ptp(ys), np.ptp(xs)) * CELL
-    return "hallway" if narrow <= 0.75 and long_side >= 3.0 else "other_room"
+    # clearance to the walls (built-in cupboards along a corridor are walls): a corridor up to
+    # HALL_WIDE wall to wall (the green house's hall, 2026-11-17, ~1.6 m)
+    return "hallway" if narrow <= HALL_WIDE / 2 and long_side >= 3.0 else "other_room"
 
 
 def _held(objects, keys) -> dict[str, dict[str, list[dict]]]:
@@ -186,7 +197,7 @@ def finalize_rooms(space, points: dict[str, np.ndarray], objects: list[dict],
                 o["room"] = merged[o["room"]]
         types = room_types(space, objects, {k: points[k] for k in keys})
         sad = _saddles(space, len(keys))
-        clear = {i: float(space.dt[space.cell(points[k])]) for i, k in enumerate(keys)}
+        clear = {i: float(_clear(space)[space.cell(points[k])]) for i, k in enumerate(keys)}
         pairs = []
         for (i, j), d in sad.items():
             a, b = keys[i], keys[j]

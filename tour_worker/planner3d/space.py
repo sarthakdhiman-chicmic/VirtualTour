@@ -29,6 +29,7 @@ WALL_TOP_MIN = 3                # splats in a 10 cm band of a cell for the wall 
 MIN_PART_M2 = 3.0            # free floor in a part of its own at least this big still counts
 OPAQUE, MAX_SPLAT_M = 0.35, 0.25       # splats that make the floor plan: opaque, not huge background blobs
 BODY = (0.15, 2.0)                     # heights a camera body could hit
+WALL_BAND = (1.4, 1.9)                 # heights only walls (and wardrobes, fridges) reach - under a door's lintel
 FURN_BODY, FURN_TALL = (0.30, 1.0), (1.3, 2.0)
 MIN_PIECE_M2 = 0.25
 # what a room's main piece is, by room type (scoring/rooms.py slugs): composed on first, largest first
@@ -192,6 +193,16 @@ class Space:
         keep = [k + 1 for k, a in enumerate(sizes) if a * CELL * CELL >= MIN_PART_M2] or [1 + int(np.argmax(sizes))]
         self.free = np.isin(lab, keep)
         self.dt = ndi.distance_transform_edt(self.free) * CELL
+        # rooms are bounded by walls, not furniture (user 2026-11-17, the green house: "so many spaces
+        # missed" - its bedrooms and study are mostly bed and wardrobe, their free floor narrow strips
+        # with no room centre, all grown into one "primary bedroom"). The walls-only plan: splats
+        # between head height and a door's lintel (WALL_BAND), so a bed, sofa or table is not a wall
+        # and a doorway stays open; room_dt is the distance to those walls
+        wall = hist((h > WALL_BAND[0]) & (h < WALL_BAND[1]))
+        wall_m = ndi.binary_opening(wall >= 3, iterations=1) | (wall >= 20)
+        room_floor = inside & ~wall_m
+        self.walls = wall_m
+        self.room_dt = ndi.distance_transform_edt(room_floor) * CELL
         self.obst, self.inside = obst_m, inside
         self.shape = (H, W)
         # furniture inputs (body / tall counts, top heights), kept for _furniture
@@ -290,7 +301,10 @@ class Space:
             # costs ~10x crossing an open room, so every cell goes to the room it is reached from
             # without squeezing through a door - wherever in its room the caller put the point
             ok = self.free
-            g, idx, ij = self._graph(ok, weighted=False, step_cost=1.0 / np.maximum(self.dt, 0.08) ** 2)
+            # the cost is the room's clearance to its WALLS (room_dt): a doorway pinches it, a bed does
+            # not - a bedroom's strips round its bed stay the bedroom's
+            clear = np.maximum(getattr(self, "room_dt", self.dt), self.dt)
+            g, idx, ij = self._graph(ok, weighted=False, step_cost=1.0 / np.maximum(clear, 0.08) ** 2)
             _, _, src = dijkstra(g, indices=[idx[c] for c in cells], min_only=True, return_predecessors=True)
             order = {int(idx[c]): k for k, c in enumerate(cells)}
             reached = src >= 0
