@@ -158,6 +158,20 @@ def _run_plan_3d(req: TourPlanRequest, storage, workdir: str, sw, t0: float) -> 
             "music_licence": _licence(req, plan), "seconds": round(time.time() - t0, 2), "timings": sw.result()}
 
 
+def _gallery(report, req) -> list[dict]:
+    """SOW EL-02's last fallback, the static gallery: every scored photo in tour order - the rooms
+    in narrative order, each room's hero first, then its others best first - with its room.
+    Returned with every plan, so a tour whose video cannot be made still has something to show."""
+    uri = {str(p.photo_id): p.uri for p in req.photos}
+    out = []
+    for r in report.rooms:
+        for n, p in enumerate(r.photos):
+            out.append({"photo_id": p.photo_id, "uri": uri.get(str(p.photo_id)), "room_key": r.room_key,
+                        "room_type": r.room_type, "hero": n == 0})
+    order = {k: i for i, k in enumerate(report.sequence)}
+    return sorted(out, key=lambda g: (order.get(g["room_key"], len(order)), not g["hero"]))
+
+
 def _licence(req, plan) -> dict | None:
     """SOW MU-06: the licence of the track the plan uses (None: no music, or the library sent none).
     Unlicensed use of a track is warned, never silent."""
@@ -238,5 +252,5 @@ def run_plan(request: dict, storage, workdir: str) -> dict:
         return plan_failure(e)
 
     return {"status": "completed", "plan": plan_dict, "plan_hash": plan.provenance.plan_hash,
-            "scoring": _scoring_summary(report), "warnings": warnings,
+            "scoring": _scoring_summary(report), "warnings": warnings, "gallery": _gallery(report, req),
             "music_licence": _licence(req, plan), "seconds": round(time.time() - t0, 2), "timings": sw.result()}

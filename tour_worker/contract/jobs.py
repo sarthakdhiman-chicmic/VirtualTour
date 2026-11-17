@@ -238,6 +238,7 @@ class TourPlanResult(BaseModel):
     timings: Optional[dict[str, Any]] = None  # tour_worker.timing: seconds per stage, total, host
     planner_3d: Optional[dict[str, Any]] = None   # a 3D tour: the scene as read, rooms, why each shot
     music_licence: Optional[dict[str, Any]] = None   # SOW MU-06: the licence of the track the plan used
+    gallery: Optional[list[dict[str, Any]]] = None   # SOW EL-02: the photos in tour order (static-gallery fallback)
 
 
 class SegmentRegion(BaseModel):

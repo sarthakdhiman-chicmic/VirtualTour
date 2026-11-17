@@ -374,3 +374,15 @@ def test_a_short_platform_tour_fits_its_ceiling():
     tour past its own ceiling."""
     res = run_job(_request(options={"max_total_s": 20}), storage=FakeStorage())
     assert res["status"] == "completed" and res["plan"]["total_duration_s"] <= 20.0 + 1e-6
+
+
+def test_every_plan_carries_a_static_gallery_in_tour_order():
+    """SOW EL-02's last fallback: the photos in tour order, each room's hero first."""
+    res = run_job(_request(), storage=FakeStorage())
+    g = res["gallery"]
+    assert g and len(g) == len({x["photo_id"] for x in g})
+    seq = res["scoring"]["sequence"]
+    rooms = [x["room_key"] for x in g]
+    assert [k for k in dict.fromkeys(rooms)] == [k for k in seq if k in rooms]
+    for k in set(rooms):
+        assert [x for x in g if x["room_key"] == k][0]["hero"]
