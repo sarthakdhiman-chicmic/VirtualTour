@@ -63,7 +63,7 @@ OPENING_GLIDE = 1.5          # the tour opens by moving into the home
 # front of it; a glide or pan looks down a room, where walls 1.2 m+ away are the room itself
 # (user 2026-11-16, Home Scan: shots closing in on walls the floor plan does not hold - a poorly
 # captured wall is no "tall" cell - so the rendered check looks 1.8 m out for every room move)
-OCC_NEAR_KIND = {"corner_sweep": 1.8, "panorama": 1.5, "descend": 1.8, "truck": 2.0, "rise": 1.8, "exit": 0.9, "walkway": 2.0, "arc": 2.0, "room_pan": 1.8, "hold_pan": 1.8, "push": 1.8, "pull": 1.8, "reveal": 1.8, "link": 1.2, "enter": 1.5, "glide": 1.8, "pan": 1.2, "detail": 0.7}
+OCC_NEAR_KIND = {"wall_pan": 1.5, "corner_sweep": 1.8, "panorama": 1.5, "descend": 1.8, "truck": 2.0, "rise": 1.8, "exit": 0.9, "walkway": 2.0, "arc": 2.0, "room_pan": 1.8, "hold_pan": 1.8, "push": 1.8, "pull": 1.8, "reveal": 1.8, "link": 1.2, "enter": 1.5, "glide": 1.8, "pan": 1.2, "detail": 0.7}
 PAN_SWEEP = 50.0
 AIM_Z_MAX = EYE - 0.10        # a room shot never looks up: not at a ceiling, not at upper cabinets
 LOW_TOP = 1.4                 # m: an object whose top is below this is a surface a room shot may aim at
@@ -88,6 +88,8 @@ ENTER_SHARE = 0.4             # of its first view on the room it enters
 # room to breathe (user 2026-11-13: "to keep the length of a shot it goes too near the walls - going
 # back and wider is better"): with one field of view, closing in on a wall reads as a zoom
 FRONT_MIN = 2.2               # m to the nearest wall or tall thing across the middle third of the frame,
+BREATHE_MIN = 1.3             # m: the least room to breathe, in the smallest rooms
+BREATHE_SHARE = 0.4           # x the room's side (sqrt of its footprint), up to FRONT_MIN / AIM_MIN
 FRONT_MIN_ENTER = 1.5         # at a room shot's start and end (an enter starts in a doorway)
 AIM_MIN = 2.0                 # m from what a room shot aims at, at its end
 OPEN_IN_W = 1.5               # the opening shot: score per m it closes in on its subject
@@ -109,8 +111,8 @@ DOOR_NEAR = 0.4             # m: a room shot never starts or ends this close to 
 WALL_CLEAR = 0.2             # m: nor pressed against a wall
 DOOR_CLEAR = 0.45            # m: a room shot never starts or ends in a doorway (clearance under this)
 EDGE_NEAR, EDGE_MAX = 0.8, 0.12   # anything within EDGE_NEAR m covering EDGE_MAX of the whole frame blocks it
-NEAR_ANY = 1.2                # m: anything this close to the lens ...
-NEAR_ANY_MAX = 0.15           # ... over this share of the frame, at any of NEAR_ANY_POSES, fails a move
+NEAR_ANY = 1.0                # m: anything this close to the lens ...
+NEAR_ANY_MAX = 0.25           # ... over this share of the frame, at any of NEAR_ANY_POSES, fails a move
 NEAR_ANY_POSES = 5
 VOID_MAX = 0.12              # at most this share of a view may be what the scan never captured
 CEIL_PITCH = 0.0             # deg the aim drops when the scan has no ceiling (its black band stays out)
@@ -152,16 +154,17 @@ DOLLY_CAP_W = 2.0             # past a third of the tour's shots          (2D: -
 DOLLY_RUN_W = 0.8             # two in a row                              (2D: -2.0)
 HERO_TRAVEL_W = 0.2           # a hero shot that travels                  (2D: +0.5)
 TRAVELS = ("walkway", "truck", "arc", "rise", "descend", "corner_sweep", "exit", "enter", "push", "pull", "glide")
-MIN_KIND_S = {"room_pan": 3.8, "pan": 3.8, "panorama": 4.5, "truck": 3.5, "arc": 3.5, "rise": 2.8, "descend": 2.8,
+MIN_KIND_S = {"wall_pan": 3.0, "room_pan": 3.8, "pan": 3.8, "panorama": 4.5, "truck": 3.5, "arc": 3.5, "rise": 2.8, "descend": 2.8,
               "corner_sweep": 3.5}
 # the move library mixes (user 2026-11-17: "we need like 10 15 camera moves we mix and match. not all
 # camera moves need to be in every tour"): no kind more than KIND_CAP times a tour (rise / descend
 # once or twice), nor more than KIND_SHARE of its shots - the flight between rooms is exempt
-KIND_CAP = {"rise": 2, "descend": 1, "panorama": 2, "corner_sweep": 2, "truck": 2, "arc": 2, "walkway": 3,
+KIND_CAP = {"wall_pan": 3, "rise": 2, "descend": 1, "panorama": 2, "corner_sweep": 2, "truck": 2, "arc": 2, "walkway": 3,
             "room_pan": 1, "push": 2, "pull": 2, "glide": 2, "hold_pan": 1}
 KIND_SHARE = 0.25
 CAP_W = 3.0                   # past its cap
 FLIGHT = ("exit", "enter", "link", "reveal")      # the moves between rooms (not capped)
+WALL_PAN = 30.0               # deg a coverage pan turns across the unseen wall
 SWEEP_LEN = (1.0, 1.4, 1.8)   # m a corner sweep travels toward the room's middle ...
 SWEEP_TURN = (25.0, 35.0)     # ... turning this much across it
 PANO_SWEEP = (45.0, 80.0)     # deg a panorama turns (the speed limit decides within)   # shorter: a simpler move
@@ -191,14 +194,15 @@ FEATURES = {"fireplace": 1.0, "windowpane": 0.8, "kitchen island": 0.8, "bathtub
             "curtain": 0.3, "door": 0.2, "sink": 0.5, "hood": 0.5, "oven": 0.4, "refrigerator": 0.3,
             "cabinet": 0.15}
 # of a view's middle on the shot's own room: under this the shot loses score (OWN_W)
-OWN_SHARE = {"corner_sweep": 0.5, "panorama": 0.5, "descend": 0.35, "truck": 0.5, "rise": 0.35, "walkway": 0.35, "arc": 0.35, "room_pan": 0.5, "push": 0.5, "pull": 0.5, "glide": 0.5}
+OWN_SHARE = {"wall_pan": 0.5, "corner_sweep": 0.5, "panorama": 0.5, "descend": 0.35, "truck": 0.5, "rise": 0.35, "walkway": 0.35, "arc": 0.35, "room_pan": 0.5, "push": 0.5, "pull": 0.5, "glide": 0.5}
 CONFIDENT_M2 = 0.5            # m2 of a room's own furniture for its rules to be eased
 RELAX = 0.8                   # the second try: room to breathe x this ...
 OWN_MIN_RELAXED = 0.35        # ... and this much of its own room in view
 OWN_MIN = 0.5                 # a room shot's view is at least half its own room
 OWN_FREE = ("enter", "reveal", "link", "pan", "detail", "exit")   # they look in from outside it, or back over the home
 COVER_OWN_MIN = 0.6           # a room's further shot shows mostly that room (not the hallway beyond)
-COMPOSED = ("walkway", "arc", "room_pan", "push", "pull", "truck", "rise", "corner_sweep", "panorama", "descend")    # the kinds a room's further shots may be
+COMPOSED = ("walkway", "arc", "room_pan", "push", "pull", "truck", "rise", "corner_sweep", "panorama", "descend",
+            "wall_pan")    # the kinds a room's further shots may be
 OWN_W = 4.0                                                # score lost per missing share
 FEATURE_W = 0.4
 # close-ups (detail shots, 1.5-2.5 s): fixtures, finishes, decor
@@ -470,6 +474,7 @@ class RoomMoves:
           push              no piece: toward the room's own working surfaces (ANCHORS)
           glide / pan       nothing else exists"""
         sp = self.space
+        self._room_now = room
         type_warn: list[str] = []
         share = PRE_SYNC_SHARE.get(kind, 0.8)
         self.turn_budget, self.move_budget = MAX_TURN_DPS * share, MAX_MOVE_MPS * share
@@ -517,6 +522,8 @@ class RoomMoves:
             composed += self._descend(room, [pts[k] for k in sorted(own)], rmin, dur, prev, earlier)
             composed += self._corner_sweep(room, [pts[k] for k in sorted(own)], rmin, dur, prev, earlier)
             composed += self._panorama(room, [pts[k] for k in sorted(own)], rmin, dur, prev, earlier)
+            if covered is not None:              # a further angle: onto the walls not seen yet
+                composed += self._wall_views(room, [pts[k] for k in sorted(own)], rmin, dur, prev, earlier, covered)
             if composed:
                 found["walkway"].append(composed)
             if anchor is not None:
@@ -565,7 +572,14 @@ class RoomMoves:
                         m.score += COVER_W * new
                         out.append(m)
                 return out
-            tiers = [fresh(roomy(t)) for t in tiers]
+            # how many further angles each rule leaves (user 2026-11-17: "have we abandoned our
+            # coverage policies?" - the green house's rooms got one shot each, and nothing said why)
+            n_all = sum(len(t) for t in tiers)
+            kept = [roomy(t) for t in tiers]
+            n_roomy = sum(len(t) for t in kept)
+            tiers = [fresh(t) for t in kept]
+            self.cover_stats = {"candidates": n_all, "room_to_breathe_and_good": n_roomy,
+                                "composed_own_room_new_walls": sum(len(t) for t in tiers)}
         else:
             # every room shot keeps room to breathe and shows mostly its own room, or the room is not
             # filmed (user 2026-11-16: "close up walls" - the closest-call fallback is gone)
@@ -668,6 +682,13 @@ class RoomMoves:
         if covered is not None:                   # a further shot is a good one or none (user 2026-11-16:
             return None, [f"coverage_no_move:{room}"]     # a held view ended on a blur at the lens)
         hold = self._hold(least, room)
+        # a hold passes the same checks as any shot (v12: four holds, the black band and a card at
+        # the lens in them): a room whose only shot is a bad hold is skipped
+        if self.occ is not None:
+            hold.why.pop("near_lens", None)
+            bad = self._cover(hold) >= 1.0 or self._void(hold) > VOID_MAX
+            if bad:
+                return None, [f"room_only_bad_hold:{room}"] + type_warn
         self.record(hold)
         return hold, [f"view_partly_blocked:{room}"] + type_warn
 
@@ -686,7 +707,25 @@ class RoomMoves:
         f0, f1 = m.why["front_m"]
         aim = float(np.linalg.norm(m.tgt[-1][:2] - m.eye[-1]))
         k = RELAX if getattr(self, "relaxed", False) else 1.0
-        return f0 >= k * (FRONT_MIN_ENTER if m.kind == "enter" else FRONT_MIN) and f1 >= k * FRONT_MIN and aim >= k * AIM_MIN
+        front, aim_min = self.breathe(getattr(self, "_room_now", None))
+        return f0 >= k * (min(FRONT_MIN_ENTER, front) if m.kind == "enter" else front) and f1 >= k * front \
+            and aim >= k * aim_min
+
+    def breathe(self, room) -> tuple[float, float]:
+        """(room in front, distance to the subject) a shot of `room` needs: FRONT_MIN / AIM_MIN in a
+        big room, half the room's side in a small one (BREATHE_MIN at least) - a 3 m bedroom never
+        has 2.2 m in front at both ends (green house v12: 7000 of its further angles failed on it,
+        each room one shot)."""
+        if room is None:
+            return FRONT_MIN, AIM_MIN
+        cache = self.__dict__.setdefault("_breathe", {})
+        if room not in cache:
+            sp = self.space
+            foot = float((sp.room_fill == sp.room_keys.index(room)).sum()) * 0.05 * 0.05 if room in sp.room_keys else 0.0
+            side = math.sqrt(max(foot, 0.0))
+            cache[room] = (float(np.clip(BREATHE_SHARE * side, BREATHE_MIN, FRONT_MIN)),
+                           float(np.clip(BREATHE_SHARE * side, BREATHE_MIN, AIM_MIN)))
+        return cache[room]
 
     def _good(self, m: Move, dur: float) -> bool:
         """A room shot is seen to move, never starts or ends in a doorway (a walk-in may start in
@@ -1594,6 +1633,54 @@ class RoomMoves:
             r = float(np.clip(sp.ray(e, h, max_m=6.0), 2.0, 6.0))
             out[k] = (e[0] + r * math.cos(h), e[1] + r * math.sin(h), EYE - LOOK_DROP)
         return out
+
+    def _wall_views(self, room, pts, rmin, dur, prev, earlier, covered) -> list[Move]:
+        """Coverage's own move (user 2026-11-17: "the shots are just one view of the room ... have
+        we abandoned our coverage policies?" - every other move aims at the room's furniture, which
+        its first shot framed): the biggest stretches of wall not seen yet (by direction from the
+        room's middle); from across the room, with a clear line and room to breathe, a slow
+        WALL_PAN deg pan across each, drifting 0.3 m toward it."""
+        sp = self.space
+        walls = sp.wall_cells(room)
+        unseen = np.setdiff1d(walls, covered) if len(covered) else walls
+        if len(unseen) < 20:
+            return []
+        ii, jj = np.unravel_index(unseen, sp.shape)
+        xy = np.c_[sp.lo[0] + (jj + .5) * 0.05, sp.lo[1] + (ii + .5) * 0.05]
+        c = self._room_centre(room)
+        ang = np.arctan2(xy[:, 1] - c[1], xy[:, 0] - c[0])
+        bins = ((ang + math.pi) / (2 * math.pi) * 12).astype(int) % 12
+        counts = np.bincount(bins, minlength=12)
+        front, aim_min = self.breathe(room)
+        sweep = min(WALL_PAN, 0.55 * self.turn_budget * dur)    # as wide as the turn limit allows in the time
+        if sweep < 15.0:
+            return []
+        u = np.linspace(0, 1, SAMPLES)
+        w = u * u * (3 - 2 * u)
+        out = []
+        for b in np.argsort(-counts)[:3]:
+            if counts[b] < 15:
+                continue
+            T = xy[bins == b].mean(0)
+            for p in pts:
+                v = T - p
+                d = float(np.linalg.norm(v))
+                if not aim_min + 0.3 <= d <= 6.0:
+                    continue
+                hc = math.atan2(v[1], v[0])
+                if sp.ray(p, hc, max_m=d + 0.3) < d - 0.5:      # it sees that wall from here
+                    continue
+                p1 = p + 0.3 * v / d
+                eye = np.outer(1 - w, p) + np.outer(w, p1)
+                for side in (1, -1):
+                    heads = hc + side * math.radians(sweep) * (w - 0.5)
+                    tgt = self._look(eye, heads)
+                    first, last = (eye[0], tgt[0]), (eye[-1], tgt[-1])
+                    if jump_cut(prev, first) or repeats(first, last, earlier):
+                        continue
+                    out.append(Move("wall_pan", eye, tgt, 1.0 + 0.01 * counts[b],
+                                    why={"onto_unseen_wall_cells": int(counts[b])}))
+        return _keep_best(out, 24)
 
     def _corner_sweep(self, room, pts, rmin, dur, prev, earlier) -> list[Move]:
         """A corner sweep: from near a corner the camera dollies toward the room's middle while its

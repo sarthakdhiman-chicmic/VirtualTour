@@ -102,6 +102,7 @@ BATH_SOFT = ("sink", "towel", "mirror")
 STUDY = ("book", "bookcase", "shelf", "lamp")
 COOKING = ("stove", "oven", "hood", "dishwasher", "microwave", "kitchen island")   # (a countertop may be a vanity)
 UTILITY_SIGNS = ("washer",)    # a washing machine: laundry, not toured (the green house's balcony nook)
+BED_CLEAR = 1.15         # one bed this much bigger than the next makes its room the primary
 BED_CLOSED_M2 = 0.8      # in a room behind a door, this much bed is enough (labels often get only part of it)
 SMALL_ROOM_M2 = 7.0      # a closed room this small with a sink, towel or mirror is a bathroom
 BED_MIN_M2 = 1.2         # this much bed (all its pieces) makes a bedroom - a stray bath fixture does not
@@ -141,7 +142,8 @@ def _type_of(space, key: str, ev: dict[str, float]) -> str:
     closed = not _open_neighbours(space, key)
     if closed and ev["bed"] >= BED_CLOSED_M2:
         return "bedroom"
-    if ev["utility"] and not ev["bed"] and ev["sofa"] < 0.8 and area_ < 10.0:
+    if ev["utility"] and not ev["bed"] and ev["sofa"] < 0.8 and area_ < 10.0 and not ev["table"] \
+            and ev["study"] < 2 and not ev["office"]:      # (the green house's study had a "washer")
         return "laundry_room"
     # a toilet / bath / shower: a bathroom - unless the room has a sofa (a stray label in the Home
     # Scan's family room)
@@ -197,6 +199,19 @@ def _open_neighbours(space, key: str) -> set[str]:
     return out
 
 
+def _mattress_m2(space, key: str) -> float:
+    """The room's biggest surface at mattress height (0.35-0.9 m), floor-plan m2 - its bed."""
+    from tour_worker.planner3d.space import CELL
+    top = getattr(space, "_top", None)
+    if top is None or key not in space.room_keys:
+        return 0.0
+    m = (space.room_fill == space.room_keys.index(key)) & (top > 0.35) & (top < 0.9)
+    lab, n = ndi.label(ndi.binary_closing(m, iterations=2))
+    if n == 0:
+        return 0.0
+    return float(np.bincount(lab.ravel())[1:].max()) * CELL * CELL
+
+
 def _held(objects, keys) -> dict[str, dict[str, list[dict]]]:
     held: dict[str, dict[str, list[dict]]] = {k: {} for k in keys}
     for o in objects:
@@ -222,7 +237,15 @@ def room_types(space, objects: list[dict], points: dict[str, np.ndarray]) -> dic
         # footprint, under the furniture too: a big bed takes free floor away from the big room
         foot = {k: float((space.room_fill == space.room_keys.index(k)).sum()) * CELL * CELL
                 if k in space.room_keys else 0.0 for k in beds}
-        out[max(beds, key=lambda k: (round(foot[k], 0), ev[k]["bed"]))] = "primary_bedroom"
+        # the bed measured off the scan (the biggest surface at mattress height): one clearly bigger
+        # (BED_CLEAR) is the primary's - a queen over a twin (the Home Scan's kids' room had more
+        # footprint); otherwise the largest room (the green house's beds are near alike)
+        mat = {k: _mattress_m2(space, k) for k in beds}
+        top2 = sorted(mat.values(), reverse=True)
+        if len(beds) > 1 and top2[1] > 0 and top2[0] >= BED_CLEAR * top2[1]:
+            out[max(beds, key=lambda k: mat[k])] = "primary_bedroom"
+        else:
+            out[max(beds, key=lambda k: (round(foot[k], 0), mat[k]))] = "primary_bedroom"
     living = [k for k in out if out[k] == "living_room"]
     if len(living) > 1:
         best = max(living, key=lambda k: area[k])
@@ -479,6 +502,12 @@ def finalize_rooms(space, points: dict[str, np.ndarray], objects: list[dict],
             # (a non-zone room may fold INTO a zone room - the green house's living end became a
             # "family room" of its own - never the other way)
             same = ta == tb or {ta, tb} <= {"living_room", "family_room"}
+            if same and {ta, tb} <= {"living_room", "family_room"}:
+                # each with its own sofa group and a TV or fireplace: two living rooms, not one (the
+                # Home Scan's wood-stove living room was folded into its family room)
+                ea, eb = (_evidence(_held(objects, [x])[x]) for x in (a, b))
+                if min(ea["sofa"], eb["sofa"]) >= 0.8 and min(ea["tv"], eb["tv"]) >= 1:
+                    continue
             if same or "other_room" in (ta, tb):
                 pairs.append((d, i, j))
         if not pairs:

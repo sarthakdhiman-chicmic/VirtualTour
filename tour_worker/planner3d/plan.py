@@ -280,10 +280,16 @@ def plan_tour_3d(model, scene: dict, rooms: list[dict], listing_id: str, cfg: Pl
             kind = lead.kind if lead.kind in ("room", "hero") else "room"
             dur = round(max(length_range("room", c3.pacing)[0] * reach, 0.85 * lead.final_duration), 2)
             earlier_ = [p for k in sorted(space.spaces.get(room, {room})) for p in poses.get(k, [])]
-            mv, _ = mover.best(room, dur, earlier=earlier_, prev=prev, piece_rank=wide.get(room, 0),
-                               kind=kind, covered=covered.get(room, np.zeros(0, np.int64)),
-                               final=room == last_room)
+            mover.cover_stats = {}
+            mv, cw = mover.best(room, dur, earlier=earlier_, prev=prev, piece_rank=wide.get(room, 0),
+                                kind=kind, covered=covered.get(room, np.zeros(0, np.int64)),
+                                final=room == last_room)
             if mv is None:
+                st = getattr(mover, "cover_stats", {}) or {}
+                seen = len(covered.get(room, ())) / max(len(walls), 1)
+                warnings.append(f"coverage_stopped:{room}:walls_seen_{seen:.2f}:"
+                                + "/".join(str(st.get(k, "-")) for k in ("candidates", "room_to_breathe_and_good",
+                                                                          "composed_own_room_new_walls")))
                 break
             sel = dataclasses.replace(lead, role="detail", kind="room", is_hero=False, is_lead=False,
                                       final_duration=dur, raw_duration=dur)
