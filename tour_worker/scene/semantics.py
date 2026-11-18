@@ -24,7 +24,8 @@ import math
 from dataclasses import dataclass, field
 
 import numpy as np
-from scipy import ndimage as ndi
+
+from tour_worker.scene.voxels import components
 
 FORMAT_VERSION = 1
 # Mask2Former ADE20K classes kept (as id2label spells them, stripped). Everything else is "other".
@@ -221,11 +222,10 @@ def find_objects(local: np.ndarray, labels: np.ndarray, space=None) -> list[dict
             continue
         p = local[idx].astype(np.float64)
         cells = np.floor(p / OBJECT_VOXEL).astype(np.int64)
-        lo = cells.min(0)
-        grid = np.zeros(tuple(cells.max(0) - lo + 1), bool)
-        grid[tuple((cells - lo).T)] = True
-        comp, k = ndi.label(grid, structure=np.ones((3, 3, 3), bool))
-        cid = comp[tuple((cells - lo).T)]
+        # occupied cells only (scene/voxels.py): a stray far-off Gaussian no longer makes a dense
+        # grid of gigabytes
+        cid = components(cells) + 1
+        k = int(cid.max(initial=0))
         for j in range(1, k + 1):
             m = cid == j
             if m.sum() < MIN_OBJECT:

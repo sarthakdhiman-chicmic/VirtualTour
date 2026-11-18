@@ -25,9 +25,9 @@ import math
 from dataclasses import dataclass
 
 import numpy as np
-from scipy import ndimage as ndi
 
 from tour_worker.scene.motion3d import TERMS, MotionField
+from tour_worker.scene.voxels import components, near
 from tour_worker.scene.splat_io import SplatModel
 
 CLASSES = {"curtain": 1, "potted_plant": 2}         # blinds, trees, water: not moved indoors (yet)
@@ -121,16 +121,8 @@ def grow(model: SplatModel, lab: np.ndarray, seen: np.ndarray) -> np.ndarray:
         src = cells[lab == cid]
         if not len(src):
             continue
-        lo = src.min(0) - 1
-        dims = src.max(0) - lo + 2
-        grid = np.zeros(tuple(dims), bool)
-        grid[tuple((src - lo).T)] = True
-        grid = ndi.binary_dilation(grid, structure=np.ones((3, 3, 3), bool))
         cand = (lab == 0) & (seen == 0)
-        c = cells[cand] - lo
-        inb = ((c >= 0) & (c < dims)).all(1)
-        grow = np.zeros(cand.sum(), bool)
-        grow[inb] = grid[tuple(c[inb].T)]
+        grow = near(cells[cand], src)                 # within one cell (26 neighbours), no dense grid
         idx = np.flatnonzero(cand)[grow]
         lab[idx] = cid
     return lab
@@ -145,11 +137,8 @@ def objects(model: SplatModel, lab: np.ndarray) -> list[tuple[int, np.ndarray]]:
         if not len(idx):
             continue
         cells = np.floor(pts[idx] / OBJECT_VOXEL).astype(np.int64)
-        lo = cells.min(0)
-        grid = np.zeros(tuple(cells.max(0) - lo + 1), bool)
-        grid[tuple((cells - lo).T)] = True
-        comp, k = ndi.label(grid, structure=np.ones((3, 3, 3), bool))
-        cid_of = comp[tuple((cells - lo).T)]
+        cid_of = components(cells) + 1
+        k = int(cid_of.max(initial=0))
         groups = []
         for j in range(1, k + 1):
             members = idx[cid_of == j]
@@ -254,11 +243,7 @@ def flame_field(model: SplatModel, local: np.ndarray, fireplaces: list[dict], up
         if len(inside) < FLAME_MIN:
             continue
         cells = np.floor(local[inside] / 0.05).astype(np.int64)
-        c0 = cells.min(0)
-        grid = np.zeros(tuple(cells.max(0) - c0 + 1), bool)
-        grid[tuple((cells - c0).T)] = True
-        comp, n = ndi.label(grid, structure=np.ones((3, 3, 3), bool))
-        cid = comp[tuple((cells - c0).T)]
+        cid = components(cells) + 1
         big = np.bincount(cid)[1:].argmax() + 1
         idx = inside[cid == big]
         if len(idx) < FLAME_MIN:
