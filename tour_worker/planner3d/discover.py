@@ -241,7 +241,10 @@ def room_types(space, objects: list[dict], points: dict[str, np.ndarray]) -> dic
         # the bed measured off the scan (the biggest surface at mattress height): one clearly bigger
         # (BED_CLEAR) is the primary's - a queen over a twin (the Home Scan's kids' room had more
         # footprint); otherwise the largest room (the green house's beds are near alike)
-        mat = {k: _mattress_m2(space, k) for k in beds}
+        # the bed its labelled splats make (Space.labelled_piece) when the labels are there - the
+        # mattress-height surface merges a kids' bed with its desk and shelves (Home Scan v15)
+        lp = {k: (space.labelled_piece(k, "bed") if getattr(space, "labels", None) is not None else None) for k in beds}
+        mat = {k: (lp[k].area if lp[k] is not None else _mattress_m2(space, k)) for k in beds}
         top2 = sorted(mat.values(), reverse=True)
         if len(beds) > 1 and top2[1] > 0 and top2[0] >= BED_CLEAR * top2[1]:
             out[max(beds, key=lambda k: mat[k])] = "primary_bedroom"

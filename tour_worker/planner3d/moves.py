@@ -100,6 +100,11 @@ WIDE_W = 0.6                  # score per m the view opens up from start to end 
 COVER_NEW_MIN = 0.15
 COVER_W = 3.0
 FRAME_MARGIN = 0.03          # the subject's box this far inside the frame's edges ...
+BED_SEEN = 0.7               # a bed too big for the frame from a tight room's free floor: this share of its
+                             # top in frame, its headboard end included (green house v15: the primary
+                             # bed filled the room - a 1 m aisle beside it - and no shot framed it)
+BED_SEEN_PATH = 0.55         # ... and this share all along a move onto it
+BED_AIM = 0.35               # x the bed's half length: a shot onto a bed aims this far toward its head
 FLOOR_MARGIN = 0.04          # ... and the floor under it this far above the frame's bottom (a strip of floor)
 MIN_SCALE_PS = 0.035          # or a push's subject grows (ln of its distance ratio) this much a second
 MIN_TRAVEL_PS = 0.12         # m/s: a room shot travels at least this much for its length ...
@@ -411,6 +416,33 @@ def frames_fully(eye2, target, box: np.ndarray, eye_z: float = EYE) -> bool:
     return bool(floor.max() <= (1.0 - FLOOR_MARGIN) * FRAME_H)
 
 
+def _in_view(eye2, target, P: np.ndarray, eye_z: float = EYE) -> np.ndarray:
+    """Which of the points P (n, 3) are in the frame from eye2 (at eye_z) aimed at target."""
+    V, K = look_at([eye2[0], eye2[1], eye_z], target), intrinsics(HFOV, FRAME_W, FRAME_H)
+    cam = P @ V[:3, :3].T + V[:3, 3]
+    z = np.maximum(cam[:, 2], 1e-6)
+    px = K[0, 0] * cam[:, 0] / z + K[0, 2]
+    py = K[1, 1] * cam[:, 1] / z + K[1, 2]
+    return (cam[:, 2] > 0.3) & (px > 0.02 * FRAME_W) & (px < 0.98 * FRAME_W) & (py > 0.02 * FRAME_H) & (py < 0.98 * FRAME_H)
+
+
+def bed_seen(eye2, target, piece, head: tuple, eye_z: float = EYE) -> tuple[float, bool]:
+    """(share of the bed's top in frame, its headboard side in frame): a grid over the top surface;
+    head: (axis, sign) of the side against the wall - axis 0 along the piece's long side, 1 across."""
+    a = np.linspace(-0.9, 0.9, 7)
+    b = np.linspace(-0.9, 0.9, 5)
+    g = np.array([[*(piece.centre + x * piece.half_long * piece.u + y * piece.half_short * piece.v), piece.top]
+                  for x in a for y in b])
+    share = float(_in_view(eye2, target, g, eye_z).mean())
+    ax, sg = head
+    if ax == 0:
+        ends = [piece.centre + sg * 0.85 * piece.half_long * piece.u + y * 0.8 * piece.half_short * piece.v for y in (-1, 1)]
+    else:
+        ends = [piece.centre + sg * 0.85 * piece.half_short * piece.v + x * 0.8 * piece.half_long * piece.u for x in (-1, 1)]
+    ends = np.array([[*e, piece.top] for e in ends])
+    return share, bool(_in_view(eye2, target, ends, eye_z).all())
+
+
 def _keep_best(moves: list, n: int = None) -> list:
     """The KEEP_PER_KIND best of a kind's candidates by their own score, before the rendered and
     framing checks (a room's pans or arcs run to hundreds - 659 in the Home Scan's living room,
@@ -706,10 +738,61 @@ class RoomMoves:
         self.record(hold)
         return hold, [f"view_partly_blocked:{room}"] + type_warn
 
-    def front(self, e, t) -> float:
-        """Metres to the nearest wall or tall thing across the middle third of the view from e to t."""
+    def front(self, e, t, past=None) -> float:
+        """Metres to the nearest wall or tall thing across the middle third of the view from e to t;
+        past: a piece the view is of - its own cells do not count (green house v15: walks onto the
+        primary bed stopped 0.5 m out, at the bed)."""
         h = math.atan2(t[1] - e[1], t[0] - e[0])
-        return float(self.space.rays(e, h + np.radians(np.linspace(-HFOV / 6, HFOV / 6, 7)), max_m=6.0).min())
+        hs = h + np.radians(np.linspace(-HFOV / 6, HFOV / 6, 7))
+        if past is None:
+            return float(self.space.rays(e, hs, max_m=6.0).min())
+        return float(self.space.rays(e, hs, max_m=6.0, past=past).min())
+
+    def aim_on(self, fp) -> np.ndarray:
+        """Where a walk or arc onto a piece aims: its middle; a bed's, BED_AIM toward its head (the
+        headboard and pillows are what a bedroom shot is of)."""
+        if fp.cls != "bed":
+            return np.asarray(fp.centre, float)
+        ax, sg = self.bed_head(fp)
+        return fp.centre + sg * BED_AIM * (fp.half_long * fp.u if ax == 0 else fp.half_short * fp.v)
+
+    def core_of(self, fp, eye, tgt) -> float | None:
+        """How much of the piece stays in frame all along a move (the CORES step it keeps), None when
+        it leaves. A bed: BED_SEEN_PATH of its top and its head in every sampled frame (from the
+        aisle at a bed's foot no frame holds its four corners - green house v15), scored CORES[-1]."""
+        core = next((c for c in CORES if all(in_frame(q, t, fp, c) for q, t in zip(eye[::10], tgt[::10]))), None)
+        if core is not None or fp.cls != "bed":
+            return core
+        head = self.bed_head(fp)
+        for q, t in zip(eye[::10], tgt[::10]):
+            share, hd = bed_seen(q, t, fp, head)
+            if share < BED_SEEN_PATH or not hd:
+                return None
+        return CORES[-1]
+
+    def bed_head(self, piece) -> tuple[int, int]:
+        """The side of a bed against a wall, its head: (axis, sign) - axis 0 the piece's long side,
+        1 across it. A floor-plan bed often takes in its nightstands and is wider than long, so all
+        four sides are tried: the one with the least clearance just beyond it."""
+        sp = self.space
+        # a labelled "bed" off the piece's middle is its headboard (green house v15: a 1.96 x 0.41 m
+        # strip at the wall) - its side is the head
+        for o in sp.room_objects(getattr(self, "_room_now", None) or "", ("bed",)):
+            f = o.get("footprint")
+            if not f:
+                continue
+            lu, lv = piece.local(np.asarray(f["centre"], np.float64))
+            ru, rv = lu / max(piece.half_long, 1e-6), lv / max(piece.half_short, 1e-6)
+            if max(abs(ru), abs(rv)) >= 0.5 and max(abs(ru), abs(rv)) <= 1.3:
+                return (0, 1 if ru > 0 else -1) if abs(ru) >= abs(rv) else (1, 1 if rv > 0 else -1)
+        best, side = None, (0, 1)
+        for ax, (w, h_, d) in enumerate(((piece.u, piece.half_long, piece.v), (piece.v, piece.half_short, piece.u))):
+            span = piece.half_short if ax == 0 else piece.half_long
+            for sg in (1, -1):
+                c = np.mean([sp.clearance(piece.centre + sg * (h_ + 0.15) * w + t * 0.6 * span * d) for t in (-1, 0, 1)])
+                if best is None or c < best:
+                    best, side = c, (ax, sg)
+        return side
 
     def _roomy(self, m: Move) -> bool:
         """Room to breathe at both ends (FRONT_MIN, an enter's start FRONT_MIN_ENTER) and the end at
@@ -717,7 +800,8 @@ class RoomMoves:
         if m.kind in ("detail", "link"):
             return True
         if "front_m" not in m.why:
-            m.why["front_m"] = (round(self.front(m.eye[0], m.tgt[0]), 2), round(self.front(m.eye[-1], m.tgt[-1]), 2))
+            pv = (m.piece.frame or m.piece) if m.piece is not None and m.kind in ("walkway", "arc") else None
+            m.why["front_m"] = (round(self.front(m.eye[0], m.tgt[0], pv), 2), round(self.front(m.eye[-1], m.tgt[-1], pv), 2))
         f0, f1 = m.why["front_m"]
         aim = float(np.linalg.norm(m.tgt[-1][:2] - m.eye[-1]))
         k = RELAX if getattr(self, "relaxed", False) else 1.0
@@ -1181,7 +1265,7 @@ class RoomMoves:
         sp = self.space
         fp = piece.frame or piece
         c = np.asarray(fp.centre, float)
-        top = np.array([*c, fp.top])
+        top = np.array([*self.aim_on(fp), fp.top])
         mine = sp.spaces.get(room, {room})
         out = []
         u = np.linspace(0, 1, SAMPLES)
@@ -1197,7 +1281,7 @@ class RoomMoves:
                         first, last = (eye[0], tgt[0]), (eye[-1], tgt[-1])
                         if jump_cut(prev, first) or repeats(first, last, earlier):
                             continue
-                        core = next((k for k in CORES if all(in_frame(q, t, fp, k) for q, t in zip(eye[::10], tgt[::10]))), None)
+                        core = self.core_of(fp, eye, tgt)
                         if core is None:
                             continue
                         score = 1.0 + 1.5 * core + 0.5 * sweep / ARC_SWEEP[-1] - 0.3 * abs(r - 2.7)
@@ -1941,7 +2025,9 @@ class RoomMoves:
         turn = math.degrees(math.acos(max(-1.0, min(1.0, float(d0 @ d1)))))
         m.why.setdefault("travel_m", round(travel, 2))
         m.why["turn_deg"] = round(turn, 1)
-        if travel >= MIN_TRAVEL_PS * dur or turn >= MIN_TURN_PS * dur:
+        # travel and turn add up: a slow slide with a slow turn moves too (green house v15: the
+        # primary bedroom's walks onto the bed - 0.8 m in a 1 m aisle, turning - read as stills)
+        if travel / (MIN_TRAVEL_PS * dur) + turn / (MIN_TURN_PS * dur) >= 1.0:
             return True
         if m.kind in ("push", "pull"):             # what a push shows moving: its subject growing
             a0 = float(np.linalg.norm(m.tgt[0][:2] - m.eye[0]))
@@ -1960,6 +2046,13 @@ class RoomMoves:
         ze = float(m.zs[-1])
         if frames_fully(m.eye[-1], m.tgt[-1], m.subject, ze):
             return True
+        if m.piece is not None and m.piece.cls == "bed":
+            # a bed the room's free floor cannot fit whole: most of it and its headboard end
+            fp = m.piece.frame or m.piece
+            share, head = bed_seen(m.eye[-1], m.tgt[-1], fp, self.bed_head(fp), ze)
+            m.why["bed_seen"] = round(share, 2)
+            if share >= BED_SEEN and head:
+                return True
         if m.kind not in ("push", "pull"):
             return False
         h = float(np.linalg.norm(m.tgt[-1][:2] - m.eye[-1][:2]))
@@ -1995,7 +2088,7 @@ class RoomMoves:
 
     def _walkway(self, room, piece, pts, paths, rmin, dur, pitch, prev, earlier, own) -> list[Move]:
         fp = piece.frame or piece                     # what is framed: the labelled object, else the piece
-        top = np.array([*fp.centre, fp.top])
+        top = np.array([*self.aim_on(fp), fp.top])
         out = []
         keep = [k for k, p in enumerate(pts) if piece.dist(p) > 0.05]
         for a_i, a in enumerate(keep):
@@ -2014,7 +2107,7 @@ class RoomMoves:
                     first, last = (path[0], tgt[0]), (path[-1], tgt[-1])
                     if jump_cut(prev, first) or repeats(first, last, earlier):
                         continue
-                    core = next((c for c in CORES if all(in_frame(q, t, fp, c) for q, t in zip(path[::10], tgt[::10]))), None)
+                    core = self.core_of(fp, path, tgt)
                     if core is None:                          # the piece leaves the frame somewhere
                         continue
                     par = parallax(path, tgt)

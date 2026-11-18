@@ -26,6 +26,10 @@ from tour_worker.scene.splat_io import SplatModel
 
 CELL = 0.05
 WALL_TOP_MIN = 3                # splats in a 10 cm band of a cell for the wall to reach it
+LABELLED_PIECES = ("bed", "sofa")     # what a room is about, found from its labelled splats when no piece shows it
+LABEL_PIECE_Z = (0.2, 1.2)             # m: the heights a bed's / sofa's labelled splats count between
+BED_TOP, BED_AREA = (0.35, 1.1), (1.8, 6.0)     # top: the mattress, or the headboard over it (green house: 0.96)   # a bed's top (m) and size (m2), when nothing names it
+LABEL_PIECE_MIN = 0.8                  # m2: less is not the piece
 MIN_PART_M2 = 3.0            # free floor in a part of its own at least this big still counts
 OPAQUE, MAX_SPLAT_M = 0.35, 0.25       # splats that make the floor plan: opaque, not huge background blobs
 BODY = (0.15, 2.0)                     # heights a camera body could hit
@@ -47,6 +51,8 @@ PREFER = {
 }
 SECOND = {"kitchen": ("countertop", "counter", "table"), "living_room": ("armchair", "coffee table"),
           "family_room": ("armchair", "coffee table"), "dining_room": ("buffet",)}
+FRAME_SHORT_MIN = {"bed": 0.9, "sofa": 0.6}   # m: the least short side of a labelled bed / sofa a shot frames
+BLOCK_SPAN = 0.6              # m of height a view blocker's splats span (a real door / mirror / wardrobe)
 VIEW_BLOCKERS = ("door", "screen door", "windowpane", "mirror", "wardrobe", "glass", "shower")
 OPEN_PLAN_M = 0.9                      # shared boundary (on cells >= ROOM_RMIN clear) longer than this: one
                                        # open-plan space - an opening ~1.3 m+ wide; a 0.9 m door measures ~0.5 m
@@ -458,7 +464,66 @@ class Space:
             home = self.piece_room(p)
             if home in mates and canon(self.room_types.get(home)) not in PREFER.get(p.cls, ()):
                 mine.append(p)
+        # what the room is about found by no floor-plan piece (a bed the scan gives no clear outline -
+        # the green house's and the Home Scan's primary bedrooms, 2026-11-17, had none, so no shot
+        # framed the bed): the piece its labelled splats make
+        if want and want[0] in LABELLED_PIECES and not any(p.cls == want[0] for p in mine):
+            lp = self.labelled_piece(room, want[0])
+            if lp is None and want[0] == "bed":
+                # nor do the labels (the survey missed it): the room's biggest low piece at mattress
+                # height and a bed's size is its bed
+                import dataclasses
+                low = [p for p in self.pieces if self.piece_room(p) == room and BED_TOP[0] <= p.top <= BED_TOP[1]
+                       and BED_AREA[0] <= p.area <= BED_AREA[1]]
+                if low:
+                    src = max(low, key=lambda p: p.area)
+                    mine = [p for p in mine if p is not src]          # it is the bed, not a second piece
+                    lp = dataclasses.replace(src, cls="bed")
+            if lp is not None:
+                mine.append(lp)
         return sorted(mine, key=lambda p: (rank(p), -p.area))
+
+    def labelled_piece(self, room: str, cls: str) -> "Piece | None":
+        """The room's `cls` (a bed, a sofa) as its labelled splats lie on the floor plan: the cells
+        they cover between LABEL_PIECE_Z, the biggest connected patch in the room, its minimum-area
+        rectangle - None when the labels have none of it there (under LABEL_PIECE_MIN m2)."""
+        cache = self.__dict__.setdefault("_labelled_pieces", {})
+        if (room, cls) in cache:
+            return cache[(room, cls)]
+        out = None
+        if self.labels is not None and room in self.room_keys:
+            import cv2
+            from tour_worker.scene.semantics import INDEX
+            k = INDEX.get(cls)
+            L, lab = self.local, self.labels.labels
+            sel = (lab == k) & (L[:, 2] > LABEL_PIECE_Z[0]) & (L[:, 2] < LABEL_PIECE_Z[1]) if k else None
+            if sel is not None and sel.any():
+                P = L[sel]
+                H, W = self.shape
+                ix = ((P[:, 0] - self.lo[0]) / CELL).astype(int)
+                iy = ((P[:, 1] - self.lo[1]) / CELL).astype(int)
+                ok = (ix >= 0) & (ix < W) & (iy >= 0) & (iy < H)
+                g = np.zeros((H, W), np.int32)
+                np.add.at(g, (iy[ok], ix[ok]), 1)
+                m = ndi.binary_closing(g >= 2, iterations=2) & (self.room_fill == self.room_keys.index(room))
+                labs, n = ndi.label(m)
+                if n:
+                    big = int(np.argmax(np.bincount(labs.ravel())[1:])) + 1
+                    ys, xs = np.nonzero(labs == big)
+                    area = len(ys) * CELL * CELL
+                    if area >= LABEL_PIECE_MIN:
+                        pts = np.c_[self.lo[0] + (xs + .5) * CELL, self.lo[1] + (ys + .5) * CELL].astype(np.float32)
+                        (cx, cy), (w, h), ang = cv2.minAreaRect(pts)
+                        a = math.radians(ang)
+                        u, v = np.array([math.cos(a), math.sin(a)]), np.array([-math.sin(a), math.cos(a)])
+                        if h > w:
+                            u, v, w, h = v, -u, h, w
+                        inside = np.zeros(len(P), bool)
+                        inside[ok] = labs[iy[ok], ix[ok]] == big
+                        top = float(np.percentile(P[inside, 2], 90)) if inside.any() else 0.6
+                        out = Piece(np.array([cx, cy]), u, v, w / 2, h / 2, top, float(w * h), cls)
+        cache[(room, cls)] = out
+        return out
 
     def attach_labels(self, labels) -> None:
         """The scene's labels (scene/semantics.py): each piece gets the class most of its splats
@@ -486,13 +551,25 @@ class Space:
             iy = ((q[:, 1] - self.lo[1]) / CELL).astype(int).clip(0, self.shape[0] - 1)
             cnt = np.zeros(self.shape, np.int32)
             np.add.at(cnt, (iy, ix), 1)
-            self.view_block = ndi.binary_closing(cnt >= 3, iterations=1)
+            # a door, mirror or wardrobe stands tall: its splats span BLOCK_SPAN m of height round
+            # the cell (green house v15: a band of "door" splats at 0.55-0.62 m across the primary
+            # bed blocked every view of the bed 0.5 m out - no shot framed it)
+            zlo = np.full(self.shape, np.inf, np.float32)
+            zhi = np.full(self.shape, -np.inf, np.float32)
+            np.minimum.at(zlo, (iy, ix), q[:, 2])
+            np.maximum.at(zhi, (iy, ix), q[:, 2])
+            span = ndi.maximum_filter(zhi, size=3) - ndi.minimum_filter(zlo, size=3)
+            self.view_block = ndi.binary_closing((cnt >= 3) & (span >= BLOCK_SPAN), iterations=1)
         self.objects = [dict(o) for o in labels.objects]
         for p in self.pieces:                       # the labelled object a piece is about
             inside = [o for o in self.objects if o["class"] in PIECE_CLASSES and o.get("footprint")
                       and (p.cls is None or o["class"] == p.cls)
                       and bool(p.contains(np.asarray(o["footprint"]["centre"]), 0.1))
-                      and o["footprint"]["long"] * o["footprint"]["short"] >= FRAME_MIN_AREA]
+                      and o["footprint"]["long"] * o["footprint"]["short"] >= FRAME_MIN_AREA
+                      # a strip is a headboard or a sofa's back, not the piece (green house v15: the
+                      # primary bed's frame was its 1.96 x 0.41 m headboard at the wall - every
+                      # shot aimed there and cut the bed off)
+                      and o["footprint"]["short"] >= FRAME_SHORT_MIN.get(o["class"], 0.0)]
             if not inside:
                 continue
             o = max(inside, key=lambda o: o["footprint"]["long"] * o["footprint"]["short"])
@@ -607,8 +684,9 @@ class Space:
             cache[max_m] = d[:np.argmin(keep) if not keep.all() else len(d)]
         return cache[max_m]
 
-    def rays(self, p, headings, max_m: float = 8.0) -> np.ndarray:
-        """ray() for many headings from one spot at once."""
+    def rays(self, p, headings, max_m: float = 8.0, past=None) -> np.ndarray:
+        """ray() for many headings from one spot at once; past: a Piece whose own cells do not stop
+        them (the subject a view is of)."""
         hs = np.asarray(headings, np.float64)
         d = self._steps(max_m)
         x = p[0] + np.cos(hs)[:, None] * d[None, :]
@@ -619,6 +697,8 @@ class Space:
         blk = out.copy()
         inb = ~out
         blk[inb] = self._blocked()[i[inb], j[inb]]
+        if past is not None:
+            blk &= ~past.contains(np.stack([x, y], -1).reshape(-1, 2), 0.1).reshape(x.shape)
         first = np.where(blk.any(1), blk.argmax(1), len(d) - 1)
         return d[first]
 

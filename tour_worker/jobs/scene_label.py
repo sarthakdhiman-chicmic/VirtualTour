@@ -94,6 +94,7 @@ def run_scene_label(request: dict, storage, workdir: str, settings: Settings | N
             stats["motion"] = motion.classes
     if found is not None:                       # name them from what they hold; merge; drop the poorly captured
         from tour_worker.planner3d.discover import finalize_rooms
+        space.attach_labels(labels)             # (the labelled bed decides the primary bedroom)
         final, room_w = finalize_rooms(space, found, labels.objects, stats.get("room_capture"))
         warnings += room_w
         out["rooms"] = [{"room_key": k, "room_type": t, "tour": toured,
