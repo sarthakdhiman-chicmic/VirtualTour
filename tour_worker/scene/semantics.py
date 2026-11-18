@@ -174,19 +174,24 @@ def class_map(segmenter, bgr: np.ndarray) -> np.ndarray:
 
 
 # ---- the vote ------------------------------------------------------------------------------------
-# classes Mask2Former uses for one thing seen from different sides: voted together (Voter.labels)
+# classes Mask2Former uses for one thing seen from different sides: voted together (Voter.labels).
+# A group never spans two room types' evidence (planner3d/discover.py): a kitchen's counters are not
+# a dining table's, a study's desk / bookcase / monitor not a dining table / cabinet / living
+# room TV (2026-11-18: counters grouped with tables came out "table", and the green house lost
+# its kitchen)
 GROUPS = (
     ("sofa", "armchair", "chair", "swivel chair", "ottoman", "bench", "stool"),
-    ("table", "coffee table", "desk", "kitchen island", "counter", "countertop"),
-    ("cabinet", "chest of drawers", "wardrobe", "shelf", "bookcase", "buffet"),
+    ("table", "coffee table"),
+    ("kitchen island", "counter", "countertop"),
+    ("cabinet", "chest of drawers", "wardrobe", "buffet"),
+    ("shelf", "bookcase"),
     ("door", "screen door"),
     ("stairs", "stairway", "step"),
     ("lamp", "light", "sconce", "chandelier"),
     ("painting", "poster"),
-    ("television receiver", "computer", "monitor"),
     ("plant", "flower"),
 )
-VOTE_VERSION = 2          # 1: per class; 2: per GROUP (2026-11-18)
+VOTE_VERSION = 3          # 1: per class; 2: per GROUP; 3: groups split by room-type evidence (2026-11-18)
 
 
 def _group_tables(torch, device):
@@ -211,12 +216,14 @@ class Voter:
     """Accumulates seen / per-class hits over views (torch; on `device`)."""
 
     def __init__(self, means: np.ndarray, opacities: np.ndarray, device: str = "cpu",
-                 scales: np.ndarray | None = None, depth_tol: tuple | None = None):
+                 scales: np.ndarray | None = None, depth_tol: tuple | None = None,
+                 moving_vote: tuple | None = None):
         import torch
         self.torch, self.device = torch, device
         self.pts = torch.from_numpy(means.astype(np.float32)).to(device)
         self.opaque = torch.from_numpy(opacities >= OPAQUE).to(device)
         self.depth_tol = tuple(depth_tol) if depth_tol else DEPTH_TOL_IMAGE
+        self.moving_vote = (int(moving_vote[0]), float(moving_vote[1])) if moving_vote else (MOVING_HITS, MOVING_SHARE)
         size = (np.minimum(np.asarray(scales, np.float32).max(1), DEPTH_SIZE_MAX) if scales is not None
                 else np.zeros(len(means), np.float32))
         self.size = torch.from_numpy(np.ascontiguousarray(size, np.float32)).to(device)
@@ -286,7 +293,8 @@ class Voter:
             moving = torch.zeros_like(ok)
             for name in MOVING:
                 moving |= best == INDEX[name]
-            ok &= ~moving | ((top >= MOVING_HITS) & (top.float() >= MOVING_SHARE * seen))
+            mh, ms = self.moving_vote
+            ok &= ~moving | ((top >= mh) & (top.float() >= ms * seen))
             out.append(torch.where(ok, best, torch.zeros_like(best)).to(torch.uint8).cpu().numpy())
         return np.concatenate(out) if out else np.zeros(0, np.uint8)
 
@@ -337,14 +345,15 @@ EMPTY_LEVEL = 3          # a pixel at most this bright in every channel is the r
 
 
 def label_scene(model, space, renderer, segmenter, rooms: list[str], scene_sha256: str,
-                progress=None, device: str | None = None, depth_tol: tuple | None = None) -> tuple[SceneLabels, dict, np.ndarray]:
+                progress=None, device: str | None = None, depth_tol: tuple | None = None,
+                moving_vote: tuple | None = None) -> tuple[SceneLabels, dict, np.ndarray]:
     """Survey, segment, vote: the scene's labels and objects, stats, and how many views saw each
     Gaussian (the motion step grows labels into the unseen ones). renderer: render/splat_shot.make_renderer's
     (its render_view(viewmat, K, w, h) -> BGR uint8); progress(done, total) per view."""
     from tour_worker.scene.camera import intrinsics, look_at
     views = survey_views(space, rooms)
     dev = device or str(getattr(getattr(renderer, "means", None), "device", "cpu"))
-    voter = Voter(model.means, model.opacities, dev, scales=model.scales, depth_tol=depth_tol)
+    voter = Voter(model.means, model.opacities, dev, scales=model.scales, depth_tol=depth_tol, moving_vote=moving_vote)
     K = intrinsics(VIEW_HFOV, VIEW_W, VIEW_H)
     up = space.up_scene
     empty: dict[str, list[float]] = {}
@@ -366,6 +375,7 @@ def label_scene(model, space, renderer, segmenter, rooms: list[str], scene_sha25
     stats = {"views": len(views), "rooms": len({v.room for v in views}), "vote_version": VOTE_VERSION,
              "visibility": "depth_image" if depth_tol is not None else "point_buffer",
              "depth_tol": list(voter.depth_tol) if depth_tol is not None else None,
+             "moving_vote": list(voter.moving_vote),
              "labelled": int((labels > 0).sum()), "seen": int((voter.seen_np > 0).sum()),
              "classes": dict(sorted(counts.items(), key=lambda t: -t[1])), "objects": len(objects),
              # per room: the share of its survey views the scan covers (1 - empty black)

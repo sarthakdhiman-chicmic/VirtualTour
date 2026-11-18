@@ -265,3 +265,15 @@ def test_a_thick_wall_layer_is_seen_and_the_wall_behind_a_curtain_is_not():
     assert (seen_flat[:n] == 0).any()                    # the flat allowance loses the back of the layer
     assert (seen_sized[:n] > 0).all()                    # sized: the whole layer
     assert (seen_sized[n:] == 0).all()                   # and still not the wall behind
+
+
+def test_no_vote_group_spans_two_room_types_evidence():
+    """A group never mixes what tells one room type from another (planner3d/discover.py): counters
+    stay kitchen, a desk / bookcase / monitor stay study, a TV stays living room."""
+    from tour_worker.planner3d.discover import COOKING, KITCHEN, STUDY
+    from tour_worker.scene.semantics import GROUPS
+    kinds = {"kitchen": set(KITCHEN) | set(COOKING), "study": set(STUDY) | {"desk", "computer", "monitor"},
+             "dining": {"table"}, "living": {"sofa", "television receiver", "fireplace"}, "bed": {"bed"}}
+    for g in GROUPS:
+        hit = {k for k, cs in kinds.items() if cs & set(g)}
+        assert len(hit) <= 1, (g, hit)

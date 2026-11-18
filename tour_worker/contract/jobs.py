@@ -153,6 +153,9 @@ class SceneLabelRequest(_Request):
     # of depth, x the Gaussian's size] (scene/semantics.DEPTH_TOL_IMAGE); None: the point depth
     # buffer (the default) - to compare settings on a scene without a deploy
     depth_tol: Optional[list[float]] = Field(default=None, min_length=3, max_length=3)
+    # tuning only: [hits, share] for the classes the motion moves (scene/semantics.MOVING_HITS /
+    # MOVING_SHARE when None) - how much of a curtain moves against how much wall it drags
+    moving_vote: Optional[list[float]] = Field(default=None, min_length=2, max_length=2)
 
 
 class TourPlanRequest(_Request):
