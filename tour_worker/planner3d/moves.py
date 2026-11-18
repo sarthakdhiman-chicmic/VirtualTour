@@ -103,6 +103,7 @@ FRAME_MARGIN = 0.03          # the subject's box this far inside the frame's edg
 BED_SEEN = 0.7               # a bed too big for the frame from a tight room's free floor: this share of its
                              # top in frame, its headboard end included (green house v15: the primary
                              # bed filled the room - a 1 m aisle beside it - and no shot framed it)
+FAR_FLOOR = ("table", "kitchen island")   # framed whole with the floor beyond them (frames_on_far_floor)
 BED_SEEN_PATH = 0.55         # ... and this share all along a move onto it
 BED_AIM = 0.35               # x the bed's half length: a shot onto a bed aims this far toward its head
 FLOOR_MARGIN = 0.04          # ... and the floor under it this far above the frame's bottom (a strip of floor)
@@ -214,6 +215,7 @@ OWN_SHARE = {"backout": 0.5, "wall_pan": 0.5, "corner_sweep": 0.5, "panorama": 0
 CONFIDENT_M2 = 0.5            # m2 of a room's own furniture for its rules to be eased
 RELAX = 0.8                   # the second try: room to breathe x this ...
 OWN_MIN_RELAXED = 0.35        # ... and this much of its own room in view
+OWN_PIECE_NEAR = 3.5          # m: a walk / arc framing the piece its type is about from this close needs no own share
 OWN_MIN = 0.5                 # a room shot's view is at least half its own room
 OWN_FREE = ("enter", "reveal", "link", "pan", "detail", "exit")   # they look in from outside it, or back over the home
 COVER_OWN_MIN = 0.6           # a room's further shot shows mostly that room (not the hallway beyond)
@@ -414,6 +416,27 @@ def frames_fully(eye2, target, box: np.ndarray, eye_z: float = EYE) -> bool:
         return False
     floor = py[box[:, 2] <= 1e-6]                         # the corners on the floor
     return bool(floor.max() <= (1.0 - FLOOR_MARGIN) * FRAME_H)
+
+
+def frames_on_far_floor(eye2, target, box: np.ndarray, eye_z: float = EYE) -> bool:
+    """frames_fully, but the floor strip only under the subject's far side: a table filmed from a
+    dining area's own floor (green house: at most 2.75 m from it) cannot show the floor under its
+    near edge at the tilt cap - the whole table with the floor beyond it reads where it stands."""
+    V, K = look_at([eye2[0], eye2[1], eye_z], target), intrinsics(HFOV, FRAME_W, FRAME_H)
+    cam = box @ V[:3, :3].T + V[:3, 3]
+    if (cam[:, 2] < 0.3).any():
+        return False
+    px = K[0, 0] * cam[:, 0] / cam[:, 2] + K[0, 2]
+    py = K[1, 1] * cam[:, 1] / cam[:, 2] + K[1, 2]
+    mx, my = FRAME_MARGIN * FRAME_W, FRAME_MARGIN * FRAME_H
+    if px.min() < mx or px.max() > FRAME_W - mx or py.min() < my:
+        return False
+    top = box[:, 2] > 1e-6
+    if py[top].max() > (1.0 - FLOOR_MARGIN) * FRAME_H:      # the top itself whole, near edge included
+        return False
+    floor = np.flatnonzero(~top)
+    far = floor[np.argsort(-cam[floor, 2])[:2]]              # the two floor corners farthest away
+    return bool(py[far].max() <= (1.0 - FLOOR_MARGIN) * FRAME_H)
 
 
 def _in_view(eye2, target, P: np.ndarray, eye_z: float = EYE) -> np.ndarray:
@@ -638,7 +661,15 @@ class RoomMoves:
                     k = len(m.eye) // 2
                     o = sp.own_share(room, m.eye[k], math.atan2(*(m.tgt[k][:2] - m.eye[k])[::-1]), HFOV)
                     m.why["own_share"] = round(o, 2)
-                    if o >= (OWN_MIN_RELAXED if getattr(self, "relaxed", False) else OWN_MIN):
+                    need = OWN_MIN_RELAXED if getattr(self, "relaxed", False) else OWN_MIN
+                    if self.on_own_piece(room, m):
+                        # it frames what makes the room that room, from close by: that is a shot of
+                        # the room whatever lies beyond (own_share counts where the view's sight
+                        # lines end - an open-plan dining zone has no walls of its own, so every view
+                        # of its table "ends" in the living room or kitchen: green house v14-v16
+                        # scored 0-0.22, and the dining room fell back to a held pan)
+                        need = 0.0
+                    if o >= need:
                         out.append(m)
                 return out
             tiers = ([own_room(roomy(t)) for t in tiers] if strict
@@ -679,9 +710,9 @@ class RoomMoves:
             tiers = [[m for m in t if m.kind not in used] for t in tiers] + [again]
         # the tour's caps are hard (v10: three rises past a cap of two): a kind at its cap only when
         # nothing else will do
-        capped = [m for t in tiers for m in t if self.at_cap(m.kind)]
+        capped = [m for t in tiers for m in t if self.at_cap(m.kind, further=covered is not None)]
         if capped:                                 # (a further shot is dropped rather than repeat one)
-            tiers = [[m for m in t if not self.at_cap(m.kind)] for t in tiers] + ([capped] if covered is None else [])
+            tiers = [[m for m in t if not self.at_cap(m.kind, further=covered is not None)] for t in tiers] + ([capped] if covered is None else [])
         tiers = [t for t in tiers if t]
         if not tiers:
             return None, [f"room_no_move:{room}" if kind != "detail" else f"room_no_detail:{room}"]
@@ -747,6 +778,24 @@ class RoomMoves:
         if past is None:
             return float(self.space.rays(e, hs, max_m=6.0).min())
         return float(self.space.rays(e, hs, max_m=6.0, past=past).min())
+
+    def on_own_piece(self, room: str, m: Move) -> bool:
+        """A walk or arc onto the piece the room's type is about (a dining room's table), standing
+        in the room, that frames it."""
+        from tour_worker.planner3d.space import PREFER
+        from tour_worker.scoring.rooms import canon
+        if m.kind not in ("walkway", "arc") or m.piece is None or m.piece.cls is None:
+            return False
+        if canon(self.space.room_types.get(room)) not in PREFER.get(m.piece.cls, ()):
+            return False
+        if self.space.piece_room(m.piece) != room:
+            return False
+        # close to it all along: from across the living room it is a living room shot (a first
+        # try at this rule picked a pull-back 6-7 m from the table)
+        fp = m.piece.frame or m.piece
+        if float(np.linalg.norm(m.eye - fp.centre, axis=1).max()) > OWN_PIECE_NEAR:
+            return False
+        return self.framed(m)
 
     def aim_on(self, fp) -> np.ndarray:
         """Where a walk or arc onto a piece aims: its middle; a bed's, BED_AIM toward its head (the
@@ -868,7 +917,15 @@ class RoomMoves:
                 s0, s1 = np.moveaxis(seam, ax, 0)[:-1], np.moveaxis(seam, ax, 0)[1:]
                 s0 |= m
                 s1 |= m
-            seam &= dt < DOOR_CLEAR + 0.15
+            # a doorway is a seam narrow between WALLS (room_dt) all across: an open-plan seam is
+            # narrow only where it meets a wall, and chairs round a dining table pinch the clearance
+            # there too (green house v14-v16: the dining room's every walk onto its table "started
+            # in a doorway" - it fell back to a held pan)
+            dt = getattr(sp, "room_dt", dt)
+            parts, n = ndi.label(seam, structure=np.ones((3, 3), bool))
+            if n:
+                widest = ndi.maximum(dt, parts, index=np.arange(1, n + 1))
+                seam = np.isin(parts, 1 + np.flatnonzero(np.asarray(widest) < DOOR_CLEAR + 0.15))
             from tour_worker.planner3d.space import CELL
             self._doors = ndi.distance_transform_edt(~seam) * CELL <= DOOR_NEAR if seam.any() else seam
         i, j = sp.cell(q)
@@ -1454,11 +1511,15 @@ class RoomMoves:
         m.why["sequence_cost"] = round(cost, 2)
         return cost
 
-    def at_cap(self, kind: str) -> bool:
+    def at_cap(self, kind: str, further: bool = False) -> bool:
+        """The tour has used the kind as often as it may. further: for a room's further angle, the
+        kind's last use is kept for a room's first shot (green house: the dining room's second
+        angle took the tour's second rise, and the study - shown by a rise - got a glide)."""
         if kind in FLIGHT:
             return False
         hist = self.__dict__.get("_history", [])
-        uses = sum(1 for k, _ in hist if k == kind)
+        # (a kind the tour has once at most is not held back: it would never be a further angle)
+        uses = sum(1 for k, _ in hist if k == kind) + (1 if further and KIND_CAP.get(kind, 2) >= 2 else 0)
         n_tour = max(getattr(self, "tour_shots", 9), 1)
         return uses >= KIND_CAP.get(kind, 2) or uses + 1 > max(1, math.ceil(KIND_SHARE * n_tour))
 
@@ -2046,6 +2107,9 @@ class RoomMoves:
         ze = float(m.zs[-1])
         if frames_fully(m.eye[-1], m.tgt[-1], m.subject, ze):
             return True
+        if m.piece is not None and m.piece.cls in FAR_FLOOR and frames_on_far_floor(m.eye[-1], m.tgt[-1], m.subject, ze):
+            m.why["far_floor"] = True
+            return True
         if m.piece is not None and m.piece.cls == "bed":
             # a bed the room's free floor cannot fit whole: most of it and its headboard end
             fp = m.piece.frame or m.piece
@@ -2334,3 +2398,4 @@ class RoomMoves:
                     m.why["near_lens"] = round(near, 3)
                     return 1.0
         return worst
+
