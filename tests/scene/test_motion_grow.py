@@ -29,3 +29,20 @@ def test_growth_takes_the_curtains_back_not_the_wall():
     assert (old[n:3 * n] == CLASSES["curtain"]).all()           # before: the wall's side too
     assert (new[n:2 * n] == CLASSES["curtain"]).all()           # the curtain's back
     assert (new[2 * n:3 * n] == 0).all()                        # nearer the wall: still
+
+
+def test_flutter_and_flame_noise_is_smooth_and_deterministic():
+    """Neighbouring Gaussians get nearly the same phase (a value per 4 cm cell made them jump out
+    of step); far apart they differ; the same points give the same values."""
+    import math
+    from tour_worker.scene.motion_label import FLUTTER_SCALE, _smooth01, _smooth_angle
+    rng = np.random.default_rng(2)
+    p = rng.uniform(-1, 1, size=(4000, 3))
+    q = p + rng.normal(scale=0.005, size=p.shape)                 # 5 mm away
+    a, b = _smooth_angle(p, FLUTTER_SCALE, 13.0), _smooth_angle(q, FLUTTER_SCALE, 13.0)
+    near = np.abs((a - b + math.pi) % (2 * math.pi) - math.pi)
+    assert np.percentile(near, 99) < 0.5                         # (old 4 cm cells: 27% of these
+    #                                                              pairs had unrelated phases)
+    far = np.abs((a - np.roll(a, 1) + math.pi) % (2 * math.pi) - math.pi)
+    assert np.median(far) > 0.8                                    # it still varies across the plant
+    assert np.array_equal(_smooth01(p, 0.15, 1.0), _smooth01(p.copy(), 0.15, 1.0))

@@ -14,8 +14,8 @@ labelled Gaussian its motion (tour_worker/scene/motion3d.py). Run once per scene
   motion  curtain: a sway along its normal, largest at the hem and zero at the rod (weight
           ((top - h) / height) ** CURTAIN_POWER), a slow wave across its width, and a smaller
           sideways drift. plant: a whole-plant sway that grows toward the tips (weight
-          ((h - base) / height) ** PLANT_POWER) plus a leaf flutter whose phase and direction are
-          shared by every Gaussian in a FLUTTER_CELL - leaves move as pieces, they do not fizz.
+          ((h - base) / height) ** PLANT_POWER) plus a leaf flutter whose phase and direction
+          vary smoothly over FLUTTER_SCALE - leaves move as pieces, neighbours never jump out of step.
 
 Everything is deterministic: the same scene and views give the same file.
 """
@@ -45,7 +45,8 @@ CURTAIN_FREQ = (0.21, 0.34)                          # Hz: the sway, the sideway
 CURTAIN_WAVE_M = (1.0, 0.7)                          # wavelength across the width
 CURTAIN_DRIFT = 0.35                                 # sideways drift, share of the sway
 PLANT_AMP, PLANT_POWER, PLANT_FREQ = 0.015, 1.8, 0.42
-FLUTTER_AMP, FLUTTER_FREQ, FLUTTER_CELL = 0.004, 1.25, 0.04
+FLUTTER_AMP, FLUTTER_FREQ = 0.004, 1.25
+FLUTTER_SCALE = 0.15                                 # m: the leaf flutter's noise varies over this
 
 
 @dataclass
@@ -61,6 +62,29 @@ def _hash01(c: np.ndarray, salt: float) -> np.ndarray:
     """A deterministic pseudo-random value in [0, 1) per integer cell (N, 3)."""
     x = np.sin(c[:, 0] * 12.9898 + c[:, 1] * 78.233 + c[:, 2] * 37.719 + salt) * 43758.5453
     return (x - np.floor(x)).astype(np.float64)
+
+
+def _smooth01(p: np.ndarray, scale: float, salt: float) -> np.ndarray:
+    """Smooth noise in [0, 1) at points p (N, 3) metres: _hash01 on a lattice of `scale` m, blended
+    between its 8 corners (smoothstep weights) - neighbouring Gaussians get nearly the same value,
+    so they move together (a value per 4 cm cell made neighbours on one leaf jump out of step:
+    flicker 0.9 on a held close-up, 2026-11-18). Deterministic."""
+    q = np.asarray(p, np.float64) / scale
+    c0 = np.floor(q).astype(np.int64)
+    f = q - c0
+    w = f * f * (3 - 2 * f)
+    out = np.zeros(len(q))
+    for dx in (0, 1):
+        for dy in (0, 1):
+            for dz in (0, 1):
+                wt = (w[:, 0] if dx else 1 - w[:, 0]) * (w[:, 1] if dy else 1 - w[:, 1]) * (w[:, 2] if dz else 1 - w[:, 2])
+                out += wt * _hash01(c0 + np.array([dx, dy, dz]), salt)
+    return np.clip(out, 0.0, 1.0 - 1e-9)
+
+
+def _smooth_angle(p: np.ndarray, scale: float, salt: float) -> np.ndarray:
+    """A smooth phase field (radians): 2 pi x _smooth01 - continuous wherever the noise is."""
+    return 2 * math.pi * _smooth01(p, scale, salt)
 
 
 def vote(model: SplatModel, views: list[View]) -> tuple[np.ndarray, np.ndarray]:
@@ -215,13 +239,15 @@ def build_field(model: SplatModel, lab: np.ndarray, up, scene_sha256: str) -> Mo
             amp[:, 0] = PLANT_AMP * wgt
             freq[:, 0] = PLANT_FREQ
             ph[:, 0] = rng.uniform(0, 2 * math.pi) + 0.8 * wgt          # tips lag the stem a little
-            cells = np.floor(p / FLUTTER_CELL).astype(np.int64)
-            a1, a2 = 2 * math.pi * _hash01(cells, 1.0 + k), np.arccos(1 - 2 * _hash01(cells, 7.0 + k))
-            d = np.c_[np.sin(a2) * np.cos(a1), np.sin(a2) * np.sin(a1), np.cos(a2)]
+            # direction and phase from smooth noise over FLUTTER_SCALE: leaves move as pieces and
+            # neighbours never jump out of step
+            d = np.c_[_smooth01(p, FLUTTER_SCALE, 1.0 + k), _smooth01(p, FLUTTER_SCALE, 3.0 + k),
+                      _smooth01(p, FLUTTER_SCALE, 7.0 + k)] * 2 - 1
+            d /= np.maximum(np.linalg.norm(d, axis=1, keepdims=True), 1e-6)
             dirs[:, 1] = d
             amp[:, 1] = FLUTTER_AMP * wgt
             freq[:, 1] = FLUTTER_FREQ
-            ph[:, 1] = 2 * math.pi * _hash01(cells, 13.0 + k)
+            ph[:, 1] = _smooth_angle(p, FLUTTER_SCALE, 13.0 + k)
             name = "potted_plant"
         keep = amp.max(1) > 1e-5                     # the rod / pot stay still: no need to list them
         idx_all.append(m[keep]); dirs_all.append(dirs[keep]); amp_all.append(amp[keep])
@@ -241,7 +267,7 @@ def build_field(model: SplatModel, lab: np.ndarray, up, scene_sha256: str) -> Mo
 FLAME_MIN = 300                       # bright warm Gaussians in a fireplace: it is lit
 FLAME_AMP_UP, FLAME_AMP_SIDE = 0.035, 0.020
 FLAME_FREQ_UP, FLAME_FREQ_SIDE = (1.6, 2.6), (0.9, 1.4)
-FLAME_CELL = 0.04
+FLAME_SCALE = 0.08                    # m: the flame noise varies over this
 
 
 def _bright_warm(model: SplatModel) -> np.ndarray:
@@ -273,9 +299,10 @@ def flame_field(model: SplatModel, local: np.ndarray, fireplaces: list[dict], up
         h = np.clip((z - base) / max(tip - base, 0.1), 0, 1)
         a = math.radians(f["footprint"]["axis_deg"])
         side = np.asarray(R, np.float64).T @ np.array([math.cos(a), math.sin(a), 0.0])   # along the firebox
-        cells = np.floor(local[idx][:, :2] / FLAME_CELL).astype(np.int64)
-        c3 = np.c_[cells, np.zeros(len(cells), np.int64)]
-        r = [_hash01(c3, 31.0 + k + s_) for s_ in range(4)]
+        # each tongue's speed and phase from smooth noise across the fire (FLAME_SCALE): neighbouring
+        # Gaussians lick together, the fire still varies across its width
+        p3 = np.c_[local[idx][:, :2], np.zeros(len(idx))]
+        r = [_smooth01(p3, FLAME_SCALE, 31.0 + k + s_) for s_ in range(4)]
         amp = np.stack([FLAME_AMP_UP * h ** 1.3, FLAME_AMP_SIDE * h ** 1.5], 1)
         freq = np.stack([FLAME_FREQ_UP[0] + (FLAME_FREQ_UP[1] - FLAME_FREQ_UP[0]) * r[0],
                          FLAME_FREQ_SIDE[0] + (FLAME_FREQ_SIDE[1] - FLAME_FREQ_SIDE[0]) * r[1]], 1)
