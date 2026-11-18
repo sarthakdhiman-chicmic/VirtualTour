@@ -149,9 +149,9 @@ class SceneLabelRequest(_Request):
     rooms: Optional[list[PlanRoom]] = None
     output_prefix: str = Field(min_length=1)
     image_urls: dict[str, str] = Field(default_factory=dict)   # optional: scene uri -> fetch URL
-    # opt-in: the vote sees through the renderer's depth image with this allowance [metres, share
-    # of depth, x the Gaussian's size] (scene/semantics.DEPTH_TOL_IMAGE); None: the point depth
-    # buffer (the default) - to compare settings on a scene without a deploy
+    # tuning only: the allowance [metres, share of depth, x the Gaussian's size] the moving classes'
+    # votes get round the renderer's depth image (scene/semantics.DEPTH_TOL_IMAGE when None) - to
+    # compare settings on a scene without a deploy
     depth_tol: Optional[list[float]] = Field(default=None, min_length=3, max_length=3)
     # tuning only: [hits, share] for the classes the motion moves (scene/semantics.MOVING_HITS /
     # MOVING_SHARE when None) - how much of a curtain moves against how much wall it drags

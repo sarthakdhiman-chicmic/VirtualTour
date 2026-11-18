@@ -56,26 +56,21 @@ SPOT_M2, SPOTS_MIN, SPOTS_MAX = 3.0, 10, 40     # one survey spot per 3 m2 of op
 OPAQUE = 0.5
 ZBUF_DOWN = 4
 DEPTH_TOL = (0.03, 0.04)          # the point depth buffer's (CPU renderer): visible within 3 cm + 4%
-# OPT-IN (a scene_label request's depth_tol; the point buffer is the default): with the renderer's
-# depth image (GPU), every pixel's opacity-weighted depth at full resolution. A
-# Gaussian is visible within DEPTH_TOL_IMAGE of the surface the view shows there: metres + a share of
-# the depth + DEPTH_SIZE_K x its own size (its largest scale, at most DEPTH_SIZE_MAX m) - a wall's or
-# a mirror's splats lie a few cm deep in a thick, noisy layer (2026-11-18, a flat 2 cm + 2%: the
-# green house lost 65% of its wall labels, 72% of its mirrors, its primary bed), while a wall
-# 5-15 cm behind a curtain still fails (the point buffer's 4x4-pixel cells and 3 cm + 4%, ~15 cm
-# at 3 m, let it through, and it took the curtain's votes)
+# The classes that move (MOVING) also need the renderer's depth image (GPU): every pixel's opacity-
+# weighted depth at full resolution. Their votes count where the Gaussian is within DEPTH_TOL_IMAGE
+# of the surface the view shows - metres + a share of the depth + 1x its own size (its largest
+# scale, at most DEPTH_SIZE_MAX m): the window glass or wall a few cm behind a sheer curtain,
+# painted "curtain" by Mask2Former in most views, takes no curtain votes. Only for those classes:
+# for every class (2026-11-18, four settings from 2 cm + 2% to 3 cm + 4%) it labelled 161-177 of
+# the green house's 251 objects, 36-40% of its walls, and moved the room typing. A scene_label
+# request's depth_tol overrides DEPTH_TOL_IMAGE.
 DEPTH_TOL_IMAGE = (0.02, 0.02, 1.0)
 DEPTH_SIZE_MAX = 0.05
-# Not the default: on the green house (2026-11-18, four settings from 2 cm + 2% to 3 cm + 4% and
-# 2x size) it labelled 161-177 objects against the point buffer's 251, 36-40% of the walls,
-# and the room typing moved - the living room's far end untoured, at 3 cm + 4% no living room.
-# The point buffer's leak (a wall behind a curtain voted curtain) is answered by MOVING_* and
-# motion_label.grow's RIGID instead.
 MIN_HITS, MIN_SHARE = 2, 0.4
 # what the 3D motion moves (scene/motion_label.py) is held to more agreement: a wall Gaussian
 # labelled "curtain" sways - a wrong label there costs more than a missing one
 MOVING = ("curtain", "plant")
-MOVING_HITS, MOVING_SHARE = 3, 0.6
+MOVING_HITS, MOVING_SHARE = 3, 0.5      # (green house close-ups 2026-11-18: 0.6 stilled most of a curtain)
 OBJECT_VOXEL, MIN_OBJECT = 0.05, 150
 SKIP_OBJECTS = {"wall", "floor", "ceiling", "sky", "tree", "palm", "grass", "house", "building", "fence"}
 
@@ -229,12 +224,19 @@ class Voter:
         self.size = torch.from_numpy(np.ascontiguousarray(size, np.float32)).to(device)
         n = len(means)
         self.seen = torch.zeros(n, dtype=torch.int16, device=device)
+        self.seen_img = torch.zeros(n, dtype=torch.int16, device=device)   # (depth image views)
+        self.used_depth = False
         self.hits = torch.zeros((n, len(VOCAB) + 1), dtype=torch.int16, device=device)
+        self.moving_ids = torch.tensor([INDEX[m] for m in MOVING], dtype=torch.long, device=device)
 
     def add(self, viewmat: np.ndarray, K: np.ndarray, width: int, height: int, classes: np.ndarray,
             depth: np.ndarray | None = None) -> None:
-        """One view's votes. depth: the renderer's (h, w) depth image (render_bgr8_depth), else the
-        opaque Gaussians' point depth buffer decides what is visible."""
+        """One view's votes. Every class: visible by the opaque Gaussians' point depth buffer. The
+        classes that move (MOVING): with depth - the renderer's (h, w) depth image - their votes
+        count only where the Gaussian is at the surface the view shows (DEPTH_TOL_IMAGE), so the
+        window glass behind a sheer curtain, painted "curtain" by Mask2Former in most views, takes no
+        curtain votes (2026-11-18 close-ups: no MOVING threshold kept the glass still without
+        stilling most of the curtain); without, as every class."""
         torch = self.torch
         R = torch.from_numpy(viewmat[:3, :3].astype(np.float32)).to(self.device)
         t = torch.from_numpy(viewmat[:3, 3].astype(np.float32)).to(self.device)
@@ -245,7 +247,26 @@ class Voter:
         u = K[0, 0] * cam[:, 0] / zs + K[0, 2]
         v = K[1, 1] * cam[:, 1] / zs + K[1, 2]
         inside = front & (u >= 0) & (u < width) & (v >= 0) & (v < height)
+        zw, zh = max(1, width // ZBUF_DOWN), max(1, height // ZBUF_DOWN)
+        cell = (v * zh / height).long().clamp(0, zh - 1) * zw + (u * zw / width).long().clamp(0, zw - 1)
+        zbuf = torch.full((zh * zw,), float("inf"), device=self.device)
+        occ = inside & self.opaque
+        zbuf.scatter_reduce_(0, cell[occ], z[occ], reduce="amin")
+        visible = inside & (z <= zbuf[cell] * (1 + DEPTH_TOL[1]) + DEPTH_TOL[0])
+        cm = torch.from_numpy(classes).to(self.device)
+        mh, mw = classes.shape
+
+        def class_at(ix):
+            mu = (u[ix] * mw / width).long().clamp(0, mw - 1)
+            mv = (v[ix] * mh / height).long().clamp(0, mh - 1)
+            return cm[mv, mu].long()
+        idx = torch.nonzero(visible).squeeze(1)
+        self.seen[idx] += 1
+        c = class_at(idx)
+        keep = c > 0
         if depth is not None:
+            self.used_depth = True
+            keep &= ~torch.isin(c, self.moving_ids)          # the moving classes vote below
             dm = torch.from_numpy(np.asarray(depth, np.float32)).to(self.device)
             dh, dw = dm.shape
             du = (u * dw / width).long().clamp(0, dw - 1)
@@ -253,22 +274,12 @@ class Voter:
             d = dm[dv, du]
             d = torch.where(d > 0, d, torch.full_like(d, float("inf")))      # nothing drawn there
             ta, tr, tk = self.depth_tol
-            visible = inside & (z <= d * (1 + tr) + ta + tk * self.size)
-        else:
-            zw, zh = max(1, width // ZBUF_DOWN), max(1, height // ZBUF_DOWN)
-            cell = (v * zh / height).long().clamp(0, zh - 1) * zw + (u * zw / width).long().clamp(0, zw - 1)
-            zbuf = torch.full((zh * zw,), float("inf"), device=self.device)
-            occ = inside & self.opaque
-            zbuf.scatter_reduce_(0, cell[occ], z[occ], reduce="amin")
-            visible = inside & (z <= zbuf[cell] * (1 + DEPTH_TOL[1]) + DEPTH_TOL[0])
-        idx = torch.nonzero(visible).squeeze(1)
-        self.seen[idx] += 1
-        cm = torch.from_numpy(classes).to(self.device)
-        mh, mw = classes.shape
-        mu = (u[idx] * mw / width).long().clamp(0, mw - 1)
-        mv = (v[idx] * mh / height).long().clamp(0, mh - 1)
-        c = cm[mv, mu].long()
-        keep = c > 0
+            at_surface = inside & (z <= d * (1 + tr) + ta + tk * self.size)
+            js = torch.nonzero(at_surface).squeeze(1)
+            self.seen_img[js] += 1
+            cj = class_at(js)
+            mv_ = torch.isin(cj, self.moving_ids)
+            self.hits[js[mv_], cj[mv_]] += 1
         self.hits[idx[keep], c[keep]] += 1
 
     def labels(self, chunk: int = 1 << 20) -> np.ndarray:
@@ -294,13 +305,19 @@ class Voter:
             for name in MOVING:
                 moving |= best == INDEX[name]
             mh, ms = self.moving_vote
-            ok &= ~moving | ((top >= mh) & (top.float() >= ms * seen))
+            # (their share of the views that saw them at the surface, when there was a depth image)
+            seen_m = self.seen_img[a:a + chunk].clamp(min=1).float() if self.used_depth else seen
+            ok &= ~moving | ((top >= mh) & (top.float() >= ms * seen_m))
             out.append(torch.where(ok, best, torch.zeros_like(best)).to(torch.uint8).cpu().numpy())
         return np.concatenate(out) if out else np.zeros(0, np.uint8)
 
     @property
     def seen_np(self) -> np.ndarray:
         return self.seen.cpu().numpy()
+
+    @property
+    def seen_img_np(self) -> np.ndarray:
+        return self.seen_img.cpu().numpy()
 
 
 # ---- objects -------------------------------------------------------------------------------------
@@ -359,10 +376,7 @@ def label_scene(model, space, renderer, segmenter, rooms: list[str], scene_sha25
     empty: dict[str, list[float]] = {}
     for k, v in enumerate(views):
         V = look_at(space.to_scene(v.eye), space.to_scene(v.target), up=up)
-        if depth_tol is not None:              # opt-in: the renderer's depth image
-            bgr, depth = render_view_depth(renderer, V, K, VIEW_W, VIEW_H)
-        else:
-            bgr, depth = render_view(renderer, V, K, VIEW_W, VIEW_H), None
+        bgr, depth = render_view_depth(renderer, V, K, VIEW_W, VIEW_H)   # (None on the CPU renderer)
         # what the scan never captured renders as the black background: how much of the view it is
         empty.setdefault(v.room, []).append(float((bgr.max(axis=2) <= EMPTY_LEVEL).mean()))
         voter.add(V, K, VIEW_W, VIEW_H, class_map(segmenter, bgr), depth)
@@ -373,8 +387,8 @@ def label_scene(model, space, renderer, segmenter, rooms: list[str], scene_sha25
     lab = SceneLabels(labels, scene_sha256, len(model), objects)
     counts = {VOCAB[c - 1]: int(n) for c, n in zip(*np.unique(labels[labels > 0], return_counts=True))}
     stats = {"views": len(views), "rooms": len({v.room for v in views}), "vote_version": VOTE_VERSION,
-             "visibility": "depth_image" if depth_tol is not None else "point_buffer",
-             "depth_tol": list(voter.depth_tol) if depth_tol is not None else None,
+             "visibility": "point_buffer; moving classes at the depth image" if voter.used_depth else "point_buffer",
+             "depth_tol": list(voter.depth_tol) if voter.used_depth else None,
              "moving_vote": list(voter.moving_vote),
              "labelled": int((labels > 0).sum()), "seen": int((voter.seen_np > 0).sum()),
              "classes": dict(sorted(counts.items(), key=lambda t: -t[1])), "objects": len(objects),

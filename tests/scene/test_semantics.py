@@ -215,12 +215,12 @@ def test_a_wall_behind_a_curtain_takes_no_curtain_votes_with_a_depth_image():
 
 
 def test_what_moves_needs_more_agreement():
-    """At half the views agreeing, a sofa Gaussian is labelled and a curtain one is not (MOVING):
+    """At 4 of 9 views agreeing, a sofa Gaussian is labelled and a curtain one is not (MOVING):
     a wrong curtain label puts motion on a wall."""
     from tour_worker.scene.semantics import INDEX, Voter
     v = Voter(np.zeros((2, 3), np.float32), np.ones(2, np.float32))
-    v.seen[:] = 8
-    v.hits[0, INDEX["sofa"]] = 4
+    v.seen[:] = 9
+    v.hits[0, INDEX["sofa"]] = 4                 # 4 of 9: over MIN_SHARE, under MOVING_SHARE
     v.hits[1, INDEX["curtain"]] = 4
     lab = v.labels()
     assert lab[0] == INDEX["sofa"] and lab[1] == 0
@@ -261,7 +261,7 @@ def test_a_thick_wall_layer_is_seen_and_the_wall_behind_a_curtain_is_not():
     for v in (flat, sized):
         for _ in range(3):
             v.add(np.eye(4), K, W, H, classes, depth=depth)
-    seen_flat, seen_sized = flat.seen_np, sized.seen_np
+    seen_flat, seen_sized = flat.seen_img_np, sized.seen_img_np      # (at the depth image's surface)
     assert (seen_flat[:n] == 0).any()                    # the flat allowance loses the back of the layer
     assert (seen_sized[:n] > 0).all()                    # sized: the whole layer
     assert (seen_sized[n:] == 0).all()                   # and still not the wall behind
