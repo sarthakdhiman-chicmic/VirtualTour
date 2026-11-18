@@ -226,3 +226,16 @@ def test_what_moves_needs_more_agreement():
     assert lab[0] == INDEX["sofa"] and lab[1] == 0
     v.hits[1, INDEX["curtain"]] = 5
     assert v.labels()[1] == INDEX["curtain"]
+
+
+def test_one_thing_named_differently_from_view_to_view_is_still_labelled():
+    """Seen 8 times as sofa x3, armchair x3, chair x2: eight votes for seating, labelled sofa (the
+    first of its most-voted classes) - per class it was three of eight, under MIN_SHARE, unlabelled."""
+    from tour_worker.scene.semantics import INDEX, Voter
+    v = Voter(np.zeros((3, 3), np.float32), np.ones(3, np.float32))
+    v.seen[:] = 8
+    v.hits[0, INDEX["sofa"]], v.hits[0, INDEX["armchair"]], v.hits[0, INDEX["chair"]] = 3, 3, 2
+    v.hits[1, INDEX["armchair"]], v.hits[1, INDEX["sofa"]] = 4, 1            # its most-voted class
+    v.hits[2, INDEX["sofa"]], v.hits[2, INDEX["bed"]] = 2, 2                 # different things: no group
+    lab = v.labels(chunk=2)                                                   # (across chunks too)
+    assert lab[0] == INDEX["sofa"] and lab[1] == INDEX["armchair"] and lab[2] == 0

@@ -165,6 +165,39 @@ def class_map(segmenter, bgr: np.ndarray) -> np.ndarray:
 
 
 # ---- the vote ------------------------------------------------------------------------------------
+# classes Mask2Former uses for one thing seen from different sides: voted together (Voter.labels)
+GROUPS = (
+    ("sofa", "armchair", "chair", "swivel chair", "ottoman", "bench", "stool"),
+    ("table", "coffee table", "desk", "kitchen island", "counter", "countertop"),
+    ("cabinet", "chest of drawers", "wardrobe", "shelf", "bookcase", "buffet"),
+    ("door", "screen door"),
+    ("stairs", "stairway", "step"),
+    ("lamp", "light", "sconce", "chandelier"),
+    ("painting", "poster"),
+    ("television receiver", "computer", "monitor"),
+    ("plant", "flower"),
+)
+VOTE_VERSION = 2          # 1: per class; 2: per GROUP (2026-11-18)
+
+
+def _group_tables(torch, device):
+    """(class -> group id (len(VOCAB) + 1,), group x class membership (groups, len(VOCAB) + 1)):
+    every class not in GROUPS is a group of its own; index 0 (unlabelled) is a group of its own."""
+    n = len(VOCAB) + 1
+    gid = list(range(n))
+    nxt = n
+    for g in GROUPS:
+        for name in g:
+            gid[INDEX[name]] = nxt
+        nxt += 1
+    used = sorted(set(gid))
+    remap = {g: k for k, g in enumerate(used)}
+    gid_t = torch.tensor([remap[g] for g in gid], dtype=torch.long, device=device)
+    member = torch.zeros((len(used), n), dtype=torch.int32, device=device)
+    member[gid_t, torch.arange(n, device=device)] = 1
+    return gid_t, member
+
+
 class Voter:
     """Accumulates seen / per-class hits over views (torch; on `device`)."""
 
@@ -216,19 +249,31 @@ class Voter:
         keep = c > 0
         self.hits[idx[keep], c[keep]] += 1
 
-    def labels(self) -> np.ndarray:
+    def labels(self, chunk: int = 1 << 20) -> np.ndarray:
+        """Each Gaussian's class: its votes summed per GROUP (a sectional seen as sofa in three
+        views, armchair in three and chair in two is eight votes for seating, not three for sofa -
+        Mask2Former names one thing differently from view to view), the group passing MIN_HITS /
+        MIN_SHARE of the views that saw it (MOVING_* when its class moves), then the group's
+        most-voted class. Rows in chunks: the group sums stay small on the GPU."""
         torch = self.torch
-        h = self.hits.clone()
-        h[:, 0] = 0
-        best = torch.argmax(h, dim=1)
-        top = h.gather(1, best[:, None]).squeeze(1).to(torch.int32)
-        seen = self.seen.clamp(min=1).float()
-        ok = (top >= MIN_HITS) & (top.float() >= MIN_SHARE * seen)
-        moving = torch.zeros_like(ok)
-        for name in MOVING:
-            moving |= best == INDEX[name]
-        ok &= ~moving | ((top >= MOVING_HITS) & (top.float() >= MOVING_SHARE * seen))
-        return torch.where(ok, best, torch.zeros_like(best)).to(torch.uint8).cpu().numpy()
+        gid, gmask = _group_tables(torch, self.device)
+        out = []
+        for a in range(0, len(self.seen), chunk):
+            h = self.hits[a:a + chunk].to(torch.int32)
+            h[:, 0] = 0
+            hg = torch.zeros((len(h), gmask.shape[0]), dtype=torch.int32, device=self.device)
+            hg.index_add_(1, gid, h)
+            bg = torch.argmax(hg, dim=1)
+            top = hg.gather(1, bg[:, None]).squeeze(1)
+            best = torch.argmax(h * gmask[bg], dim=1)          # the group's most-voted class
+            seen = self.seen[a:a + chunk].clamp(min=1).float()
+            ok = (top >= MIN_HITS) & (top.float() >= MIN_SHARE * seen)
+            moving = torch.zeros_like(ok)
+            for name in MOVING:
+                moving |= best == INDEX[name]
+            ok &= ~moving | ((top >= MOVING_HITS) & (top.float() >= MOVING_SHARE * seen))
+            out.append(torch.where(ok, best, torch.zeros_like(best)).to(torch.uint8).cpu().numpy())
+        return np.concatenate(out) if out else np.zeros(0, np.uint8)
 
     @property
     def seen_np(self) -> np.ndarray:
@@ -300,7 +345,7 @@ def label_scene(model, space, renderer, segmenter, rooms: list[str], scene_sha25
     objects = find_objects(space.local, labels, space)
     lab = SceneLabels(labels, scene_sha256, len(model), objects)
     counts = {VOCAB[c - 1]: int(n) for c, n in zip(*np.unique(labels[labels > 0], return_counts=True))}
-    stats = {"views": len(views), "rooms": len({v.room for v in views}),
+    stats = {"views": len(views), "rooms": len({v.room for v in views}), "vote_version": VOTE_VERSION,
              "labelled": int((labels > 0).sum()), "seen": int((voter.seen_np > 0).sum()),
              "classes": dict(sorted(counts.items(), key=lambda t: -t[1])), "objects": len(objects),
              # per room: the share of its survey views the scan covers (1 - empty black)
