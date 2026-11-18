@@ -56,7 +56,8 @@ SPOT_M2, SPOTS_MIN, SPOTS_MAX = 3.0, 10, 40     # one survey spot per 3 m2 of op
 OPAQUE = 0.5
 ZBUF_DOWN = 4
 DEPTH_TOL = (0.03, 0.04)          # the point depth buffer's (CPU renderer): visible within 3 cm + 4%
-# with the renderer's depth image (GPU): every pixel's opacity-weighted depth at full resolution. A
+# OPT-IN (a scene_label request's depth_tol; the point buffer is the default): with the renderer's
+# depth image (GPU), every pixel's opacity-weighted depth at full resolution. A
 # Gaussian is visible within DEPTH_TOL_IMAGE of the surface the view shows there: metres + a share of
 # the depth + DEPTH_SIZE_K x its own size (its largest scale, at most DEPTH_SIZE_MAX m) - a wall's or
 # a mirror's splats lie a few cm deep in a thick, noisy layer (2026-11-18, a flat 2 cm + 2%: the
@@ -65,6 +66,11 @@ DEPTH_TOL = (0.03, 0.04)          # the point depth buffer's (CPU renderer): vis
 # at 3 m, let it through, and it took the curtain's votes)
 DEPTH_TOL_IMAGE = (0.02, 0.02, 1.0)
 DEPTH_SIZE_MAX = 0.05
+# Not the default: on the green house (2026-11-18, four settings from 2 cm + 2% to 3 cm + 4% and
+# 2x size) it labelled 161-177 objects against the point buffer's 251, 36-40% of the walls,
+# and the room typing moved - the living room's far end untoured, at 3 cm + 4% no living room.
+# The point buffer's leak (a wall behind a curtain voted curtain) is answered by MOVING_* and
+# motion_label.grow's RIGID instead.
 MIN_HITS, MIN_SHARE = 2, 0.4
 # what the 3D motion moves (scene/motion_label.py) is held to more agreement: a wall Gaussian
 # labelled "curtain" sways - a wrong label there costs more than a missing one
@@ -344,7 +350,10 @@ def label_scene(model, space, renderer, segmenter, rooms: list[str], scene_sha25
     empty: dict[str, list[float]] = {}
     for k, v in enumerate(views):
         V = look_at(space.to_scene(v.eye), space.to_scene(v.target), up=up)
-        bgr, depth = render_view_depth(renderer, V, K, VIEW_W, VIEW_H)
+        if depth_tol is not None:              # opt-in: the renderer's depth image
+            bgr, depth = render_view_depth(renderer, V, K, VIEW_W, VIEW_H)
+        else:
+            bgr, depth = render_view(renderer, V, K, VIEW_W, VIEW_H), None
         # what the scan never captured renders as the black background: how much of the view it is
         empty.setdefault(v.room, []).append(float((bgr.max(axis=2) <= EMPTY_LEVEL).mean()))
         voter.add(V, K, VIEW_W, VIEW_H, class_map(segmenter, bgr), depth)
@@ -354,7 +363,9 @@ def label_scene(model, space, renderer, segmenter, rooms: list[str], scene_sha25
     objects = find_objects(space.local, labels, space)
     lab = SceneLabels(labels, scene_sha256, len(model), objects)
     counts = {VOCAB[c - 1]: int(n) for c, n in zip(*np.unique(labels[labels > 0], return_counts=True))}
-    stats = {"views": len(views), "rooms": len({v.room for v in views}), "vote_version": VOTE_VERSION, "depth_tol": list(voter.depth_tol),
+    stats = {"views": len(views), "rooms": len({v.room for v in views}), "vote_version": VOTE_VERSION,
+             "visibility": "depth_image" if depth_tol is not None else "point_buffer",
+             "depth_tol": list(voter.depth_tol) if depth_tol is not None else None,
              "labelled": int((labels > 0).sum()), "seen": int((voter.seen_np > 0).sum()),
              "classes": dict(sorted(counts.items(), key=lambda t: -t[1])), "objects": len(objects),
              # per room: the share of its survey views the scan covers (1 - empty black)
