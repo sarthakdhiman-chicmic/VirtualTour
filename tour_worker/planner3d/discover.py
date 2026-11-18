@@ -272,6 +272,10 @@ SEED_APART = 1.5         # m between two zones' starts
 ZONE_NEAR = 2.0          # m: a room's centre this near a zone makes it that zone's kind of room
 ZONE_APART = 2.0         # m between zone centres for them to be two rooms
 ZONE_FLOOR_M2 = 3.0      # a zone's room needs this much free floor, else it joins its neighbour
+# a kitchen's appliances (stove, hood, dishwasher - COOKING) make it one however little open floor
+# the split leaves it: a galley kitchen beside a dining table (green house 2026-11-18: 2.3 m2 once
+# the dining room's start moved 0.5 m, and the kitchen was folded into the dining room)
+ZONE_FLOOR_MIN = {"kitchen": 1.5}
 ZONE_TYPE = {"living": "living_room", "dining": "dining_room", "kitchen": "kitchen", "office": "home_office",
              "bath": "bathroom"}        # a zone's room is what its zone is (beds: room_types picks the primary)
 
@@ -423,7 +427,7 @@ def split_by_zones(space, points: dict[str, np.ndarray], objects: list[dict]):
             space.set_rooms(trial)
             area = {nm: float((space.room_of == space.room_keys.index(nm)).sum()) * CELL * CELL
                     if nm in space.room_keys else 0.0 for nm in names}
-            small = [n for n, nm in enumerate(names) if area[nm] < ZONE_FLOOR_M2]
+            small = [n for n, nm in enumerate(names) if area[nm] < ZONE_FLOOR_MIN.get(keep[n]["kind"], ZONE_FLOOR_M2)]
             if not small:
                 out = trial
                 kinds.update({nm: z["kind"] for nm, z in zip(names, keep)})
