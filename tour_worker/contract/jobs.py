@@ -149,6 +149,9 @@ class SceneLabelRequest(_Request):
     rooms: Optional[list[PlanRoom]] = None
     output_prefix: str = Field(min_length=1)
     image_urls: dict[str, str] = Field(default_factory=dict)   # optional: scene uri -> fetch URL
+    # tuning only: the vote's visibility allowance [metres, share of depth, x the Gaussian's size]
+    # (scene/semantics.DEPTH_TOL_IMAGE when None) - to compare settings on a scene without a deploy
+    depth_tol: Optional[list[float]] = Field(default=None, min_length=3, max_length=3)
 
 
 class TourPlanRequest(_Request):

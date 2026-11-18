@@ -77,7 +77,8 @@ def run_scene_label(request: dict, storage, workdir: str, settings: Settings | N
             segmenter = get_segmenter(settings)
     with sw.stage("survey_segment_vote"):
         labels, stats, seen = label_scene(model, space, renderer, segmenter, keys, sc.sha256,
-                                          progress=lambda d, n: report.progress(d, n, "views"))
+                                          progress=lambda d, n: report.progress(d, n, "views"),
+                                          depth_tol=tuple(req.depth_tol) if req.depth_tol else None)
     report.note(f"labelled {stats['labelled']:,} of {stats['seen']:,} seen Gaussians; {stats['objects']} objects")
     with sw.stage("motion"):
         motion = motion_from_labels(model, labels, seen, space.local, space.up_scene, space.R, sc.sha256)

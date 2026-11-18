@@ -56,12 +56,15 @@ SPOT_M2, SPOTS_MIN, SPOTS_MAX = 3.0, 10, 40     # one survey spot per 3 m2 of op
 OPAQUE = 0.5
 ZBUF_DOWN = 4
 DEPTH_TOL = (0.03, 0.04)          # the point depth buffer's (CPU renderer): visible within 3 cm + 4%
-# with the renderer's depth image (GPU): every pixel's opacity-weighted depth at full resolution, so
-# a Gaussian is visible when it is within 2 cm + 2% of the surface the view shows there - a wall
-# 5-15 cm behind a curtain no longer passes (the point buffer's 4x4-pixel cells and 3 cm + 4%,
-# ~15 cm at 3 m, let it, and it took the curtain's votes; semi-transparent Gaussians never wrote
-# that buffer at all)
-DEPTH_TOL_IMAGE = (0.02, 0.02)
+# with the renderer's depth image (GPU): every pixel's opacity-weighted depth at full resolution. A
+# Gaussian is visible within DEPTH_TOL_IMAGE of the surface the view shows there: metres + a share of
+# the depth + DEPTH_SIZE_K x its own size (its largest scale, at most DEPTH_SIZE_MAX m) - a wall's or
+# a mirror's splats lie a few cm deep in a thick, noisy layer (2026-11-18, a flat 2 cm + 2%: the
+# green house lost 65% of its wall labels, 72% of its mirrors, its primary bed), while a wall
+# 5-15 cm behind a curtain still fails (the point buffer's 4x4-pixel cells and 3 cm + 4%, ~15 cm
+# at 3 m, let it through, and it took the curtain's votes)
+DEPTH_TOL_IMAGE = (0.02, 0.02, 1.0)
+DEPTH_SIZE_MAX = 0.05
 MIN_HITS, MIN_SHARE = 2, 0.4
 # what the 3D motion moves (scene/motion_label.py) is held to more agreement: a wall Gaussian
 # labelled "curtain" sways - a wrong label there costs more than a missing one
@@ -201,11 +204,16 @@ def _group_tables(torch, device):
 class Voter:
     """Accumulates seen / per-class hits over views (torch; on `device`)."""
 
-    def __init__(self, means: np.ndarray, opacities: np.ndarray, device: str = "cpu"):
+    def __init__(self, means: np.ndarray, opacities: np.ndarray, device: str = "cpu",
+                 scales: np.ndarray | None = None, depth_tol: tuple | None = None):
         import torch
         self.torch, self.device = torch, device
         self.pts = torch.from_numpy(means.astype(np.float32)).to(device)
         self.opaque = torch.from_numpy(opacities >= OPAQUE).to(device)
+        self.depth_tol = tuple(depth_tol) if depth_tol else DEPTH_TOL_IMAGE
+        size = (np.minimum(np.asarray(scales, np.float32).max(1), DEPTH_SIZE_MAX) if scales is not None
+                else np.zeros(len(means), np.float32))
+        self.size = torch.from_numpy(np.ascontiguousarray(size, np.float32)).to(device)
         n = len(means)
         self.seen = torch.zeros(n, dtype=torch.int16, device=device)
         self.hits = torch.zeros((n, len(VOCAB) + 1), dtype=torch.int16, device=device)
@@ -231,7 +239,8 @@ class Voter:
             dv = (v * dh / height).long().clamp(0, dh - 1)
             d = dm[dv, du]
             d = torch.where(d > 0, d, torch.full_like(d, float("inf")))      # nothing drawn there
-            visible = inside & (z <= d * (1 + DEPTH_TOL_IMAGE[1]) + DEPTH_TOL_IMAGE[0])
+            ta, tr, tk = self.depth_tol
+            visible = inside & (z <= d * (1 + tr) + ta + tk * self.size)
         else:
             zw, zh = max(1, width // ZBUF_DOWN), max(1, height // ZBUF_DOWN)
             cell = (v * zh / height).long().clamp(0, zh - 1) * zw + (u * zw / width).long().clamp(0, zw - 1)
@@ -322,14 +331,14 @@ EMPTY_LEVEL = 3          # a pixel at most this bright in every channel is the r
 
 
 def label_scene(model, space, renderer, segmenter, rooms: list[str], scene_sha256: str,
-                progress=None, device: str | None = None) -> tuple[SceneLabels, dict, np.ndarray]:
+                progress=None, device: str | None = None, depth_tol: tuple | None = None) -> tuple[SceneLabels, dict, np.ndarray]:
     """Survey, segment, vote: the scene's labels and objects, stats, and how many views saw each
     Gaussian (the motion step grows labels into the unseen ones). renderer: render/splat_shot.make_renderer's
     (its render_view(viewmat, K, w, h) -> BGR uint8); progress(done, total) per view."""
     from tour_worker.scene.camera import intrinsics, look_at
     views = survey_views(space, rooms)
     dev = device or str(getattr(getattr(renderer, "means", None), "device", "cpu"))
-    voter = Voter(model.means, model.opacities, dev)
+    voter = Voter(model.means, model.opacities, dev, scales=model.scales, depth_tol=depth_tol)
     K = intrinsics(VIEW_HFOV, VIEW_W, VIEW_H)
     up = space.up_scene
     empty: dict[str, list[float]] = {}
@@ -345,7 +354,7 @@ def label_scene(model, space, renderer, segmenter, rooms: list[str], scene_sha25
     objects = find_objects(space.local, labels, space)
     lab = SceneLabels(labels, scene_sha256, len(model), objects)
     counts = {VOCAB[c - 1]: int(n) for c, n in zip(*np.unique(labels[labels > 0], return_counts=True))}
-    stats = {"views": len(views), "rooms": len({v.room for v in views}), "vote_version": VOTE_VERSION,
+    stats = {"views": len(views), "rooms": len({v.room for v in views}), "vote_version": VOTE_VERSION, "depth_tol": list(voter.depth_tol),
              "labelled": int((labels > 0).sum()), "seen": int((voter.seen_np > 0).sum()),
              "classes": dict(sorted(counts.items(), key=lambda t: -t[1])), "objects": len(objects),
              # per room: the share of its survey views the scan covers (1 - empty black)

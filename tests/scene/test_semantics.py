@@ -239,3 +239,29 @@ def test_one_thing_named_differently_from_view_to_view_is_still_labelled():
     v.hits[2, INDEX["sofa"]], v.hits[2, INDEX["bed"]] = 2, 2                 # different things: no group
     lab = v.labels(chunk=2)                                                   # (across chunks too)
     assert lab[0] == INDEX["sofa"] and lab[1] == INDEX["armchair"] and lab[2] == 0
+
+
+def test_a_thick_wall_layer_is_seen_and_the_wall_behind_a_curtain_is_not():
+    """The depth image's allowance grows with each Gaussian's size: a wall's noisy layer, splats up
+    to 8 cm deep (each 4 cm across), is seen; a wall 10 cm behind a curtain is still hidden."""
+    from tour_worker.scene.camera import intrinsics
+    from tour_worker.scene.semantics import INDEX, Voter
+    W, H = 64, 48
+    K = intrinsics(60.0, W, H)
+    xs, ys = np.meshgrid(np.linspace(-0.3, 0.3, 12), np.linspace(-0.2, 0.2, 10))
+    n = xs.size
+    layer = np.c_[xs.ravel(), ys.ravel(), 2.0 + np.linspace(0.0, 0.08, n)]           # 8 cm deep
+    behind = np.c_[xs.ravel(), ys.ravel(), np.full(n, 2.1)]                          # 10 cm back
+    pts = np.vstack([layer, behind]).astype(np.float32)
+    scales = np.r_[np.full((n, 3), 0.04), np.full((n, 3), 0.03)].astype(np.float32)
+    classes = np.full((H, W), INDEX["wall"], np.uint8)
+    depth = np.full((H, W), 2.0, np.float32)
+    flat = Voter(pts, np.ones(len(pts), np.float32), depth_tol=(0.02, 0.02, 0.0))
+    sized = Voter(pts, np.ones(len(pts), np.float32), scales=scales)
+    for v in (flat, sized):
+        for _ in range(3):
+            v.add(np.eye(4), K, W, H, classes, depth=depth)
+    seen_flat, seen_sized = flat.seen_np, sized.seen_np
+    assert (seen_flat[:n] == 0).any()                    # the flat allowance loses the back of the layer
+    assert (seen_sized[:n] > 0).all()                    # sized: the whole layer
+    assert (seen_sized[n:] == 0).all()                   # and still not the wall behind
