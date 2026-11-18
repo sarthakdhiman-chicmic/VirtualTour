@@ -58,6 +58,7 @@ MOVE_LEN = (0.6, 2.6)
 CORES = (0.75, 0.6, 0.5, 0.4)
 SIT_BACK = 2.4                # m from the piece at the start of a walkway move
 OCC_NEAR, MAX_OCC, OCC_W, OCC_CHECK_KIND = 2.0, 0.20, 3.0, 30
+SHOT_CHECKS = 160             # rendered checks (lens / void) one shot's choice may spend over all its tiers
 OPENING_GLIDE = 1.5          # the tour opens by moving into the home
 # near-lens distance per move: a walkway composes on a piece, so nothing may stand within 2 m in
 # front of it; a glide or pan looks down a room, where walls 1.2 m+ away are the room itself
@@ -759,6 +760,10 @@ class RoomMoves:
             cells = np.c_[sp.lo[0] + (xs + .5) * 0.05, sp.lo[1] + (ys + .5) * 0.05]
             c = cells.mean(0)
             self.occ.focus(c, float(np.linalg.norm(cells - c, axis=1).max()) + OCC_NEAR + 0.5)
+        # one budget of rendered checks for the shot, over all its tiers: a weak scan's room has
+        # dozens of tiers (preference x clearance x fallbacks), each once allowed OCC_CHECK_KIND a
+        # kind - Home Scan planning went from 6 to 30+ minutes
+        self._budget = {"kinds": {}, "left": SHOT_CHECKS}
         least, seen = None, set()
         for cands in tiers:
             for m in cands:
@@ -999,7 +1004,8 @@ class RoomMoves:
         ceiling, and the room got a held pan)."""
         sp = self.space
         cands = sorted(cands, key=lambda m: -m.score)
-        least, checked, done = None, {}, set()
+        bud = getattr(self, "_budget", None) or {"kinds": {}, "left": SHOT_CHECKS}
+        least, checked, done = None, bud["kinds"], set()
         st = self.stage_stats(room, getattr(self, "_cov_now", False))
         while True:
             best, passed, stopped = None, [], False
@@ -1011,6 +1017,9 @@ class RoomMoves:
                     break
                 if checked.get(m.kind, 0) >= OCC_CHECK_KIND:      # every kind gets its share of checks
                     continue
+                if bud["left"] <= 0:                            # the shot's checks are spent
+                    st["budget_out"] += 1
+                    break
                 if m.kind in OWN_SHARE and "own_share" not in m.why:    # it films its own room
                     k = len(m.eye) // 2
                     share = sp.own_share(room, m.eye[k], math.atan2(*(m.tgt[k][:2] - m.eye[k])[::-1]), HFOV)
@@ -1028,6 +1037,7 @@ class RoomMoves:
                     st["fail_speed"] += 1
                     continue
                 checked[m.kind] = checked.get(m.kind, 0) + 1
+                bud["left"] -= 1
                 m.occ = self._cover(m)
                 if least is None or m.occ < least.occ:
                     least = m
@@ -1043,6 +1053,7 @@ class RoomMoves:
             # first, down the ranking until one passes
             for m in sorted(passed, key=lambda m: -(m.score - OCC_W * m.occ)):
                 if m.kind != "detail":
+                    bud["left"] -= 1
                     v = self._void(m)
                     m.why["void"] = round(v, 3)
                     if v > VOID_MAX:
