@@ -55,7 +55,13 @@ SPOTS_PER_ROOM, SPOT_MIN_GAP = 2, 1.2
 SPOT_M2, SPOTS_MIN, SPOTS_MAX = 3.0, 10, 40     # one survey spot per 3 m2 of open floor
 OPAQUE = 0.5
 ZBUF_DOWN = 4
-DEPTH_TOL = (0.03, 0.04)
+DEPTH_TOL = (0.03, 0.04)          # the point depth buffer's (CPU renderer): visible within 3 cm + 4%
+# with the renderer's depth image (GPU): every pixel's opacity-weighted depth at full resolution, so
+# a Gaussian is visible when it is within 2 cm + 2% of the surface the view shows there - a wall
+# 5-15 cm behind a curtain no longer passes (the point buffer's 4x4-pixel cells and 3 cm + 4%,
+# ~15 cm at 3 m, let it, and it took the curtain's votes; semi-transparent Gaussians never wrote
+# that buffer at all)
+DEPTH_TOL_IMAGE = (0.02, 0.02)
 MIN_HITS, MIN_SHARE = 2, 0.4
 OBJECT_VOXEL, MIN_OBJECT = 0.05, 150
 SKIP_OBJECTS = {"wall", "floor", "ceiling", "sky", "tree", "palm", "grass", "house", "building", "fence"}
@@ -167,7 +173,10 @@ class Voter:
         self.seen = torch.zeros(n, dtype=torch.int16, device=device)
         self.hits = torch.zeros((n, len(VOCAB) + 1), dtype=torch.int16, device=device)
 
-    def add(self, viewmat: np.ndarray, K: np.ndarray, width: int, height: int, classes: np.ndarray) -> None:
+    def add(self, viewmat: np.ndarray, K: np.ndarray, width: int, height: int, classes: np.ndarray,
+            depth: np.ndarray | None = None) -> None:
+        """One view's votes. depth: the renderer's (h, w) depth image (render_bgr8_depth), else the
+        opaque Gaussians' point depth buffer decides what is visible."""
         torch = self.torch
         R = torch.from_numpy(viewmat[:3, :3].astype(np.float32)).to(self.device)
         t = torch.from_numpy(viewmat[:3, 3].astype(np.float32)).to(self.device)
@@ -178,12 +187,21 @@ class Voter:
         u = K[0, 0] * cam[:, 0] / zs + K[0, 2]
         v = K[1, 1] * cam[:, 1] / zs + K[1, 2]
         inside = front & (u >= 0) & (u < width) & (v >= 0) & (v < height)
-        zw, zh = max(1, width // ZBUF_DOWN), max(1, height // ZBUF_DOWN)
-        cell = (v * zh / height).long().clamp(0, zh - 1) * zw + (u * zw / width).long().clamp(0, zw - 1)
-        zbuf = torch.full((zh * zw,), float("inf"), device=self.device)
-        occ = inside & self.opaque
-        zbuf.scatter_reduce_(0, cell[occ], z[occ], reduce="amin")
-        visible = inside & (z <= zbuf[cell] * (1 + DEPTH_TOL[1]) + DEPTH_TOL[0])
+        if depth is not None:
+            dm = torch.from_numpy(np.asarray(depth, np.float32)).to(self.device)
+            dh, dw = dm.shape
+            du = (u * dw / width).long().clamp(0, dw - 1)
+            dv = (v * dh / height).long().clamp(0, dh - 1)
+            d = dm[dv, du]
+            d = torch.where(d > 0, d, torch.full_like(d, float("inf")))      # nothing drawn there
+            visible = inside & (z <= d * (1 + DEPTH_TOL_IMAGE[1]) + DEPTH_TOL_IMAGE[0])
+        else:
+            zw, zh = max(1, width // ZBUF_DOWN), max(1, height // ZBUF_DOWN)
+            cell = (v * zh / height).long().clamp(0, zh - 1) * zw + (u * zw / width).long().clamp(0, zw - 1)
+            zbuf = torch.full((zh * zw,), float("inf"), device=self.device)
+            occ = inside & self.opaque
+            zbuf.scatter_reduce_(0, cell[occ], z[occ], reduce="amin")
+            visible = inside & (z <= zbuf[cell] * (1 + DEPTH_TOL[1]) + DEPTH_TOL[0])
         idx = torch.nonzero(visible).squeeze(1)
         self.seen[idx] += 1
         cm = torch.from_numpy(classes).to(self.device)
@@ -263,10 +281,10 @@ def label_scene(model, space, renderer, segmenter, rooms: list[str], scene_sha25
     empty: dict[str, list[float]] = {}
     for k, v in enumerate(views):
         V = look_at(space.to_scene(v.eye), space.to_scene(v.target), up=up)
-        bgr = render_view(renderer, V, K, VIEW_W, VIEW_H)
+        bgr, depth = render_view_depth(renderer, V, K, VIEW_W, VIEW_H)
         # what the scan never captured renders as the black background: how much of the view it is
         empty.setdefault(v.room, []).append(float((bgr.max(axis=2) <= EMPTY_LEVEL).mean()))
-        voter.add(V, K, VIEW_W, VIEW_H, class_map(segmenter, bgr))
+        voter.add(V, K, VIEW_W, VIEW_H, class_map(segmenter, bgr), depth)
         if progress:
             progress(k + 1, len(views))
     labels = voter.labels()
@@ -279,6 +297,16 @@ def label_scene(model, space, renderer, segmenter, rooms: list[str], scene_sha25
              # per room: the share of its survey views the scan covers (1 - empty black)
              "room_capture": {r: round(1.0 - float(np.mean(e)), 3) for r, e in empty.items()}}
     return lab, stats, voter.seen_np
+
+
+def render_view_depth(renderer, viewmat, K, w: int, h: int) -> tuple[np.ndarray, np.ndarray | None]:
+    """(BGR uint8, depth image or None): the GPU renderer's depth image with the frame; the CPU
+    reference renderer has none (the vote falls back to the point depth buffer)."""
+    if hasattr(renderer, "render_bgr8_depth"):
+        from tour_worker.render.splat_shot import GPU_LOCK
+        with GPU_LOCK:
+            return renderer.render_bgr8_depth(viewmat, K, w, h)
+    return render_view(renderer, viewmat, K, w, h), None
 
 
 def render_view(renderer, viewmat, K, w: int, h: int) -> np.ndarray:

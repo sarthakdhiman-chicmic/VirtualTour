@@ -114,6 +114,24 @@ class GsplatRenderer(MotionMixin):
             return np.ascontiguousarray(out.cpu().numpy())
 
 
+    def render_bgr8_depth(self, viewmat: np.ndarray, K: np.ndarray, width: int, height: int):
+        """(BGR uint8 frame, (h, w) float32 expected depth): one rasterisation with the depth as a
+        fourth channel - each Gaussian's depth weighted by what it adds to the pixel, so a sheer
+        curtain pulls a pixel's depth forward by its opacity (scene/semantics.py's visibility
+        test). Black background, as render_bgr8's default."""
+        t = self.torch
+        with t.no_grad():
+            v = t.from_numpy(np.asarray(viewmat, np.float32))[None].cuda()
+            k = t.from_numpy(np.asarray(K, np.float32))[None].cuda()
+            img, _, _ = self._raster(self.means, self.quats, self.scales, self.opac, self.sh, v, k, width, height,
+                                     sh_degree=self.degree, near_plane=0.05, far_plane=1e4,
+                                     backgrounds=None, packed=False, rasterize_mode="classic",
+                                     render_mode="RGB+ED")
+            rgb, depth = img[0, ..., :3].float(), img[0, ..., 3].float()
+            out = area_reduce_bgr8(rgb, width, height, self._weights)
+            return np.ascontiguousarray(out.cpu().numpy()), np.ascontiguousarray(depth.cpu().numpy())
+
+
 def _nvidia_driver() -> str | None:
     try:
         import subprocess

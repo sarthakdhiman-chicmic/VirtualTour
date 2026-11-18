@@ -187,3 +187,28 @@ def test_with_no_rooms_given_the_job_finds_and_names_them(tmp_path, monkeypatch)
     rooms = {r["room_type"]: r for r in res["rooms"]}
     assert set(rooms) == {"living_room", "primary_bedroom"}
     assert rooms["living_room"]["point"][0] < 6.0 < rooms["primary_bedroom"]["point"][0]     # the wall at x = 6
+
+
+def test_a_wall_behind_a_curtain_takes_no_curtain_votes_with_a_depth_image():
+    """With the renderer's depth image, a wall 10 cm behind a curtain is hidden (the point depth
+    buffer's 3 cm + 4% let it through, and it took the curtain's votes)."""
+    from tour_worker.scene.camera import intrinsics
+    from tour_worker.scene.semantics import INDEX, Voter
+    W, H = 64, 48
+    K = intrinsics(60.0, W, H)
+    xs, ys = np.meshgrid(np.linspace(-0.3, 0.3, 12), np.linspace(-0.2, 0.2, 10))
+    curtain = np.c_[xs.ravel(), ys.ravel(), np.full(xs.size, 2.0)]
+    wall = np.c_[xs.ravel(), ys.ravel(), np.full(xs.size, 2.1)]
+    pts = np.vstack([curtain, wall]).astype(np.float32)
+    # a sheer curtain: below the point buffer's opacity, so it never hid the wall there
+    opac = np.r_[np.full(len(curtain), 0.3), np.full(len(wall), 0.9)].astype(np.float32)
+    classes = np.full((H, W), INDEX["curtain"], np.uint8)
+    view = np.eye(4)
+    v_img, v_buf = Voter(pts, opac), Voter(pts, opac)
+    for _ in range(3):
+        v_img.add(view, K, W, H, classes, depth=np.full((H, W), 2.0, np.float32))
+        v_buf.add(view, K, W, H, classes)
+    lab_img, lab_buf = v_img.labels(), v_buf.labels()
+    n = len(curtain)
+    assert (lab_img[:n] == INDEX["curtain"]).all() and (lab_img[n:] == 0).all()
+    assert (lab_buf[n:] == INDEX["curtain"]).all()        # the old buffer's leak, kept as the fallback
