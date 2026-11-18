@@ -680,18 +680,32 @@ class RoomMoves:
                      else [own_room(roomy(t)) for t in tiers] + [own_room(roomy(glides))])
         stats["passed_rules"] += _n(tiers)
         # the room's first shot shows what makes it that room (TYPE_SIGNS), when anything does
+        typed: set | None = None
         if piece_rank == 0 and covered is None and kind != "detail" and self.type_signs(room):
+            # in order of preference, never a hard filter: the bed / sofa whole (user 2026-11-16:
+            # the primary bedroom opened on a mirror and a corner of the bed), then what shows the
+            # room's kind, then the rest - a room is shown even where no view of its kind passes the
+            # render checks (Home Scan v17: six whole-sofa views, all with a door frame at the edge,
+            # and the living room was skipped while 1369 other views were never tried)
             shown = [[m for m in t if m.kind in ("link",) or self.shows_type(room, m)] for t in tiers]
-            # a bedroom / living room opens on its bed / sofa whole (user 2026-11-16: the primary
-            # bedroom opened on a mirror and a corner of the bed); else on what shows its kind
+            typed = {id(m) for t in shown for m in t}
             if any(o["class"] in TYPE_WHOLE for o in self.type_signs(room)):
-                whole = [[m for m in t if m.kind in ("link",) or self.shows_type(room, m, whole=True)] for t in shown]
-                if any(whole):
-                    shown = whole
-            if any(shown):
-                tiers = shown
-            else:
-                type_warn = [f"room_type_not_in_view:{room}"]
+                # (a walk or arc framing the room's bed / sofa piece counts: a tight room's bed is
+                # framed by bed_seen - most of it and its head - the whole of it fits no frame there)
+                whole = [[m for m in t if m.kind in ("link",) or self.shows_type(room, m, whole=True)
+                          or (m.kind in ("walkway", "arc") and m.piece is not None and m.piece.cls in TYPE_WHOLE
+                              and self.framed(m))] for t in shown]
+                w_ids = {id(m) for t in whole for m in t}
+                # a walk or arc on the bed / sofa first, then any other whole view (green house: the
+                # back-outs took the primary bedroom from its walk along the bed - user 2026-11-18
+                # liked the walk, and the back-outs were "horrible")
+                on_piece = [[m for m in t if m.kind in ("walkway", "arc") and m.piece is not None
+                             and m.piece.cls in TYPE_WHOLE] for t in whole]
+                p_ids = {id(m) for t in on_piece for m in t}
+                shown = on_piece + [[m for m in t if id(m) not in p_ids] for t in whole] \
+                    + [[m for m in t if id(m) not in w_ids] for t in shown]
+            rest = [[m for m in t if id(m) not in typed] for t in tiers]
+            tiers = shown + rest
         # what the room asks for (its profile) and variety (never the same kind twice running)
         prof = self.profile(room)
         used = self.__dict__.setdefault("_kinds", {}).get(room, [])
@@ -715,9 +729,13 @@ class RoomMoves:
             tiers = [[m for m in t if m.kind not in used] for t in tiers] + [again]
         # the tour's caps are hard (v10: three rises past a cap of two): a kind at its cap only when
         # nothing else will do
-        capped = [m for t in tiers for m in t if self.at_cap(m.kind, further=covered is not None)]
+        first = covered is None and piece_rank == 0
+        cap_of = lambda m: self.at_cap(m.kind, further=covered is not None,          # noqa: E731
+                                       own_piece=first and self.on_own_piece(room, m))
+        capped = [m for t in tiers for m in t if cap_of(m)]
         if capped:                                 # (a further shot is dropped rather than repeat one)
-            tiers = [[m for m in t if not self.at_cap(m.kind, further=covered is not None)] for t in tiers] + ([capped] if covered is None else [])
+            c_ids = {id(m) for m in capped}
+            tiers = [[m for m in t if id(m) not in c_ids] for t in tiers] + ([capped] if covered is None else [])
         tiers = [t for t in tiers if t]
         stats["to_render_checks"] += _n(tiers)
         if not tiers:
@@ -756,6 +774,8 @@ class RoomMoves:
             if low is not None and (least is None or low.occ < least.occ):
                 least = low
             if best is not None:
+                if typed is not None and id(best) not in typed:
+                    type_warn = [f"room_type_not_in_view:{room}"]
                 best.why.update(candidates=len(cands), occlusion=round(best.occ, 3))
                 self._kinds.setdefault(room, []).append(best.kind)
                 self.record(best)
@@ -971,57 +991,66 @@ class RoomMoves:
         return float(len(np.setdiff1d(seen, covered, assume_unique=False))) / len(walls)
 
     def _check(self, room: str, cands: list[Move], dur: float) -> tuple[Move | None, Move | None]:
-        """(the best candidate within the speed limits, its own room share and the lens rule;
-        the least blocked one within the speed limits) - best first, lazily, stopping once no later
-        candidate can win."""
+        """(the best candidate within the speed limits, its own room share, the lens rule and the
+        void limit; the least blocked one within the speed limits) - best first, lazily, stopping
+        once no later candidate can win. The void check renders, so it runs on the winners only -
+        and when it turns every winner down, the candidates the early stop skipped are judged next
+        (Home Scan v17: the dining room had 118 candidates, ~5 judged; all five showed the missing
+        ceiling, and the room got a held pan)."""
         sp = self.space
         cands = sorted(cands, key=lambda m: -m.score)
-        best, least, checked, passed = None, None, {}, []
-        for m in cands:
-            if best is not None and m.score <= best.score - OCC_W * best.occ:
-                break
-            if checked.get(m.kind, 0) >= OCC_CHECK_KIND:      # every kind gets its share of checks
-                continue
-            if m.kind in OWN_SHARE and "own_share" not in m.why:    # it films its own room
-                k = len(m.eye) // 2
-                share = sp.own_share(room, m.eye[k], math.atan2(*(m.tgt[k][:2] - m.eye[k])[::-1]), HFOV)
-                m.why["own_share"] = round(share, 2)
-                # a view mostly of another room loses score (a small room in an open plan still
-                # gets its best view: there is no view of it without its neighbour)
-                m.score -= OWN_W * max(0.0, OWN_SHARE[m.kind] - share)
-                if best is not None and m.score <= best.score - OCC_W * best.occ:
+        least, checked, done = None, {}, set()
+        st = self.stage_stats(room, getattr(self, "_cov_now", False))
+        while True:
+            best, passed, stopped = None, [], False
+            for m in cands:
+                if id(m) in done:
                     continue
-            if "turn_dps" not in m.why:
-                turn, move = trial_speeds(m.eye, m.tgt, dur, m.zs, m.easing)
-                m.why.update(turn_dps=round(turn, 1), move_mps=round(move, 2))
-            st = self.stage_stats(room, getattr(self, "_cov_now", False))
-            if m.why["turn_dps"] > self.turn_budget or m.why["move_mps"] > self.move_budget:
-                st["fail_speed"] += 1
-                continue
-            checked[m.kind] = checked.get(m.kind, 0) + 1
-            m.occ = self._cover(m)
-            if least is None or m.occ < least.occ:
-                least = m
-            if m.occ > MAX_OCC:
-                st["fail_near_lens" if "near_lens" in m.why else "fail_edge" if "edge_cover" in m.why else "fail_blocked"] += 1
-                continue
-            passed.append(m)
-            if best is None or m.score - OCC_W * m.occ > best.score - OCC_W * best.occ:
-                best = m
-        # what of its view the scan never captured (rendered, so only for the winners): best first,
-        # down the ranking until one passes
-        if self.occ is not None and best is not None:
-            best = None
+                if best is not None and m.score <= best.score - OCC_W * best.occ:
+                    stopped = True
+                    break
+                if checked.get(m.kind, 0) >= OCC_CHECK_KIND:      # every kind gets its share of checks
+                    continue
+                if m.kind in OWN_SHARE and "own_share" not in m.why:    # it films its own room
+                    k = len(m.eye) // 2
+                    share = sp.own_share(room, m.eye[k], math.atan2(*(m.tgt[k][:2] - m.eye[k])[::-1]), HFOV)
+                    m.why["own_share"] = round(share, 2)
+                    # a view mostly of another room loses score (a small room in an open plan still
+                    # gets its best view: there is no view of it without its neighbour)
+                    m.score -= OWN_W * max(0.0, OWN_SHARE[m.kind] - share)
+                    if best is not None and m.score <= best.score - OCC_W * best.occ:
+                        continue
+                done.add(id(m))
+                if "turn_dps" not in m.why:
+                    turn, move = trial_speeds(m.eye, m.tgt, dur, m.zs, m.easing)
+                    m.why.update(turn_dps=round(turn, 1), move_mps=round(move, 2))
+                if m.why["turn_dps"] > self.turn_budget or m.why["move_mps"] > self.move_budget:
+                    st["fail_speed"] += 1
+                    continue
+                checked[m.kind] = checked.get(m.kind, 0) + 1
+                m.occ = self._cover(m)
+                if least is None or m.occ < least.occ:
+                    least = m
+                if m.occ > MAX_OCC:
+                    st["fail_near_lens" if "near_lens" in m.why else "fail_edge" if "edge_cover" in m.why else "fail_blocked"] += 1
+                    continue
+                passed.append(m)
+                if best is None or m.score - OCC_W * m.occ > best.score - OCC_W * best.occ:
+                    best = m
+            if self.occ is None or best is None:
+                return best, least
+            # what of its view the scan never captured (rendered, so only for the winners): best
+            # first, down the ranking until one passes
             for m in sorted(passed, key=lambda m: -(m.score - OCC_W * m.occ)):
                 if m.kind != "detail":
                     v = self._void(m)
                     m.why["void"] = round(v, 3)
                     if v > VOID_MAX:
-                        self.stage_stats(room, getattr(self, "_cov_now", False))["fail_void"] += 1
+                        st["fail_void"] += 1
                         continue
-                best = m
-                break
-        return best, least
+                return m, least
+            if not stopped:                       # every candidate judged: none
+                return None, least
 
     # ---- what a view shows ----------------------------------------------------------------------
     def ends_on_something(self, room: str, eye2, tgt) -> bool:
@@ -1530,7 +1559,7 @@ class RoomMoves:
         m.why["sequence_cost"] = round(cost, 2)
         return cost
 
-    def at_cap(self, kind: str, further: bool = False) -> bool:
+    def at_cap(self, kind: str, further: bool = False, own_piece: bool = False) -> bool:
         """The tour has used the kind as often as it may. further: for a room's further angle, the
         kind's last use is kept for a room's first shot (green house: the dining room's second
         angle took the tour's second rise, and the study - shown by a rise - got a glide)."""
@@ -1540,6 +1569,11 @@ class RoomMoves:
         # (a kind the tour has once at most is not held back: it would never be a further angle)
         uses = sum(1 for k, _ in hist if k == kind) + (1 if further and KIND_CAP.get(kind, 2) >= 2 else 0)
         n_tour = max(getattr(self, "tour_shots", 9), 1)
+        if own_piece:
+            # a room's first shot walking onto what the room is about (its sofa, table, bed): each
+            # frames a different subject - only the hard cap holds (green house: the dining room's
+            # table walk took the tour's share of walks, and the primary bedroom lost its bed walk)
+            return uses >= KIND_CAP.get(kind, 2)
         return uses >= KIND_CAP.get(kind, 2) or uses + 1 > max(1, math.ceil(KIND_SHARE * n_tour))
 
     @staticmethod
