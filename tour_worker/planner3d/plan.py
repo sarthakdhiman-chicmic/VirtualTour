@@ -475,7 +475,8 @@ def plan_tour_3d(model, scene: dict, rooms: list[dict], listing_id: str, cfg: Pl
     rep = {
         "scene": {"up": [round(float(x), 4) for x in space.up_scene], "up_source": space.frame.source,
                   "room_height_m": round(space.room_height, 2), "pieces": len(space.pieces),
-                  "labels": labels is not None, "objects": len(space.objects)},
+                  "labels": labels is not None, "objects": len(space.objects),
+                  "check_render": getattr(mover.occ, "backend", None) if mover.occ is not None else None},
         "rooms": [{"room_key": k, "room_type": rtype.get(k) or next((r.get("room_type") for kk, r in zip(keys, rooms) if kk == k), None),
                    "toured": k in rtype, "area_m2": round(space.room_area(k), 1),
                    "open_plan_with": sorted(space.spaces.get(k, {k}) - {k}),
