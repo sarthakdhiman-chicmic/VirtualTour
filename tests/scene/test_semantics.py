@@ -212,3 +212,17 @@ def test_a_wall_behind_a_curtain_takes_no_curtain_votes_with_a_depth_image():
     n = len(curtain)
     assert (lab_img[:n] == INDEX["curtain"]).all() and (lab_img[n:] == 0).all()
     assert (lab_buf[n:] == INDEX["curtain"]).all()        # the old buffer's leak, kept as the fallback
+
+
+def test_what_moves_needs_more_agreement():
+    """At half the views agreeing, a sofa Gaussian is labelled and a curtain one is not (MOVING):
+    a wrong curtain label puts motion on a wall."""
+    from tour_worker.scene.semantics import INDEX, Voter
+    v = Voter(np.zeros((2, 3), np.float32), np.ones(2, np.float32))
+    v.seen[:] = 8
+    v.hits[0, INDEX["sofa"]] = 4
+    v.hits[1, INDEX["curtain"]] = 4
+    lab = v.labels()
+    assert lab[0] == INDEX["sofa"] and lab[1] == 0
+    v.hits[1, INDEX["curtain"]] = 5
+    assert v.labels()[1] == INDEX["curtain"]

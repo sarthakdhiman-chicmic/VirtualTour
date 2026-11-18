@@ -38,6 +38,7 @@ MIN_HITS, MIN_SHARE = 2, 0.5
 GROW_VOXEL = 0.03
 OBJECT_VOXEL = 0.05
 MIN_OBJECT = 200                                     # Gaussians
+RIGID = ("wall", "floor", "ceiling", "windowpane", "door", "screen door")   # never grown into
 
 CURTAIN_AMP, CURTAIN_POWER = 0.030, 1.6              # metres at the hem
 CURTAIN_FREQ = (0.21, 0.34)                          # Hz: the sway, the sideways drift
@@ -111,21 +112,40 @@ def label(model: SplatModel, views: list[View]) -> np.ndarray:
     return grow(model, lab, seen)
 
 
-def grow(model: SplatModel, lab: np.ndarray, seen: np.ndarray) -> np.ndarray:
+def grow(model: SplatModel, lab: np.ndarray, seen: np.ndarray, rigid: np.ndarray | None = None) -> np.ndarray:
     """Labelled classes grown into Gaussians no view saw (the far side of a curtain, a plant's
-    inside): an unseen Gaussian within one GROW_VOXEL of a labelled one takes its label."""
+    inside): an unseen Gaussian within one GROW_VOXEL of a labelled one takes its label.
+    rigid: (N,) bool, Gaussians labelled as structure (RIGID: wall, floor, window ...): an unseen
+    Gaussian nearer to one of them than to the class stays still - the wall a few cm behind a
+    curtain is the wall's, the back of the curtain the curtain's."""
     lab = lab.copy()
     pts = model.means.astype(np.float64)
     cells = np.floor(pts / GROW_VOXEL).astype(np.int64)
     for cid in CLASSES.values():
-        src = cells[lab == cid]
-        if not len(src):
+        src_i = np.flatnonzero(lab == cid)
+        if not len(src_i):
             continue
         cand = (lab == 0) & (seen == 0)
-        grow = near(cells[cand], src)                 # within one cell (26 neighbours), no dense grid
+        grow = near(cells[cand], cells[src_i])        # within one cell (26 neighbours), no dense grid
         idx = np.flatnonzero(cand)[grow]
+        if rigid is not None and len(idx):
+            idx = idx[_nearer_class(pts, idx, src_i, rigid)]
         lab[idx] = cid
     return lab
+
+
+def _nearer_class(pts: np.ndarray, idx: np.ndarray, src_i: np.ndarray, rigid: np.ndarray) -> np.ndarray:
+    """(len(idx),) bool: the Gaussian is at least as near the class as the nearest rigid one."""
+    from scipy.spatial import cKDTree
+    q = pts[idx]
+    lo, hi = q.min(0) - 2 * GROW_VOXEL, q.max(0) + 2 * GROW_VOXEL
+    r_i = np.flatnonzero(rigid & np.all((pts >= lo) & (pts <= hi), axis=1))
+    if not len(r_i):
+        return np.ones(len(idx), bool)
+    s_i = src_i[np.all((pts[src_i] >= lo) & (pts[src_i] <= hi), axis=1)]
+    d_cls = cKDTree(pts[s_i]).query(q)[0] if len(s_i) else np.full(len(q), np.inf)
+    d_rig = cKDTree(pts[r_i]).query(q)[0]
+    return d_cls <= d_rig
 
 
 def objects(model: SplatModel, lab: np.ndarray) -> list[tuple[int, np.ndarray]]:
@@ -296,7 +316,7 @@ def motion_from_labels(model: SplatModel, scene_labels, seen: np.ndarray, local:
     lab = np.zeros(len(model), np.int8)
     lab[scene_labels.mask("curtain")] = CLASSES["curtain"]
     lab[scene_labels.mask("plant")] = CLASSES["potted_plant"]
-    lab = grow(model, lab, seen)
+    lab = grow(model, lab, seen, rigid=scene_labels.mask(*RIGID))
     sway = build_field(model, lab, up_scene, scene_sha256)
     fires = [o for o in scene_labels.objects if o["class"] == "fireplace"]
     flames = flame_field(model, local, fires, up_scene, R, scene_sha256)

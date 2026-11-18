@@ -9,8 +9,8 @@ job, at upload) and cached like the motion file; the 3D planner reads it to know
            a class per pixel
   vote     every Gaussian projected into every view; "seen" when its centre is visible there (a
            depth buffer of the opaque Gaussians), a "hit" for the class under it. Labelled with its
-           top class when hits >= MIN_HITS and hits >= MIN_SHARE x seen (torch: on the GPU when the
-           renderer is)
+           top class when hits >= MIN_HITS and hits >= MIN_SHARE x seen - for the classes the motion
+           moves (MOVING), MOVING_HITS and MOVING_SHARE (torch: on the GPU when the renderer is)
   objects  a class's labelled Gaussians grouped into objects (connected OBJECT_VOXEL cells, at least
            MIN_OBJECT Gaussians): a bed, a sofa, each window - with their box, footprint and room
 
@@ -63,6 +63,10 @@ DEPTH_TOL = (0.03, 0.04)          # the point depth buffer's (CPU renderer): vis
 # that buffer at all)
 DEPTH_TOL_IMAGE = (0.02, 0.02)
 MIN_HITS, MIN_SHARE = 2, 0.4
+# what the 3D motion moves (scene/motion_label.py) is held to more agreement: a wall Gaussian
+# labelled "curtain" sways - a wrong label there costs more than a missing one
+MOVING = ("curtain", "plant")
+MOVING_HITS, MOVING_SHARE = 3, 0.6
 OBJECT_VOXEL, MIN_OBJECT = 0.05, 150
 SKIP_OBJECTS = {"wall", "floor", "ceiling", "sky", "tree", "palm", "grass", "house", "building", "fence"}
 
@@ -218,7 +222,12 @@ class Voter:
         h[:, 0] = 0
         best = torch.argmax(h, dim=1)
         top = h.gather(1, best[:, None]).squeeze(1).to(torch.int32)
-        ok = (top >= MIN_HITS) & (top.float() >= MIN_SHARE * self.seen.clamp(min=1).float())
+        seen = self.seen.clamp(min=1).float()
+        ok = (top >= MIN_HITS) & (top.float() >= MIN_SHARE * seen)
+        moving = torch.zeros_like(ok)
+        for name in MOVING:
+            moving |= best == INDEX[name]
+        ok &= ~moving | ((top >= MOVING_HITS) & (top.float() >= MOVING_SHARE * seen))
         return torch.where(ok, best, torch.zeros_like(best)).to(torch.uint8).cpu().numpy()
 
     @property
