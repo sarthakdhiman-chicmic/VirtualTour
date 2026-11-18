@@ -9,7 +9,7 @@ where the rooms are from the floor plan alone, and what each is from the labels 
           are dropped.
   what    from the labelled objects in each room (scene/semantics.py): a toilet or bath is a
           bathroom, a hob, sink or fridge a kitchen, a bed a bedroom (the biggest bed the primary
-          bedroom), a sofa or television a living room (more than one: family rooms), a table with
+          bedroom), a sofa or television a living room (never a family room), a table with
           chairs a dining room, a desk an office; a long narrow room with none of these a hallway;
           else "other_room".
 """
@@ -223,8 +223,8 @@ def _held(objects, keys) -> dict[str, dict[str, list[dict]]]:
 
 def room_types(space, objects: list[dict], points: dict[str, np.ndarray]) -> dict[str, str]:
     """{room key: room type} from the labelled objects in each room (module docstring): the primary
-    bedroom is the largest bedroom by floor and bed; more than one living room: the largest is the
-    living room, the others family rooms."""
+    bedroom is the largest bedroom by floor and bed. There is no family room: every sofa area is a
+    living room."""
     from tour_worker.planner3d.space import CELL
     held = _held(objects, points)
     ev = {k: _evidence(h) for k, h in held.items()}
@@ -250,12 +250,9 @@ def room_types(space, objects: list[dict], points: dict[str, np.ndarray]) -> dic
             out[max(beds, key=lambda k: mat[k])] = "primary_bedroom"
         else:
             out[max(beds, key=lambda k: (round(foot[k], 0), mat[k]))] = "primary_bedroom"
-    living = [k for k in out if out[k] == "living_room"]
-    if len(living) > 1:
-        best = max(living, key=lambda k: area[k])
-        for k in living:
-            if k != best:
-                out[k] = "family_room"
+    # no "family room": a second sofa area is a living room too - merged into the first when they
+    # share an open space (finalize_rooms), else a living room of its own (user 2026-11-18: the
+    # Home Scan's "family room" took the living room's place and the living room was skipped)
     return out
 
 
@@ -444,8 +441,7 @@ def split_by_zones(space, points: dict[str, np.ndarray], objects: list[dict]):
 def zone_types(space, objects, points: dict, types: dict) -> dict:
     """A room is what the furniture at its centre is for: an open plan's zone rooms are their zones;
     any other room takes the zone nearest its centre (within ZONE_NEAR) - the Home Scan's dining room
-    voted "living" from a sofa at its edge. Beds stay room_types' (it picks the primary). Then one
-    living room: the largest, the others family rooms."""
+    voted "living" from a sofa at its edge. Beds stay room_types' (it picks the primary)."""
     from tour_worker.planner3d.space import CELL
     out = dict(types)
     zk = getattr(space, "zone_kinds", {})
@@ -460,14 +456,6 @@ def zone_types(space, objects, points: dict, types: dict) -> dict:
                 kind = near["kind"]
         if kind in ZONE_TYPE:
             out[k] = ZONE_TYPE[kind]
-    living = [k for k in out if out[k] == "living_room"]
-    if len(living) > 1:
-        area = {k: float((space.room_of == space.room_keys.index(k)).sum()) * CELL * CELL if k in space.room_keys else 0.0
-                for k in living}
-        best = max(living, key=lambda k: area[k])
-        for k in living:
-            if k != best:
-                out[k] = "family_room"
     return out
 
 

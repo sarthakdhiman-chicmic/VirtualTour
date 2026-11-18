@@ -138,7 +138,11 @@ def _walk_order(space, selected: list, stage: dict[str, str], rtype: dict[str, s
         # the tour opens in THE living room (user 2026-11-17: the Home Scan opened on its family room)
         # - the first stage with a room that is not a hallway (an entry hall is a link, not a stop)
         if not any(canon(rtype.get(k)) not in CONNECTORS for k, _ in out):
-            lead = next((n for n, (k, _) in enumerate(group) if canon(rtype.get(k)) == "living_room"), 0)
+            # (two living rooms - the 3D finder names no family room: the larger one)
+            lv = [n for n, (k, _) in enumerate(group) if canon(rtype.get(k)) == "living_room"]
+            keys_ = getattr(space, "room_keys", [])
+            lead = max(lv, key=lambda n: (float((space.room_fill == keys_.index(group[n][0])).sum())
+                                          if group[n][0] in keys_ else 0.0, -n)) if lv else 0
         ordered, prev = [group[lead]], group[lead][0]
         group = group[:lead] + group[lead + 1:]
         while group:
@@ -476,7 +480,9 @@ def plan_tour_3d(model, scene: dict, rooms: list[dict], listing_id: str, cfg: Pl
                    "toured": k in rtype, "area_m2": round(space.room_area(k), 1),
                    "open_plan_with": sorted(space.spaces.get(k, {k}) - {k}),
                    "main_pieces": [p.to_dict() for p in space.main_pieces(k)],
-                   "objects": sorted({o["class"] for o in space.room_objects(k)})} for k in space.room_keys],
+                   "objects": sorted({o["class"] for o in space.room_objects(k)}),
+                   "checks": {st: dict(c) for st, c in getattr(mover, "check_stats", {}).get(k, {}).items()}}
+                  for k in space.room_keys],
         "sequence": [r for r in report.sequence],
         "shots": plan_rows,
     }

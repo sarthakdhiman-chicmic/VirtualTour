@@ -541,6 +541,7 @@ class RoomMoves:
           glide / pan       nothing else exists"""
         sp = self.space
         self._room_now = room
+        self._cov_now = covered is not None
         type_warn: list[str] = []
         share = PRE_SYNC_SHARE.get(kind, 0.8)
         self.turn_budget, self.move_budget = MAX_TURN_DPS * share, MAX_MOVE_MPS * share
@@ -596,6 +597,8 @@ class RoomMoves:
             if anchor is not None:
                 found["push"].append(self._push(room, anchor, pts, paths, rmin, dur, prev, earlier, own))
         tiers: list[list[Move]] = [t for k in order for t in found[k]]
+        stats = self.stage_stats(room, covered is not None)
+        _n = lambda ts: len({id(m) for t in ts for m in t})          # noqa: E731
         # nothing to compose on, or every composed move blocked: glides into the deepest views (a pan
         # is never a room shot - it sweeps past what a room holds; only the closing look-back pans)
         glides: list[Move] = []
@@ -618,6 +621,7 @@ class RoomMoves:
                     m.tgt[:, 2] -= drop * np.linalg.norm(m.tgt[:, :2] - m.eye, axis=1)
                 m.tgt[:, 2] = np.minimum(m.tgt[:, 2], AIM_Z_MAX)
         strict = piece_rank > 0 and kind != "detail"
+        stats["generated"] += _n(tiers + [glides])
         roomy = lambda t: [m for m in t if self._roomy(m) and self._good(m, dur)]
         if covered is not None and kind != "detail":
             # a further shot of the room: it must show walls the earlier ones did not (glides
@@ -674,6 +678,7 @@ class RoomMoves:
                 return out
             tiers = ([own_room(roomy(t)) for t in tiers] if strict
                      else [own_room(roomy(t)) for t in tiers] + [own_room(roomy(glides))])
+        stats["passed_rules"] += _n(tiers)
         # the room's first shot shows what makes it that room (TYPE_SIGNS), when anything does
         if piece_rank == 0 and covered is None and kind != "detail" and self.type_signs(room):
             shown = [[m for m in t if m.kind in ("link",) or self.shows_type(room, m)] for t in tiers]
@@ -714,6 +719,7 @@ class RoomMoves:
         if capped:                                 # (a further shot is dropped rather than repeat one)
             tiers = [[m for m in t if not self.at_cap(m.kind, further=covered is not None)] for t in tiers] + ([capped] if covered is None else [])
         tiers = [t for t in tiers if t]
+        stats["to_render_checks"] += _n(tiers)
         if not tiers:
             return None, [f"room_no_move:{room}" if kind != "detail" else f"room_no_detail:{room}"]
         for m in {id(m): m for t in tiers for m in t}.values():
@@ -778,6 +784,15 @@ class RoomMoves:
         if past is None:
             return float(self.space.rays(e, hs, max_m=6.0).min())
         return float(self.space.rays(e, hs, max_m=6.0, past=past).min())
+
+    def stage_stats(self, room: str, further: bool) -> dict:
+        """How a room's candidates fared, its first shot and its further angles apart: generated,
+        passed_rules (room to breathe, framing, own room), to_render_checks (after the type, variety
+        and cap rules), then each render check's failures (fail_speed / near_lens / edge / blocked /
+        void) - the planning report's rooms[].checks (why a room was skipped, or got one angle)."""
+        from collections import Counter
+        all_ = self.__dict__.setdefault("check_stats", {})
+        return all_.setdefault(room, {}).setdefault("further" if further else "first", Counter())
 
     def on_own_piece(self, room: str, m: Move) -> bool:
         """A walk or arc onto the piece the room's type is about (a dining room's table), standing
@@ -979,13 +994,16 @@ class RoomMoves:
             if "turn_dps" not in m.why:
                 turn, move = trial_speeds(m.eye, m.tgt, dur, m.zs, m.easing)
                 m.why.update(turn_dps=round(turn, 1), move_mps=round(move, 2))
+            st = self.stage_stats(room, getattr(self, "_cov_now", False))
             if m.why["turn_dps"] > self.turn_budget or m.why["move_mps"] > self.move_budget:
+                st["fail_speed"] += 1
                 continue
             checked[m.kind] = checked.get(m.kind, 0) + 1
             m.occ = self._cover(m)
             if least is None or m.occ < least.occ:
                 least = m
             if m.occ > MAX_OCC:
+                st["fail_near_lens" if "near_lens" in m.why else "fail_edge" if "edge_cover" in m.why else "fail_blocked"] += 1
                 continue
             passed.append(m)
             if best is None or m.score - OCC_W * m.occ > best.score - OCC_W * best.occ:
@@ -999,6 +1017,7 @@ class RoomMoves:
                     v = self._void(m)
                     m.why["void"] = round(v, 3)
                     if v > VOID_MAX:
+                        self.stage_stats(room, getattr(self, "_cov_now", False))["fail_void"] += 1
                         continue
                 best = m
                 break

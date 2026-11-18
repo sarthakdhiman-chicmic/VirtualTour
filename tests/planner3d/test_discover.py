@@ -69,7 +69,7 @@ def test_the_tour_follows_the_walk_and_never_closes_in_a_bathroom():
     sel = [types.SimpleNamespace(room_key=k, final_duration=4.0) for k in ("living", "far_family", "kitchen", "bed", "bath")]
     sel[-1].final_duration = 8.0                                         # the closing length
     stage = {"living": "living", "far_family": "living", "kitchen": "living", "bed": "private", "bath": "private"}
-    rtype = {"living": "living_room", "far_family": "family_room", "kitchen": "kitchen", "bed": "bedroom", "bath": "bathroom"}
+    rtype = {"living": "living_room", "far_family": "living_room", "kitchen": "kitchen", "bed": "bedroom", "bath": "bathroom"}
     cfg = types.SimpleNamespace(pacing="normal")
     out = _walk_order(space, sel, stage, rtype, cfg)
     assert [s.room_key for s in out] == ["living", "kitchen", "far_family", "bath", "bed"]
