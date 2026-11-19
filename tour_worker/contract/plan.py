@@ -278,7 +278,7 @@ CAMERA_TYPES = {"1.0": {"ken_burns"}, "1.1": {"ken_burns"}, "1.2": {"ken_burns"}
                 "1.3": {"ken_burns", "keyframe_path", "compound"},
                 "1.4": {"ken_burns", "keyframe_path", "compound"},
                 "1.5": {"ken_burns", "keyframe_path", "compound"},   # 1.5 = 1.4 + a music block
-                "1.6": {"bezier_path"}}                              # 1.6 = a 3D scene tour
+                "1.6": {"bezier_path", "video_clip"}}                # 1.6 = 3D scene tour; video_clip = drone
 PLAN_VERSIONS = tuple(CAMERA_TYPES)
 
 def check_camera_type(plan: Plan):
@@ -302,6 +302,8 @@ def check_camera_type(plan: Plan):
             raise ValueError(f"invalid_plan: compound camera in shot {shot.shot_id} has bezier segments")
         if shot.camera.type == "bezier_path":
             check_bezier_camera(shot)
+        if shot.camera.type == "video_clip" and not shot.camera.clip_uri:
+            raise ValueError(f"invalid_plan: video_clip camera in shot {shot.shot_id} needs clip_uri")
         if shot.camera.type in ("keyframe_path", "compound"):
             if shot.camera.hfov_deg is not None and not isinstance(shot.camera.hfov_deg, (int, float)):
                 raise ValueError(f"invalid_plan: hfov_deg in shot {shot.shot_id} must be one number")
