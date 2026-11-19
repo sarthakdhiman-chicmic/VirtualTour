@@ -104,7 +104,8 @@ class Timing(BaseModel):
 class CameraParams(BaseModel):
     """ken_burns (plan 1.0-1.2): start + end + easing.
     keyframe_path (1.3): move + keyframes (+ projection, hfov_deg).
-    compound (1.3.2): move + start + segments + timing (+ projection, hfov_deg)."""
+    compound (1.3.2): move + start + segments + timing (+ projection, hfov_deg).
+    video_clip: a drone/exterior video file; clip_uri is the S3 URI, in_s the trim start."""
     type: str = "ken_burns"
     easing: CameraEasing = CameraEasing.EASE_IN_OUT
     preset: str | None = None
@@ -121,6 +122,14 @@ class CameraParams(BaseModel):
     time_warp: list[list[float]] | None = None
     # beat sync: zoom punches on the music's hooks (a shot opening on a drop, an accent mid-shot)
     punches: list["Punch"] | None = None
+    # video_clip (plan 1.6+): drone / exterior video file used as a shot
+    clip_uri: str | None = None          # S3 URI of the video clip
+    in_s: float | None = None            # trim start in seconds (0 or unset = from the beginning)
+    zoom_end: float | None = None        # optional slow push: final zoom multiplier (e.g. 1.05)
+
+    @model_serializer(mode="wrap")
+    def _omit_unset_additions(self, handler):
+        return _omit_none(handler(self), ("clip_uri", "in_s", "zoom_end"))
 
 
 class Punch(BaseModel):

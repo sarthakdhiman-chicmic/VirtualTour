@@ -143,7 +143,7 @@ def _run_plan_3d(req: TourPlanRequest, storage, workdir: str, sw, t0: float) -> 
             plan, rep, rooms_report = plan_tour_3d(
                 model, sc.model_dump(exclude_none=True), [r.model_dump() for r in req.rooms], req.listing_id, cfg,
                 music_track=req.music_track.model_dump() if req.music_track else None, preset=req.options.preset,
-                labels=labels)
+                labels=labels, drone_clips=req.drone_clips or None)
     except Exception as e:  # noqa: BLE001
         return failure("planning_failed", f"planning_failed: {type(e).__name__}: {e}")
     plan_dict = plan.model_dump(mode="json")

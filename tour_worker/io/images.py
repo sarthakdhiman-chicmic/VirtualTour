@@ -58,6 +58,19 @@ def fetch_and_prepare(plan, storage, workdir, image_urls=None):
             except Exception as e:
                 warnings.append(f"motion_mask_fetch_failed:{shot.shot_id}:{region.id} ({e})")
 
+    # drone video clips (video_clip shots, plan 1.6+): fetch once; a missing clip fails the render
+    for shot in plan.shots:
+        cam = shot.camera
+        if cam.type == "video_clip" and cam.clip_uri:
+            dest = clip_dest(images_dir, cam.clip_uri)
+            os.makedirs(os.path.dirname(dest), exist_ok=True)
+            if not os.path.exists(dest):
+                try:
+                    uri = image_urls.get(cam.clip_uri, cam.clip_uri)
+                    storage.get(uri, dest)
+                except Exception as e:
+                    raise WorkerError("image_fetch_failed", f"failed to fetch drone clip {shot.shot_id} ({e})")
+
     # branding images (the agent's photo, the brokerage logo): a failed fetch is a warning and the
     # card is drawn without that image (tour_worker/render/overlays.py)
     branding = getattr(plan.output, "branding", None)
@@ -78,3 +91,12 @@ def branding_path(images_dir: str, uri: str) -> str:
     """Where a branding image is fetched to (named by its URI's hash: URIs may be long URLs)."""
     import hashlib
     return os.path.join(images_dir, "branding", hashlib.sha1(uri.encode()).hexdigest()[:16])
+
+
+def clip_dest(images_dir: str, uri: str) -> str:
+    """Where a drone video clip is fetched to (hash of URI + original extension, in clips/ subdir)."""
+    import hashlib
+    stem = hashlib.sha1(uri.encode()).hexdigest()[:16]
+    basename = uri.rsplit("/", 1)[-1]
+    ext = basename.rsplit(".", 1)[-1] if "." in basename else "mp4"
+    return os.path.join(images_dir, "clips", f"{stem}.{ext}")

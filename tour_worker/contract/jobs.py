@@ -172,6 +172,7 @@ class TourPlanRequest(_Request):
     scenes: Optional[dict[str, Optional[dict[str, Any]]]] = None           # tour_segment scenes
     music_track: Optional[MusicTrackInput] = None
     options: PlanOptions = Field(default_factory=PlanOptions)
+    drone_clips: Optional[list[dict[str, Any]]] = None   # exterior video clips (entry / rear)
 
     @model_validator(mode="after")
     def _unique_photo_ids(self):

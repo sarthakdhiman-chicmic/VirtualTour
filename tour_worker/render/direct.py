@@ -30,6 +30,7 @@ import cv2
 import numpy as np
 
 from tour_worker.errors import WorkerError
+from tour_worker.io.images import clip_dest
 from tour_worker.render.encode import (CHUNK_GOPS, CRF, GOP_S, PRESET, VBV_INIT_CHUNK, _run,
                                        hevc_args, video_profile)
 from tour_worker.render.frames import ShotWarp, render_workers
@@ -106,13 +107,21 @@ def _shot(i: int):
         # photo); SplatShots, and photo shots on the GPU, are visited out of order by parallel
         # threads: keep them all
         dev = _STATE.get("photo_device")
-        for k in [k for k in cache if k < i - 1 and plan.shots[k].camera.type != "bezier_path" and dev is None]:
+        _keep_types = ("bezier_path", "video_clip")
+        for k in [k for k in cache if k < i - 1 and plan.shots[k].camera.type not in _keep_types and dev is None]:
             del cache[k]
         n = _STATE["timeline"][i]["render_frames"]
-        if plan.shots[i].camera.type == "bezier_path":
+        cam_type = plan.shots[i].camera.type
+        if cam_type == "bezier_path":
             from tour_worker.render.splat_shot import SplatShot
             got = SplatShot(plan, plan.shots[i], n, _STATE["splat"], _STATE["supersample"], _STATE["splat_stats"],
                             start_frame=_STATE["timeline"][i]["render_from"])
+        elif cam_type == "video_clip":
+            from tour_worker.render.clip import ClipShot
+            cam = plan.shots[i].camera
+            path = clip_dest(_STATE["images"], cam.clip_uri)
+            got = ClipShot(path, cam.in_s or 0.0, n, plan.output.width, plan.output.height, plan.output.fps,
+                           zoom_end=cam.zoom_end or 1.0)
         else:
             got = ShotWarp(plan, plan.shots[i], n, _STATE["images"])
             if dev is not None:
@@ -432,10 +441,11 @@ def render_direct(plan, workdir: str, warnings: list | None = None, music_path: 
     images = os.path.join(workdir, "images")
     tl = compute_timeline(plan)
     three_d = any(s.camera.type == "bezier_path" for s in plan.shots)
+    has_clips = any(s.camera.type == "video_clip" for s in plan.shots)
     if three_d and splat is None:
         raise WorkerError("scene_render_failed", "a 3D plan needs its scene renderer")
     for shot, t in zip(plan.shots, tl):                       # validate early; collect warnings once
-        if shot.camera.type != "bezier_path":
+        if shot.camera.type not in ("bezier_path", "video_clip"):
             ShotWarp(plan, shot, t["render_frames"], images, warnings)
     n = total_frames(plan)
     step = CHUNK_GOPS * GOP_S * plan.output.fps
@@ -457,7 +467,7 @@ def render_direct(plan, workdir: str, warnings: list | None = None, music_path: 
             # worker processes each importing it from the pod's network volume stalled for minutes),
             # chunks encoded by threads. The frame stays on the device through composition and the
             # overlays; the CPU work left per frame (the sky) runs outside the GPU lock
-            in_process = three_d or photo_device is not None
+            in_process = three_d or has_clips or photo_device is not None
             switch = sys.getswitchinterval()
             if photo_device is not None:
                 # the drawer makes hundreds of small torch calls a frame, each giving up the GIL; at the

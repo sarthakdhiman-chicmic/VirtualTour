@@ -212,9 +212,10 @@ def _route_tour(space, selected: list, connectors: set[str], cfg: PlannerConfig)
 
 def plan_tour_3d(model, scene: dict, rooms: list[dict], listing_id: str, cfg: PlannerConfig,
                  music_track: dict | None = None, preset: str = "property_showcase",
-                 check_occlusion: bool = True, labels=None):
+                 check_occlusion: bool = True, labels=None, drone_clips: list[dict] | None = None):
     """(plan, planning report, the rooms as a scoring report). scene: the plan's scene block (uri, sha256, format, up_axis?, motion_*?);
-    rooms: [{room_key?, room_type, point: [x, y, z] in scene axes, tour: bool = True}]."""
+    rooms: [{room_key?, room_type, point: [x, y, z] in scene axes, tour: bool = True}].
+    drone_clips: [{video_s3_url, role, in_point_s?, out_point_s?, zoom_end?, transition_to_interior?}]."""
     warnings: list[str] = []
     space = Space(model, scene.get("up_axis"))
     warnings += space.warnings
@@ -445,12 +446,54 @@ def plan_tour_3d(model, scene: dict, rooms: list[dict], listing_id: str, cfg: Pl
             b.transition_in = TransitionParams(type="fade", duration_s=round(min(FADE_S, 0.5 * min(a.duration_s, b.duration_s)), 3))
     apply_captions(shots, cfg.output_room_labels is not None)
 
-    # the speed limits on the shots as they will play (after the sync)
+    # the speed limits on the shots as they will play (after the sync) — interior shots only;
+    # run before drone clip injection so zip(shots, plan_rows) stays aligned
     for s, row in zip(shots, plan_rows):
         turn, move = speeds_of([x.model_dump() for x in s.camera.segments], s.duration_s, s.camera.easing, fps=cfg.fps)
         row.update(played_s=s.duration_s, played_turn_dps=round(turn, 1), played_move_mps=round(move, 2))
         if turn > MAX_TURN_DPS + 0.05 or move > MAX_MOVE_MPS + 0.005:
             warnings.append(f"camera_speed:{s.shot_id}")
+
+    # inject drone video clips (entry_exterior before interior shots, rear_exterior after)
+    if drone_clips:
+        entry_clips = [c for c in drone_clips if c.get("role") == "entry_exterior"]
+        rear_clips = [c for c in drone_clips if c.get("role") == "rear_exterior"]
+
+        def _make_drone_shot(clip: dict, shot_id: str, narrative_stage: str) -> Shot:
+            in_s = clip.get("in_point_s") or 0.0
+            out_s = clip.get("out_point_s")
+            duration_s = round(max(1.0, (out_s - in_s) if out_s is not None else 5.0), 3)
+            cam = CameraParams(type="video_clip", clip_uri=clip["video_s3_url"],
+                               in_s=in_s if in_s > 0 else None,
+                               zoom_end=clip.get("zoom_end") or None)
+            return Shot(shot_id=shot_id, order=0, asset_id="drone_clip",
+                        room_key=clip.get("role", "exterior"), room_type="exterior",
+                        narrative_stage=narrative_stage, role="hero",
+                        duration_s=duration_s, camera=cam,
+                        transition_in=TransitionParams(type="cut", duration_s=0.0))
+
+        prepend: list[Shot] = []
+        for k, clip in enumerate(entry_clips):
+            prepend.append(_make_drone_shot(clip, f"d_e{k + 1:02d}", "opening"))
+        if prepend and shots:
+            # transition from last entry clip into first interior shot
+            trans_type = entry_clips[-1].get("transition_to_interior", "cut")
+            if trans_type == "fade":
+                shots[0].transition_in = TransitionParams(
+                    type="fade", duration_s=round(min(FADE_S, 0.5 * shots[0].duration_s), 3))
+            else:
+                shots[0].transition_in = TransitionParams(type="cut", duration_s=0.0)
+        shots = prepend + shots
+
+        for k, clip in enumerate(rear_clips):
+            drone_shot = _make_drone_shot(clip, f"d_r{k + 1:02d}", "closing")
+            if k == 0 and shots:
+                drone_shot.transition_in = TransitionParams(
+                    type="fade", duration_s=round(min(FADE_S, 0.5 * shots[-1].duration_s), 3))
+            shots.append(drone_shot)
+
+        for n, s in enumerate(shots, start=1):
+            s.order = n
 
     up = scene.get("up_axis")
     if up is None and float(space.up_scene @ np.array([0.0, 0.0, 1.0])) < 0.999:
