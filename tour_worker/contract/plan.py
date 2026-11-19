@@ -122,6 +122,10 @@ class Camera(BaseModel):
     time_warp: Optional[List[List[float]]] = None
     # beat sync: zoom punches on musical hits (tour_worker/render/camera_path.punch_scale)
     punches: Optional[List["Punch"]] = None
+    # video_clip (plan 1.6+): drone / exterior video file used as a shot
+    clip_uri: Optional[str] = None
+    in_s: Optional[float] = None
+    zoom_end: Optional[float] = None
     model_config = ConfigDict(extra='ignore')
 
 class Punch(BaseModel):
