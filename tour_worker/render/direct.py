@@ -380,6 +380,8 @@ def render_direct(plan, workdir: str, warnings: list | None = None, music_path: 
     has_clips = any(s.camera.type == "video_clip" for s in plan.shots)
     if three_d and splat is None:
         raise WorkerError("scene_render_failed", "a 3D plan needs its scene renderer")
+    if getattr(splat, "stage_s", None) is not None:    # the renderer is cached across jobs: this job's stages only
+        splat.stage_s.clear()
     for shot, t in zip(plan.shots, tl):                       # validate early; collect warnings once
         if shot.camera.type not in ("bezier_path", "video_clip"):
             ShotWarp(plan, shot, t["render_frames"], images, warnings)
