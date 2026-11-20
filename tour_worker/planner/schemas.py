@@ -214,10 +214,13 @@ class MusicTrack(BaseModel):
     segments: list["MusicSegment"] | None = None
     crossfade_s: float | None = None
     edits: list[dict] | None = None
+    # SOW MU-06 / client review 2026-11-20 item 20: the track's licence as the music library holds it
+    # (contract.jobs.MusicLicence), recorded in the plan; None: none was sent (music_licence_missing)
+    licence: dict | None = None
 
     @model_serializer(mode="wrap")
     def _omit_unset_additions(self, handler):
-        return _omit_none(handler(self), ("sync_version", "segments", "crossfade_s", "edits"))
+        return _omit_none(handler(self), ("sync_version", "segments", "crossfade_s", "edits", "licence"))
 
 
 class MusicSegment(BaseModel):

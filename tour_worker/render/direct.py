@@ -18,7 +18,6 @@ every copy; else a silent track (players and platforms expect one).
 """
 from __future__ import annotations
 
-import math
 import os
 import subprocess
 import sys
@@ -131,57 +130,6 @@ def _shot(i: int):
         return got
 
 
-WHIP_BLUR = 0.12        # a whip's peak motion blur, share of the frame width
-PUSH_ZOOM = 0.35        # a push zooms into the outgoing shot by this much, and out of the incoming one
-PUSH_TAPS = 4           # zoom samples averaged for the push's radial blur
-
-
-def _whip(out: np.ndarray, inc: np.ndarray, p: float, direction: int) -> np.ndarray:
-    """Both shots slide by a frame width (the camera whipping sideways): the outgoing leaves, the
-    incoming arrives, with a horizontal motion blur peaking at the cut. direction +1: the picture
-    moves left (the camera pans right)."""
-    h, w = out.shape[:2]
-    e = p * p * (3 - 2 * p)
-    shift = int(round(e * w))
-    canvas = np.empty_like(out)
-    if direction >= 0:
-        canvas[:, :w - shift] = out[:, shift:]
-        canvas[:, w - shift:] = inc[:, :shift]
-    else:
-        canvas[:, shift:] = out[:, :w - shift]
-        canvas[:, :shift] = inc[:, w - shift:]
-    k = 1 + int(round(WHIP_BLUR * w * math.sin(math.pi * p)))
-    return cv2.blur(canvas, (k, 1)) if k > 1 else canvas
-
-
-def _zoom(img: np.ndarray, s: float) -> np.ndarray:
-    h, w = img.shape[:2]
-    m = np.array([[s, 0, (1 - s) * w / 2], [0, s, (1 - s) * h / 2]], np.float32)
-    return cv2.warpAffine(img, m, (w, h), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT101)
-
-
-def _push(out: np.ndarray, inc: np.ndarray, p: float) -> np.ndarray:
-    """Zoom through: the outgoing shot rushes in to its centre, the incoming one settles from close
-    in; a radial blur (zoom samples averaged) peaks at the cut, where the two cross."""
-    e = p * p * (3 - 2 * p)
-    blur = PUSH_ZOOM * 0.25 * math.sin(math.pi * p)
-
-    def rushed(img, s):
-        taps = [_zoom(img, s * (1 + blur * k / max(1, PUSH_TAPS - 1))).astype(np.float32) for k in range(PUSH_TAPS)]
-        return sum(taps) / len(taps)
-
-    a = min(1.0, max(0.0, (p - 0.35) / 0.3))
-    a = a * a * (3 - 2 * a)
-    mix = rushed(out, 1 + PUSH_ZOOM * e) * (1 - a) + rushed(inc, 1 + PUSH_ZOOM * (1 - e)) * a
-    return np.clip(mix + 0.5, 0, 255).astype(np.uint8)
-
-
-def _whip_direction(shot) -> int:
-    """+1 when the incoming shot's camera moves right (the whip continues its motion), else -1."""
-    kf = getattr(shot.camera, "keyframes", None) or []
-    return -1 if len(kf) >= 2 and kf[-1].cx < kf[0].cx else 1
-
-
 def draw_frame(g: int) -> np.ndarray:
     """Output frame g of the tour (BGR uint8)."""
     plan, tl = _STATE["plan"], _STATE["timeline"]
@@ -191,11 +139,6 @@ def draw_frame(g: int) -> np.ndarray:
         if not 0 <= f < t["render_frames"]:
             continue
         img = _shot(i).frame(f)
-        kind = plan.shots[i].transition_in.type
-        if canvas is not None and kind in ("whip", "push") and f < t["fade_frames"]:
-            p = (f + 1) / (t["fade_frames"] + 1)          # 0..1 through the transition, the cut at 0.5
-            canvas = _whip(canvas, img, p, _whip_direction(plan.shots[i])) if kind == "whip" else _push(canvas, img, p)
-            continue
         a = fade_opacity(f, t["fade_frames"])
         if a >= 1.0 or canvas is None and a >= 1.0:
             canvas = img
@@ -210,7 +153,7 @@ def draw_frame(g: int) -> np.ndarray:
 
 def draw_frame_t(g: int):
     """draw_frame on the GPU (photo shots on a photo_device): the frame as a uint8 tensor there.
-    Cuts and fades are composed on the device; a whip or push (a few frames) uses the CPU's."""
+    Cuts and fades are composed on the device."""
     import torch
     plan, tl = _STATE["plan"], _STATE["timeline"]
     stats = _STATE.setdefault("draw_stats", {})
@@ -220,13 +163,6 @@ def draw_frame_t(g: int):
         if not 0 <= f < t["render_frames"]:
             continue
         img = _shot(i).frame_t(f, stats)
-        kind = plan.shots[i].transition_in.type
-        if canvas is not None and kind in ("whip", "push") and f < t["fade_frames"]:
-            p = (f + 1) / (t["fade_frames"] + 1)
-            a_np, b_np = canvas.cpu().numpy(), img.cpu().numpy()
-            out = _whip(a_np, b_np, p, _whip_direction(plan.shots[i])) if kind == "whip" else _push(a_np, b_np, p)
-            canvas = torch.as_tensor(out, device=img.device)
-            continue
         a = fade_opacity(f, t["fade_frames"])
         if a >= 1.0 or canvas is None and a >= 1.0:
             canvas = img

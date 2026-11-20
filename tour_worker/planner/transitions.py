@@ -1,20 +1,14 @@
-"""Transitions chosen by content (client review 2026-11-05: "hard cuts on the beat make an excellent
-default"; motion transitions carry the viewer from one part of the home to the next):
-  - same room, or the same part of the home: a hard cut, on the beat;
-  - into a new part of the home (the narrative stage changes: outside -> entry, living -> private,
-    private -> amenities): a whip when the incoming camera moves sideways, a push (zoom through)
-    when it moves into depth - TRANSITION_S long, centred on the cut, so the cut still lands on the
-    beat (tour_worker/render/timeline.py);
-  - daylight -> twilight (or back): a fade, FADE_S.
-Every transition stays at most half of the shorter shot either side."""
+"""Transitions chosen by content (client review 2026-11-20, item 8: no full-frame smear effects -
+movement between parts of the home is carried by the camera itself, cut on the beat):
+  - every shot change: a hard cut, on the beat;
+  - daylight -> twilight (or back): a fade, FADE_S - the only transition kept.
+A fade stays at most half of the shorter shot either side."""
 from __future__ import annotations
 
 import cv2
 import numpy as np
 
-LATERAL_MOVES = frozenset({"reveal_pan", "reveal_slider", "reveal_gimbal_track", "push_slider", "slide",
-                           "push_slide"})
-TRANSITION_S, FADE_S = 0.33, 0.8
+FADE_S = 0.8
 
 
 def is_dusk(img: np.ndarray) -> bool:
@@ -27,12 +21,8 @@ def is_dusk(img: np.ndarray) -> bool:
 def choose_transitions(shots, dusk_photos: frozenset[str] = frozenset()) -> None:
     """In place: each shot's transition_in (the first stays a cut)."""
     for prev, shot in zip(shots, shots[1:]):
-        limit = 0.5 * min(prev.duration_s, shot.duration_s)
         kind, dur = "cut", 0.0
         if (prev.asset_id in dusk_photos) != (shot.asset_id in dusk_photos):
             kind, dur = "fade", FADE_S
-        elif shot.room_key != prev.room_key and shot.narrative_stage != prev.narrative_stage:
-            move = getattr(shot.camera, "move", None) or getattr(shot.camera, "preset", None) or ""
-            kind, dur = ("whip" if move in LATERAL_MOVES else "push"), TRANSITION_S
         shot.transition_in.type = kind
-        shot.transition_in.duration_s = round(min(dur, limit), 3)
+        shot.transition_in.duration_s = round(min(dur, 0.5 * min(prev.duration_s, shot.duration_s)), 3)

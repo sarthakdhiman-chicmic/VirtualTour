@@ -59,7 +59,7 @@ def snap_durations(
     maximising musical value minus a cost for straying from the planned shot lengths. Hard rules:
     shot k between gmin[k]..gmax[k] s (scalars: every shot), the last shot >= final_min s, every
     boundary within `drift` s of its planned position - later by up to late_growth x the planned
-    time before it as well (room shots only grow, so their cuts creep later as the tour goes on) -
+    time before it as well (shots mostly grow, so their cuts creep later as the tour goes on) -
     the tour end on a bar start if end_on_bar.
     required: hook clusters (arrays of candidate indices) that must each get a cut on one of
     their members - no two consecutive boundaries may enclose a whole cluster, and no cut may
@@ -213,11 +213,14 @@ WINDOW_MIN_S = 0.6                       # a synced length window is never narro
 
 
 def length_bounds(targets: list[float], roles: list[str] | None, cfg: PlannerConfig, wide=False):
-    """Per shot (min, max) synced length, by shot type (planner/lengths.py): room and hero shots only
-    grow - a cut that needs to land on a beat extends the shot to the next beat rather than
-    shortening a room shot (client 2026-11-13); close-ups ("close") flex both ways. Within the type's
-    floor and stretch ceiling for the pacing. wide: the wider windows of the hooks fallback."""
+    """Per shot (min, max) synced length, by shot type (planner/lengths.py): a room shot may shorten
+    to reach a hit, never below the 3 s floor (client review 2026-11-20, item 9); hero shots only
+    grow; close-ups ("close") flex both ways. Within the type's floor and stretch ceiling for the
+    pacing. wide: the wider windows of the hooks fallback."""
     from .lengths import SYNC_BOUNDS, WIDE_BOUNDS, ceiling_s, floor_s, sync_kind
+    # cuts are moved cut_lead_frames early and snapped to frames after the fit: the floor keeps that
+    # margin so a shot never plays under it
+    margin = (cfg.music_cut_lead_frames + 1) / cfg.fps
     lo, hi = [], []
     for k, t in enumerate(targets):
         kind = sync_kind(roles[k] if roles else None)
@@ -225,7 +228,7 @@ def length_bounds(targets: list[float], roles: list[str] | None, cfg: PlannerCon
         # up to the type's ceiling (a shot already past it, like a stretched closing shot, may
         # still reach the next beat: a second more)
         h = max(min(max(ceiling_s(kind, cfg.pacing), t), f_hi * t), min(f_hi * t, t + 1.0))
-        low = max(floor_s(kind, cfg.pacing), f_lo * t)
+        low = max(floor_s(kind, cfg.pacing) + margin, f_lo * t)
         lo.append(low)
         hi.append(max(h, low + WINDOW_MIN_S))   # a window always spans about a beat: never empty
     return np.array(lo), np.array(hi)
@@ -345,7 +348,7 @@ def _sync_v2(targets, track: dict, cfg: PlannerConfig, roles) -> SyncResult | No
         cuts_on_bar=sum(bool(plan.bars[j]) for j in plan.path), cut_lead_frames=lead,
         hooks_required=plan.required_ok, hooks=rows or None, sync_version=2,
         segments=[MusicSegment(from_s=round(a, 4), to_s=round(b, 4)) for a, b in plan.segments],
-        crossfade_s=cfg.music_v2_crossfade_s, edits=plan.edits or None,
+        crossfade_s=cfg.music_v2_crossfade_s, edits=plan.edits or None, licence=track.get("licence"),
     )
     return SyncResult(durations, music, f"music_heroes_missed:{missed}" if missed else None,
                       hooks_hit=sum(r.kind == "cut" for r in rows), hooks_reachable=len(rows),
@@ -461,7 +464,7 @@ def _sync_v3(
         fade_out_s=cfg.music_fade_out_s, synced=path is not None, fallback_reason=reason,
         cuts_on_bar=(sum(bool(bars[j]) for j in path) if path is not None else None),
         cut_lead_frames=lead if path is not None else 0,
-        hooks_required=required_ok, hooks=report or None,
+        hooks_required=required_ok, hooks=report or None, licence=track.get("licence"),
     )
     warning = None if path is not None else f"music_not_synced:{reason}"
     if path is not None and not required_ok and clusters:

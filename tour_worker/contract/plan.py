@@ -137,9 +137,8 @@ class Punch(BaseModel):
     decay_s: float
     model_config = ConfigDict(extra='ignore')
 
-# cut (the default, on the beat); fade; whip (both shots slide sideways with motion blur) and push
-# (zoom through into the next room) - beat-timed motion transitions centred on the cut (client
-# review 2026-11-05; tour_worker/render/direct.py draws them, planner/transitions.py chooses)
+# cut (the default, on the beat) and fade (daylight <-> twilight). whip / push are no longer planned
+# (client review 2026-11-20, item 8); plans saved with them still validate and render them as cuts
 TRANSITIONS = ("cut", "fade", "whip", "push")
 
 class Transition(BaseModel):
@@ -217,6 +216,7 @@ class Music(BaseModel):
     cut_lead_frames: int = 0               # cuts sit this many frames before their beat
     hooks_required: bool = False           # every hook moment got a cut (tools/quality/sync_quality.py)
     hooks: Optional[List[dict]] = None     # [{t, kind: cut|accent|missed, reason}]
+    licence: Optional[dict] = None         # the track's licence (contract.jobs.MusicLicence), information only
     model_config = ConfigDict(extra='ignore')
 
 class Voiceover(BaseModel):

@@ -1,14 +1,25 @@
 # Licences
 
-## Mask2Former (tour_segment)
-- **Weights:** `facebook/mask2former-swin-large-ade-panoptic`. The revision and sha256 are pinned
-  in `tour_worker/vision/segment.py`. The Hugging Face model card gives the licence as "other";
-  the Mask2Former code (Meta) is MIT. This needs a legal check of the weights' terms.
-- **ADE20K** (its training data): the dataset images are for non-commercial research and
-  education (MIT CSAIL terms). The product owner accepted this for the earlier ADE20K model,
-  pending legal review; the same question applies here.
+## Mask2Former (tour_segment, scene_label)
+- **Code:** Mask2Former (Meta) is MIT.
+- **Production checkpoint (required, SOW §3.2):** our own panoptic Mask2Former, Swin-B backbone
+  pretrained on ImageNet-1K, trained on our data with the motion classes added. Not yet trained;
+  it replaces the interim weights below in both photo tours and 3D labelling.
+- **Interim weights, development only:** `facebook/mask2former-swin-large-ade-panoptic` (revision
+  and sha256 pinned in `tour_worker/vision/segment.py`; model card licence "other"). They are
+  trained on **ADE20K**, whose images are licensed for non-commercial research and education (MIT
+  CSAIL terms). **Acceptance of the ADE20K weights has not been given** (client review 2026-11-20,
+  item 19); the licence is under review, and these weights must not be in the production path.
 - Replaced OneFormer (COCO + ADE20K, two passes) on 2026-11-11. `training/fireplace_adapter/` is
   an offline OneFormer experiment and is not used by any job.
+
+## Music tracks (SOW §5.3C, MU-06)
+Each track's licence comes from the music library with the track (`music_track.licence`) and is
+recorded in the plan (`music.licence`) and echoed in the plan job's `music_licence`; a track sent
+without one is warned `music_licence_missing`. The demo track `poradovskyi` ("Real Estate Luxury
+Music", Pixabay download 530233) is under the Pixabay Content License: commercial use allowed, no
+attribution, no standalone redistribution of the audio. Its use inside an automated video product
+is not yet confirmed and it is used for demos only.
 
 ## 3D tours (plan 1.6)
 - **gsplat** (Apache-2.0, nerfstudio-project): the CUDA rasteriser for Gaussian splat scenes

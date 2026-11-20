@@ -109,14 +109,17 @@ def test_the_living_room_is_the_hero_even_when_a_family_room_scores_higher():
     assert mult["living_room"] == 2.0 and mult["family_room"] == 1.0
 
 
-def test_the_sync_extends_room_and_hero_shots_but_never_shortens_them():
-    """Client 2026-11-13: when a cut needs to land on a beat, extend to the next beat rather than
-    shortening a room shot; close-ups are the flexible ones."""
+def test_room_shots_may_shorten_to_3_s_hero_shots_only_grow():
+    """Client review 2026-11-20, item 9: a room shot may shorten to reach a hit, never below 3 s
+    at any pacing; hero shots only grow; close-ups flex both ways."""
     from tour_worker.planner.music_sync import length_bounds
-    cfg = PlannerConfig()
-    for wide in (False, True):
-        lo, hi = length_bounds([8.0, 4.0, 2.0], ["hero", "detail", "close"], cfg, wide=wide)
-        assert lo[0] >= 8.0 - 1e-6 and lo[1] >= 4.0 - 1e-6 and hi[0] > 8.0 and hi[1] > 4.0
-        assert lo[2] < 2.0 and hi[2] > 2.0
+    for pacing in ("slow", "normal", "fast"):
+        cfg = PlannerConfig(pacing=pacing)
+        for wide in (False, True):
+            lo, hi = length_bounds([8.0, 5.0, 3.2, 2.0], ["hero", "detail", "room", "close"], cfg, wide=wide)
+            assert lo[0] >= 8.0 - 1e-6 and hi[0] > 8.0                      # hero: only grows
+            assert lo[1] < 5.0 and hi[1] > 5.0                              # room: both ways
+            assert lo[1] >= 3.0 and lo[2] >= 3.0                            # never under 3 s
+            assert lo[3] < 2.0 and hi[3] > 2.0
     lo, hi = length_bounds([8.0], ["hero"], PlannerConfig(music_shot_abs_max_s=6.0))
     assert lo[0] <= hi[0]                                         # never an empty window

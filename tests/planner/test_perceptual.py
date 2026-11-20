@@ -10,6 +10,7 @@ from tour_worker.planner.perceptual import plan_motion_regions
 from tour_worker.planner.schemas import CameraParams, Keyframe
 
 CFG = PlannerConfig()
+FIRE_CFG = PlannerConfig(perceptual_effects={**CFG.perceptual_effects, "fire": "fire_flicker"})
 W, H = 1536, 1024  # under detect's 1600 px limit: bboxes are photo pixels
 
 
@@ -182,10 +183,15 @@ def test_curtains_and_plants_get_opposite_sway_phases():
     assert by["curtain"].freq_hz == by["potted_plant"].freq_hz      # stays opposite all shot
 
 
-def test_lit_fires_get_the_fire_effect():
+def test_lit_fires_are_held_still_by_default():
+    fire = det(0, "fire", [700, 600, 820, 700])
+    assert plan_motion_regions("L", "s01", cam(), [fire], W, H, 1920, 1080, CFG, room_type="living_room") == []
+
+
+def test_lit_fires_get_the_fire_effect_when_enabled():
     fire = det(0, "fire", [700, 600, 820, 700])
     reg = plan_motion_regions(
-        "L", "s01", cam(), [fire], W, H, 1920, 1080, CFG, room_type="living_room"
+        "L", "s01", cam(), [fire], W, H, 1920, 1080, FIRE_CFG, room_type="living_room"
     )
     assert reg and reg[0].effect == "fire_flicker" and reg[0].anchor == "bottom"
 
@@ -195,8 +201,8 @@ def test_fire_strength_follows_the_flames_own_height():
     fire more), not one on-screen strength for every fire."""
     small = det(0, "fire", [700, 650, 760, 690])                 # 40 px high flames
     big = det(1, "fire", [600, 550, 900, 700])                   # 150 px high flames
-    a = plan_motion_regions("L", "s01", cam(), [small], W, H, 1920, 1080, CFG)[0].amplitude_px
-    b = plan_motion_regions("L", "s01", cam(), [big], W, H, 1920, 1080, CFG)[0].amplitude_px
+    a = plan_motion_regions("L", "s01", cam(), [small], W, H, 1920, 1080, FIRE_CFG)[0].amplitude_px
+    b = plan_motion_regions("L", "s01", cam(), [big], W, H, 1920, 1080, FIRE_CFG)[0].amplitude_px
     frac = CFG.perceptual_amplitude["fire_flicker"][0]
     assert a == pytest.approx(frac * 40, abs=0.05) and b == pytest.approx(frac * 150, abs=0.05)
 
@@ -232,6 +238,6 @@ def test_fire_regions_from_the_segment_job_plan_as_fire_flicker():
     cam_ = CameraParams(type="keyframe_path", move="reveal_x", keyframes=[
         Keyframe(t=0, cx=0.5, cy=0.5, zoom=1.2), Keyframe(t=1, cx=0.5, cy=0.5, zoom=1.012)])
     regions = plan_motion_regions("L", "s01", cam_, [fire], 2048, 1365, 1920, 1080,
-                                  PlannerConfig(), room_type="living_room")
+                                  FIRE_CFG, room_type="living_room")
     assert [(r.label, r.effect, r.mask_uri) for r in regions] == [
         ("fire", "fire_flicker", fire["mask_url"])]

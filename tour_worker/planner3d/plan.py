@@ -12,9 +12,8 @@ What the photo planner decides, it decides here too - one source of truth for bo
 Lengths are the photo tours' (planner/lengths.py: room 3.5-5 s, hero 5-8 s, detail 1.5-2.5 s at
 Normal); a move is planned for its shot's length, so a short shot gets a smaller move.
 
-Per shot, planner3d/moves.py picks the move. Transitions: a cut inside a room or between rooms of the
-same part of the home (never a jump cut - the move generator avoids those); a fade into a new part
-of the home (the narrative stage changes). No push or zoom transitions.
+Per shot, planner3d/moves.py picks the move. Transitions: cuts between interior shots (never a jump
+cut - the move generator avoids those); a fade only between a drone clip and the interior.
 """
 from __future__ import annotations
 
@@ -430,7 +429,7 @@ def plan_tour_3d(model, scene: dict, rooms: list[dict], listing_id: str, cfg: Pl
     music = None
     if music_track:                                   # the same beat sync, as an even retime
         from tour_worker.planner.music_sync import sync_to_music
-        # the opening and closing shots sync as heroes (they hold); room shots only grow; close-ups flex
+        # the opening and closing shots sync as heroes (they hold); room shots may shorten to a hit (3 s floor); close-ups flex
         roles = ["hero" if s.role == "hero" or k in (0, len(shots) - 1) else s.role for k, s in enumerate(shots)]
         r = sync_to_music([s.duration_s for s in shots], music_track, c3, roles)
         for s, d in zip(shots, r.durations):
@@ -438,12 +437,8 @@ def plan_tour_3d(model, scene: dict, rooms: list[dict], listing_id: str, cfg: Pl
         music = r.music
         warnings += [x for x in [r.warning, *(r.extra_warnings or [])] if x]
 
-    # transitions: a fade into a new part of the home, cuts otherwise
-    for a, b in zip(shots, shots[1:]):
-        # (a link and the shots either side of it are one walk through the home: cuts)
-        if b.room_key != a.room_key and b.narrative_stage != a.narrative_stage and "link" not in (a.role, b.role) \
-                and a.camera.move != "exit":              # an exit cuts on its motion into the next room
-            b.transition_in = TransitionParams(type="fade", duration_s=round(min(FADE_S, 0.5 * min(a.duration_s, b.duration_s)), 3))
+    # transitions: every interior shot change is a cut - the camera carries the move between parts
+    # of the home (client review 2026-11-20, item 8); shots are built with cuts
     apply_captions(shots, cfg.output_room_labels is not None)
 
     # the speed limits on the shots as they will play (after the sync) — interior shots only;

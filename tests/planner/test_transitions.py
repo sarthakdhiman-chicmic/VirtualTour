@@ -3,7 +3,7 @@ import types
 
 import numpy as np
 
-from tour_worker.planner.transitions import FADE_S, TRANSITION_S, choose_transitions, is_dusk
+from tour_worker.planner.transitions import FADE_S, choose_transitions, is_dusk
 
 
 def _shot(asset, room, stage, move="push_in", d=4.0):
@@ -12,12 +12,12 @@ def _shot(asset, room, stage, move="push_in", d=4.0):
                                  transition_in=types.SimpleNamespace(type="cut", duration_s=0.0))
 
 
-def test_cuts_inside_a_part_of_the_home_motion_into_the_next():
+def test_every_change_of_shot_is_a_cut_even_into_a_new_part_of_the_home():
     shots = [_shot("a", "ext", "exterior_open"), _shot("b", "entry", "entry", move="reveal_slider"),
              _shot("c", "liv", "living", move="push_in"), _shot("d", "kit", "living"), _shot("e", "kit", "living")]
     choose_transitions(shots)
-    assert [s.transition_in.type for s in shots] == ["cut", "whip", "push", "cut", "cut"]
-    assert shots[1].transition_in.duration_s == TRANSITION_S
+    assert [s.transition_in.type for s in shots] == ["cut"] * 5
+    assert all(s.transition_in.duration_s == 0.0 for s in shots)
 
 
 def test_daylight_to_twilight_fades_and_no_transition_outlasts_half_a_shot():

@@ -1,5 +1,5 @@
-"""Sky motion (effect sky_drift, 2026-10-27): clouds that drift and billow (cloud shadows were
-tried and left out - user: "lets not do shadows"; the code stays, off by default).
+"""Sky motion (effect sky_drift, 2026-10-27): clouds that drift and billow, and their shadows passing
+over the ground (on since the client review 2026-11-20, item 14 - SOW 5.2D Shadows).
 
 Unlike the other effects the sky cannot be moved in place: clouds drifting behind a roofline or a
 tree need sky the photo never showed. So the sky is its own layer:
@@ -19,11 +19,11 @@ tree need sky the photo never showed. So the sky is its own layer:
            skyline
 Everything is a smooth function of t (seeded gradient noise), so frames are deterministic.
 
-Effects (any combination; the tour uses drift + billow):
+Effects (any combination; the tour uses all three):
   drift    the clouds slide with the wind (the shot's wind direction, as the trees): 2% of the
            photo width per second at the top, less towards the horizon (user's pick of 1 / 2 / 3%)
   billow   slow, large-scale churn: clouds subtly change shape
-  shadows  soft cloud shadows pass over the ground and the house (off)
+  shadows  soft cloud shadows pass over the ground and the house, with the same wind
 
 In a tour the sky is a layer under everything else (tour_worker/render/frames.py ShotWarp): each
 frame's photo is first this composite, then the other regions (trees over the moving sky) and
@@ -63,6 +63,7 @@ SHADOW_COVER = 0.0         # noise threshold: about half the ground in shadow at
 SHADOW_SPEED = 1.5         # x the top clouds' drift, at the skyline ...
 SHADOW_NEAR = 2.0          # ... and this many times more at the bottom of the frame (perspective)
 SHADOW_TINT = (0.85, 1.0, 1.12)   # B, G, R share of the darkening: shade is a touch blue
+TOUR_EFFECTS = ("drift", "billow", "shadows")
 GRID = 16                  # noise fields are evaluated every GRID px and upsampled (they are smooth)
 
 
@@ -341,5 +342,5 @@ def load_sky(shot, spec, images_dir: str, src: np.ndarray, duration_s: float) ->
         raise FileNotFoundError("missing")
     h, w = src.shape[:2]
     coarse = cv2.resize(m, (w, h), interpolation=cv2.INTER_NEAREST)
-    return SkyMotion(src, coarse, seed=int(spec.seed), wind=float(shot_wind(shot, w).direction),
+    return SkyMotion(src, coarse, seed=int(spec.seed), effects=TOUR_EFFECTS, wind=float(shot_wind(shot, w).direction),
                      duration=duration_s, billow_px=float(spec.amplitude_px), billow_hz=float(spec.freq_hz))

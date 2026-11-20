@@ -652,7 +652,7 @@ every shot is a `bezier_path` camera flying through it.
   reparameterised by arc length so the camera moves evenly before easing and the beat-sync
   `time_warp`.
 - **Rendering** (`render/splat_shot.py`): `SplatShot` has ShotWarp's frame interface, so 3D shots
-  go through the same composition (fades, whip, push, overlays), chunk encoders, audio and join.
+  go through the same composition (fades, overlays), chunk encoders, audio and join.
   3D plans draw in one process (one GPU). gsplat on CUDA in production; `render/splat_cpu.py` is
   a CPU reference rasteriser (same maths) for checking scenes without a GPU and as the reference
   the GPU path is compared against (PSNR >= 45 dB; tests skip without CUDA).

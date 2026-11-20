@@ -201,19 +201,7 @@ def test_a_voiceover_ducks_the_music_and_the_mix_is_delivered_at_minus_14_lufs()
         assert 20 * np.log10(before / after) < 3.0               # and back after it
 
 
-def test_whip_and_push_carry_one_shot_into_the_next_around_the_cut():
-    from tour_worker.render.direct import _push, _whip
-    a = np.zeros((90, 160, 3), np.uint8)
-    b = np.full((90, 160, 3), 200, np.uint8)
-    a[:, 70:90] = 255                                            # a bright bar in the outgoing shot
-    mid = _whip(a, b, 0.5, 1)
-    assert mid[:, :60].mean() < 120 and mid[:, 100:].mean() > 120  # half out, half in
-    assert np.abs(np.diff(mid[45].astype(int), axis=0)).max() < 120   # blurred: no hard edge at the seam
-    assert _whip(a, b, 0.05, 1)[:, :60].mean() < 40 and _whip(a, b, 0.97, 1).mean() > 190
-    assert _push(a, b, 0.1).mean() < 60 and _push(a, b, 0.95).mean() > 180
-
-
-def test_a_plan_with_whips_and_pushes_renders_and_verifies():
+def test_a_saved_plan_with_a_whip_renders_it_as_a_cut():
     raw = _plan().model_dump(mode="json")
     raw["plan_version"] = "1.4"
     raw["shots"][1]["transition_in"] = {"type": "whip", "duration_s": 0.33}
@@ -224,6 +212,7 @@ def test_a_plan_with_whips_and_pushes_renders_and_verifies():
         out = render_direct(plan, td, workers=1)
         verify(out, plan)
         assert total_frames(plan) == 90
+        assert compute_timeline(plan)[1]["fade_frames"] == 0
 
 
 def test_fades_blend_like_the_browser_composition():

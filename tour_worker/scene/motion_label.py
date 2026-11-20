@@ -339,12 +339,11 @@ def merge_fields(fields: list, scene_sha256: str, splats: int) -> MotionField | 
 def motion_from_labels(model: SplatModel, scene_labels, seen: np.ndarray, local: np.ndarray, up_scene, R,
                        scene_sha256: str) -> MotionField | None:
     """The scene's motion from its labels: curtains sway, plants stir (grown into the Gaussians no
-    view saw), lit fireplaces flicker."""
+    view saw). Lit fires are held still (client review 2026-11-20, item 15: they did not read as
+    real); flame_field stays for a later pass."""
     lab = np.zeros(len(model), np.int8)
     lab[scene_labels.mask("curtain")] = CLASSES["curtain"]
     lab[scene_labels.mask("plant")] = CLASSES["potted_plant"]
     lab = grow(model, lab, seen, rigid=scene_labels.mask(*RIGID))
     sway = build_field(model, lab, up_scene, scene_sha256)
-    fires = [o for o in scene_labels.objects if o["class"] == "fireplace"]
-    flames = flame_field(model, local, fires, up_scene, R, scene_sha256)
-    return merge_fields([sway, flames], scene_sha256, len(model))
+    return merge_fields([sway], scene_sha256, len(model))

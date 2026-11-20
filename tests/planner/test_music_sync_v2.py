@@ -64,11 +64,13 @@ def test_a_drop_gets_its_cut():
     assert any(h.kind == "cut" and h.tier == 1 for h in r.music.hooks)
 
 
-def test_a_drop_only_shortening_could_reach_is_missed_not_forced():
-    """Client 2026-11-13: extend to the next beat rather than shortening a room shot. A drop at
-    10.0 s after 3.5 s room shots (two reach at most 8.75 s, three at least 10.5 s) gets no cut."""
+def test_room_shots_shorten_to_reach_a_drop_but_never_below_3_s():
+    """Client review 2026-11-20, item 9: room shots may shorten to land a strong hit, never below
+    3 s. The drop at 10.0 s lands on a cut, or the tour's music opens on it."""
     r = sync_to_music(TARGETS, track([hero(10.0, 1, "drop", 0.9)], phrases_every=100.0), CFG)
-    assert all(d >= t - 0.04 for d, t in zip(r.durations, TARGETS))
+    assert min(r.durations) >= 3.0 - 1e-6
+    on_cut = np.min(np.abs(cuts_of(r) - (10.0 - r.music.start_s))) <= TOL
+    assert on_cut or abs(r.music.start_s - 10.0) <= TOL
 
 
 PUNCHY = CFG.model_copy(update={"music_punches": True})   # punches are off by default (user 2026-10-23)

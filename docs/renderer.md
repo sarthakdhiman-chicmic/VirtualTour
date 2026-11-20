@@ -53,7 +53,7 @@ plan ──► fetch photos / masks / music / scene (jobs/render.py)
      ──► per shot, a frame source:
             ShotWarp   (render/frames.py)      photo shots: camera + motion regions
             SplatShot  (render/splat_shot.py)  3D shots: a camera path through a splat scene
-     ──► draw_frame(g): compose the shots at output frame g (cuts, fades, whip, push)
+     ──► draw_frame(g): compose the shots at output frame g (cuts, fades)
      ──► overlays (render/overlays.py): branded frame, and the MLS frame
      ──► chunks of whole GOPs, each its own process: draw its frames, pipe them to x264
      ──► audio track, made once (music + voiceover, loudness-normalised, PCM)
@@ -97,9 +97,9 @@ beat sync aimed for.
 | Transition | How it is drawn |
 | --- | --- |
 | cut | the next shot replaces the last at its first frame (the default) |
-| fade | smoothstep opacity over the fade frames (used for daylight to twilight, and between parts of the home in 3D tours) |
-| whip | both shots slide by a frame width in the incoming camera's direction, with a horizontal motion blur peaking at the cut (the midpoint) |
-| push | the outgoing shot rushes in to its centre while the incoming one settles from close |
+| fade | smoothstep opacity over the fade frames (daylight to twilight, and a drone clip into the interior) |
+
+whip and push were removed (client review 2026-11-20, item 8); plans saved with them render a cut.
 
 The planner chooses transitions (`planner/transitions.py`, `planner3d/plan.py`); the renderer
 only draws them.

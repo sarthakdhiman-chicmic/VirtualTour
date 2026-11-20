@@ -169,14 +169,15 @@ def test_segments_and_music_reach_the_planner():
     res = run_job(_request(music_track=track), storage=FakeStorage())
     assert res["status"] == "completed", res
     assert res["plan"]["plan_version"] == "1.5" and res["plan"]["music"]["uri"] == "s3://b/music/t1.mp3"
-    # SOW MU-06: the track's licence proof travels with the plan's result (not the plan: its hash
-    # does not change); a track with none, or not cleared for commercial use, is warned
+    # SOW MU-06 / client review 2026-11-20 item 20: the track's licence is recorded in the plan and
+    # echoed with the result; a track with none, or not cleared for commercial use, is warned
     assert res["music_licence"] == {"track_id": "t1", "licence": None, "warning": "music_licence_missing"}
+    assert "licence" not in res["plan"]["music"]                  # none sent: the plan is as before
     lic = {"licence_id": "L-1", "provider": "Artlist", "licence_type": "commercial_automated_video",
            "commercial_use": True, "proof_uri": "s3://b/licences/L-1.pdf"}
     res2 = run_job(_request(music_track=dict(track, licence=lic)), storage=FakeStorage())
     assert res2["music_licence"]["licence"]["licence_id"] == "L-1" and "warning" not in res2["music_licence"]
-    assert res2["plan_hash"] == res["plan_hash"]
+    assert res2["plan"]["music"]["licence"]["licence_id"] == "L-1"
     res3 = run_job(_request(music_track=dict(track, licence=dict(lic, commercial_use=False))), storage=FakeStorage())
     assert res3["music_licence"]["warning"] == "music_not_cleared_for_commercial_use"
 

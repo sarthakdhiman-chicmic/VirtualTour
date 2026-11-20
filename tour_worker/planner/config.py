@@ -116,8 +116,9 @@ class PlannerConfig(BaseModel):
         "curtain": "fabric_sway", "blinds": "fabric_sway", "potted_plant": "foliage_sway",
         "tree": "canopy_flutter", "water": "calm_water",
         # ADE20K OneFormer (2026-10-16): "plant" covers potted plants AND outdoor shrubs (still:
-        # perceptual_still_outdoors); "fire" = a lit fire found inside a fireplace
-        "plant": "foliage_sway", "fire": "fire_flicker",
+        # perceptual_still_outdoors). A lit fire ("fire" -> "fire_flicker") is held still: it did not
+        # read as real (client review 2026-11-20, item 15); the effect stays for a later pass
+        "plant": "foliage_sway",
         # the sky (2026-10-27): clouds drift (2% of the photo width per second) and billow
         "sky": "sky_drift",
     }
@@ -210,7 +211,7 @@ class PlannerConfig(BaseModel):
     # Beat sync (plan 1.5, planner/music_sync.py; rules from find_transitions.py `sync`)
     music_max_drift: float = 2.5        # s any boundary may move from its planned position ...
     music_late_growth: float = 0.15     # ... and later by this x the planned time before it: room
-                                        # shots only grow (planner/lengths.py), so cuts creep later
+                                        # shots mostly grow (planner/lengths.py), so cuts creep later
     music_length_weight: float = 4.0    # cost of changing a shot's planned length
     music_bar_weight: float = 0.3       # preference for cuts on a bar start
     music_offbeat_penalty: float = 0.1

@@ -3,33 +3,34 @@
 a few seconds; a detail (a fixture, a finish) or a mood reads in under two.
 
   type     what it is                                         Normal     Fast        Slow
-  room     a room shot, its layout visible                    3.5-5 s    2.5-4 s     4.5-6.5 s
+  room     a room shot, its layout visible                    3.5-5 s    3-4 s       4.5-6.5 s
   hero     a hero room's shots (best living room, kitchen,    5-8 s      4-6.5 s     6.5-9 s
            primary bedroom), and the opening / closing shots
   detail   a close-up: fixtures, hardware, finishes, on the   1.5-2.5 s  1.2-1.8 s   2-3 s
            music's drops
 
 Where in its range a shot sits comes from what it shows (richness 0-1: the 2D planner's scene
-context for a photo, the labelled objects in view for a 3D shot). The beat sync then EXTENDS room
-and hero shots to the next beat - never shortens them; detail shots are the flexible ones
-(SYNC_BOUNDS)."""
+context for a photo, the labelled objects in view for a 3D shot). The beat sync then fits each cut
+to the music (SYNC_BOUNDS): a room shot may shorten to reach a strong hit but never below 3 s
+(client review 2026-11-20, item 9; SOW 5.2C 3-8 s a shot); hero shots only grow; detail shots flex
+both ways."""
 from __future__ import annotations
 
 TYPES = ("room", "hero", "detail")
 
 LENGTHS = {
     "normal": {"room": (3.5, 5.0), "hero": (5.0, 8.0), "detail": (1.5, 2.5)},
-    "fast":   {"room": (2.5, 4.0), "hero": (4.0, 6.5), "detail": (1.2, 1.8)},
+    "fast":   {"room": (3.0, 4.0), "hero": (4.0, 6.5), "detail": (1.2, 1.8)},
     "slow":   {"room": (4.5, 6.5), "hero": (6.5, 9.0), "detail": (2.0, 3.0)},
 }
-# a room shot is never shorter than this (the client's floor: at least 3 s, ~2.5 s fast)
+# a room shot is never shorter than this (the client's floor: at least 3 s at every pacing)
 FLOOR = {"normal": {"room": 3.0, "hero": 5.0, "detail": 1.2},
-         "fast": {"room": 2.5, "hero": 4.0, "detail": 1.0},
+         "fast": {"room": 3.0, "hero": 4.0, "detail": 1.0},
          "slow": {"room": 4.5, "hero": 6.5, "detail": 1.8}}
-# the beat sync's window, as a share of the planned length: room and hero shots only grow (to the
-# next beat, or the one after when a strong moment is there); details flex both ways
-SYNC_BOUNDS = {"room": (1.0, 1.25), "hero": (1.0, 1.2), "detail": (0.7, 1.6)}
-WIDE_BOUNDS = {"room": (1.0, 1.4), "hero": (1.0, 1.35), "detail": (0.6, 1.8)}   # the hooks fallback
+# the beat sync's window, as a share of the planned length (and never under FLOOR): room shots
+# shorten or grow to the nearest strong beat, hero shots only grow, details flex both ways
+SYNC_BOUNDS = {"room": (0.8, 1.25), "hero": (1.0, 1.2), "detail": (0.7, 1.6)}
+WIDE_BOUNDS = {"room": (0.8, 1.4), "hero": (1.0, 1.35), "detail": (0.6, 1.8)}   # the hooks fallback
 STRETCH = 1.25                         # a shot stretched for a short tour stops at range max x this
 
 
