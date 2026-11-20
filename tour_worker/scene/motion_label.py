@@ -3,7 +3,7 @@ labelled Gaussian its motion (tour_worker/scene/motion3d.py). Run once per scene
 (tools/scene/label_motion.py).
 
   views   frames of the scene with known cameras (e.g. a rendered tour: each frame's camera comes
-          from the plan) and their Mask2Former masks (the tour_segment job)
+          from the plan) and their OneFormer masks (the tour_segment job)
   vote    every Gaussian is projected into every view; when its centre is visible there (a depth
           buffer of the opaque Gaussians) it is "seen", and when it also falls in a curtain / plant
           mask it is a "hit". A Gaussian is labelled when hits >= MIN_HITS and hits / seen >= MIN_SHARE.

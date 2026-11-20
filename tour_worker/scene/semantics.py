@@ -1,11 +1,11 @@
-"""What every splat of a scene is (bed, sofa, window, fireplace, countertop, vase ...): Mask2Former's
+"""What every splat of a scene is (bed, sofa, window, counter, vase ...): OneFormer's
 classes voted onto the Gaussians from rendered survey views. Made once per scene (the scene_label
 job, at upload) and cached like the motion file; the 3D planner reads it to know what a room holds
-(planner3d), and the motion file comes from the same labels (curtains, plants, lit fireplaces).
+(planner3d), and the motion file comes from the same labels (curtains, plants).
 
   views    per room, a few open spots on its floor x VIEW_HEADINGS headings, eye height, the
            horizon a little below centre - every surface of a room is seen from two sides
-  segment  each view through Mask2Former (the platform's one segmentation model, vision/segment.py):
+  segment  each view through OneFormer (the platform's one segmentation model, vision/segment.py):
            a class per pixel
   vote     every Gaussian projected into every view; "seen" when its centre is visible there (a
            depth buffer of the opaque Gaussians), a "hit" for the class under it. Labelled with its
@@ -28,7 +28,9 @@ import numpy as np
 from tour_worker.scene.voxels import components
 
 FORMAT_VERSION = 1
-# Mask2Former ADE20K classes kept (as id2label spells them, stripped). Everything else is "other".
+# Classes kept, by their common names (vision/segment.COMMON: the segmenter's id2label gives
+# them). Everything else is "other". The list is ADE20K's (the model before OneFormer COCO): its
+# order is the labels files' ids, so it only grows; classes COCO does not have are never voted.
 VOCAB = (
     # pieces a shot composes on
     "bed", "sofa", "armchair", "table", "coffee table", "desk", "kitchen island", "counter", "countertop",
@@ -46,6 +48,8 @@ VOCAB = (
     "fence",
     # appended (ids above stay as they were): a laundry nook is not a room to tour (2026-11-17)
     "washer",
+    # appended: OneFormer COCO's kitchen and office cues (2026-11-20)
+    "toaster", "keyboard", "mouse",
 )
 INDEX = {n: k + 1 for k, n in enumerate(VOCAB)}           # 0: unlabelled
 VIEW_HEADINGS = 8
@@ -60,7 +64,7 @@ DEPTH_TOL = (0.03, 0.04)          # the point depth buffer's (CPU renderer): vis
 # weighted depth at full resolution. Their votes count where the Gaussian is within DEPTH_TOL_IMAGE
 # of the surface the view shows - metres + a share of the depth + 1x its own size (its largest
 # scale, at most DEPTH_SIZE_MAX m): the window glass or wall a few cm behind a sheer curtain,
-# painted "curtain" by Mask2Former in most views, takes no curtain votes. Only for those classes:
+# painted "curtain" by the segmenter in most views, takes no curtain votes. Only for those classes:
 # for every class (2026-11-18, four settings from 2 cm + 2% to 3 cm + 4%) it labelled 161-177 of
 # the green house's 251 objects, 36-40% of its walls, and moved the room typing. A scene_label
 # request's depth_tol overrides DEPTH_TOL_IMAGE.
@@ -156,7 +160,7 @@ def survey_views(space, rooms: list[str], eye_h: float = 1.5) -> list[SurveyView
 
 
 def class_map(segmenter, bgr: np.ndarray) -> np.ndarray:
-    """Mask2Former's panoptic map -> (h, w) uint8 of INDEX classes (0: anything not kept)."""
+    """The segmenter's panoptic map -> (h, w) uint8 of INDEX classes (0: anything not kept)."""
     _, seg, info = segmenter.panoptic(bgr)
     out = np.zeros(seg.shape, np.uint8)
     id2label = segmenter.id2label
@@ -169,7 +173,7 @@ def class_map(segmenter, bgr: np.ndarray) -> np.ndarray:
 
 
 # ---- the vote ------------------------------------------------------------------------------------
-# classes Mask2Former uses for one thing seen from different sides: voted together (Voter.labels).
+# classes the segmenter uses for one thing seen from different sides: voted together (Voter.labels).
 # A group never spans two room types' evidence (planner3d/discover.py): a kitchen's counters are not
 # a dining table's, a study's desk / bookcase / monitor not a dining table / cabinet / living
 # room TV (2026-11-18: counters grouped with tables came out "table", and the green house lost
@@ -234,7 +238,7 @@ class Voter:
         """One view's votes. Every class: visible by the opaque Gaussians' point depth buffer. The
         classes that move (MOVING): with depth - the renderer's (h, w) depth image - their votes
         count only where the Gaussian is at the surface the view shows (DEPTH_TOL_IMAGE), so the
-        window glass behind a sheer curtain, painted "curtain" by Mask2Former in most views, takes no
+        window glass behind a sheer curtain, painted "curtain" by the segmenter in most views, takes no
         curtain votes (2026-11-18 close-ups: no MOVING threshold kept the glass still without
         stilling most of the curtain); without, as every class."""
         torch = self.torch
@@ -285,7 +289,7 @@ class Voter:
     def labels(self, chunk: int = 1 << 20) -> np.ndarray:
         """Each Gaussian's class: its votes summed per GROUP (a sectional seen as sofa in three
         views, armchair in three and chair in two is eight votes for seating, not three for sofa -
-        Mask2Former names one thing differently from view to view), the group passing MIN_HITS /
+        the segmenter names one thing differently from view to view), the group passing MIN_HITS /
         MIN_SHARE of the views that saw it (MOVING_* when its class moves), then the group's
         most-voted class. Rows in chunks: the group sums stay small on the GPU."""
         torch = self.torch

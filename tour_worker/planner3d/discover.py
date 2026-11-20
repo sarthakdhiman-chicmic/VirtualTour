@@ -89,18 +89,19 @@ def discover_rooms(space) -> dict[str, np.ndarray]:
     return {k: pts[k] for k in keys}
 
 
-KITCHEN = ("stove", "oven", "sink", "refrigerator", "dishwasher", "kitchen island", "countertop", "hood", "microwave")
+KITCHEN = ("stove", "oven", "sink", "refrigerator", "dishwasher", "kitchen island", "countertop", "counter", "hood",
+           "microwave", "toaster")
 BATH = ("toilet", "bathtub", "shower")
 LIVING = ("sofa", "television receiver", "fireplace")
 # a desk, a computer or a monitor - not "screen" / "crt screen": the labels call a wall TV that
 # (user 2026-11-16: a family room's fireplace corner became a "Home Office" from its TV)
-OFFICE = ("desk", "computer", "monitor")
+OFFICE = ("desk", "computer", "monitor", "keyboard", "mouse")
 # what the green house's labels showed in the rooms the user marked (2026-11-17): bathrooms with no
 # toilet / bath / shower labelled - a sink, a towel, a mirror; a study with no desk - books, shelves,
 # a lamp by a table and chairs; a bed labelled "sofa"; a hall's built-ins labelled "refrigerator"
 BATH_SOFT = ("sink", "towel", "mirror")
 STUDY = ("book", "bookcase", "shelf", "lamp")
-COOKING = ("stove", "oven", "hood", "dishwasher", "microwave", "kitchen island")   # (a countertop may be a vanity)
+COOKING = ("stove", "oven", "hood", "dishwasher", "microwave", "toaster", "kitchen island")   # (a countertop may be a vanity)
 UTILITY_SIGNS = ("washer",)    # a washing machine: laundry, not toured (the green house's balcony nook)
 LIVING_APART = 4.0       # m: two living rooms this far apart are two; nearer, one seen from two sides
 BED_CLEAR = 1.15         # one bed this much bigger than the next makes its room the primary

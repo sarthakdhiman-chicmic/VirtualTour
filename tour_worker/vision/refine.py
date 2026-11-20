@@ -1,16 +1,12 @@
-"""Refinements of Mask2Former's raw masks (2026-11-11, from the M2F benchmark's refine step):
+"""Refinement of the segmentation model's raw water masks (2026-11-11, from the M2F benchmark's
+refine step; kept for OneFormer COCO, 2026-11-20):
 
-  water      Mask2Former's "swimming pool" / water masks take in raised spa walls, tile rims and
-             some coping. refine_water_surface keeps the model's mask (reflections, submerged
-             shelves, steps and dark water keep moving) and takes out only what stands above the
-             waterline: dark walls with brighter stone directly above them, thin rims and coping
-             along the edge.
+  water      raw pool / water masks take in raised spa walls, tile rims and some coping.
+             refine_water_surface keeps the model's mask (reflections, submerged shelves, steps
+             and dark water keep moving) and takes out only what stands above the waterline:
+             dark walls with brighter stone directly above them, thin rims and coping along the edge.
              (2026-11-11 v2: the first, chroma-based version froze reflections and shelves and let
              a dark blue spa wall ripple.)
-  fireplace  Mask2Former's "fireplace" covers the whole surround, mantel and chimney breast.
-             refine_fireplace_and_flames finds the dark firebox cavity, then the flame core
-             inside it (saturated orange-yellow with a near-white core). Only a lit fire returns
-             a flame core; the structure around it stays still.
 
 Masks are uint8, 0 / 255, the photo's size. Pure OpenCV / numpy: deterministic."""
 from __future__ import annotations
@@ -138,63 +134,3 @@ def refine_water_surface(bgr: np.ndarray, raw_pool_mask: np.ndarray) -> tuple[np
     rest[surface > 0] = 0
     return surface, rest
 
-
-def refine_fireplace_and_flames(bgr: np.ndarray, raw_fireplace_mask: np.ndarray
-                                ) -> tuple[np.ndarray, np.ndarray, np.ndarray, bool]:
-    """(flame_core, hearth_glow, fireplace_structure, is_lit) of a raw fireplace mask:
-    the flame tongues (they move), the firebox cavity around them (a warm pulse, no motion), and
-    the mantel / hearth / surround (still)."""
-    empty = np.zeros_like(raw_fireplace_mask)
-    if not raw_fireplace_mask.any():
-        return empty, empty, empty, False
-
-    ys, xs = np.nonzero(raw_fireplace_mask)
-    y0, y1 = int(ys.min()), int(ys.max()) + 1
-    x0, x1 = int(xs.min()), int(xs.max()) + 1
-    crop = bgr[y0:y1, x0:x1]
-    fp = raw_fireplace_mask[y0:y1, x0:x1] > 0
-
-    hsv = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV).astype(np.float32)
-    h, s, v = hsv[..., 0], hsv[..., 1] / 255.0, hsv[..., 2] / 255.0
-
-    # 1. the firebox: the fireplace's dark cavity (convex hulls of its big dark parts)
-    dark = cv2.morphologyEx(((v < 0.35) & fp).astype(np.uint8), cv2.MORPH_CLOSE, np.ones((5, 5), np.uint8))
-    n_cav, lab_cav, st_cav, _ = cv2.connectedComponentsWithStats(dark)
-    firebox = np.zeros(dark.shape, dtype=np.uint8)
-    area_fp = max(1, int(fp.sum()))
-    for i in range(1, n_cav):
-        if st_cav[i, cv2.CC_STAT_AREA] >= 0.02 * area_fp:
-            pts = cv2.findNonZero((lab_cav == i).astype(np.uint8))
-            if pts is not None:
-                cv2.fillConvexPoly(firebox, cv2.convexHull(pts), 1)
-    has_cavity = bool(firebox.any())
-
-    # 2. flames inside the cavity (else inside the fireplace): saturated orange-yellow, brighter
-    #    than their surroundings, each part reaching a near-white core
-    zone = firebox > 0 if has_cavity else fp
-    k_blur = max(15, int(0.06 * bgr.shape[1]) | 1)
-    local_v = cv2.medianBlur((v * 255).astype(np.uint8), min(k_blur, 255) | 1).astype(np.float32) / 255.0
-    cand = (h >= 3) & (h <= 34) & (s > 0.35) & (v > 0.50) & (v - local_v > 0.10) & zone
-    n_fl, lab_fl, st_fl, _ = cv2.connectedComponentsWithStats(cand.astype(np.uint8))
-    flames = np.zeros(cand.shape, dtype=np.uint8)
-    for i in range(1, n_fl):
-        part = lab_fl == i
-        if part.sum() >= 15 and np.percentile(v[part], 90) >= 0.75:
-            flames[part] = 255
-
-    is_lit = int((flames > 0).sum()) >= max(30, int(0.00015 * bgr.shape[0] * bgr.shape[1]))
-    flame_core = np.zeros_like(raw_fireplace_mask)
-    hearth_glow = np.zeros_like(raw_fireplace_mask)
-    if is_lit:
-        f = cv2.morphologyEx(flames, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7)))
-        f = cv2.dilate(f, np.ones((3, 3), np.uint8))
-        flame_core[y0:y1, x0:x1] = f
-        if has_cavity:
-            glow = (firebox * 255).astype(np.uint8)
-            glow[f > 0] = 0
-            hearth_glow[y0:y1, x0:x1] = glow
-
-    structure = raw_fireplace_mask.copy()
-    structure[flame_core > 0] = 0
-    structure[hearth_glow > 0] = 0
-    return flame_core, hearth_glow, structure, is_lit

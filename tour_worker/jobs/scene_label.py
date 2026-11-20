@@ -4,9 +4,9 @@ scene's motion (scene/motion_label.py), once per scene, at upload.
   fetch + load   the scene (as tour_render: sha256 checked; not kept on disk)
   survey         per room, rendered views (scene/semantics.survey_views) on the job's renderer: the
                  GPU (gsplat) on a GPU worker, the CPU reference otherwise
-  segment        each view through Mask2Former (the tour_segment job's model, cached per process)
+  segment        each view through OneFormer (the tour_segment job's model, cached per process)
   vote           classes onto the Gaussians, then objects (a bed, each window ...) with their rooms
-  motion         curtains / plants (grown into what no view saw) and lit fireplaces' flames
+  motion         curtains / plants (grown into what no view saw)
   store          <output_prefix>scene_labels.npz, and <output_prefix>scene_motion.npz when anything moves
 
 Result: SceneLabelResult (contract/jobs.py). Its labels_uri / sha256 go into tour_plan's scene

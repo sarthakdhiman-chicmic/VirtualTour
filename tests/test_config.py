@@ -7,16 +7,16 @@ from tour_worker.config import REPO_ROOT, Settings, get_settings
 def test_defaults():
     s = Settings.from_env({})
     assert s == Settings(storage="remote", images_dir="/tmp", render_workers=None,
-                         models_dir=os.path.join(REPO_ROOT, "models"), segment_model="m2f_ade20k",
+                         models_dir=os.path.join(REPO_ROOT, "models"), segment_model="oneformer_coco",
                          segment_dir=None)
-    assert s.segment_path() == os.path.join(REPO_ROOT, "models", "mask2former_swin_large_ade_panoptic")
+    assert s.segment_path() == os.path.join(REPO_ROOT, "models", "oneformer_coco_swin_large")
 
 
 def test_from_env():
     s = Settings.from_env({"WORKER_STORAGE": "local", "IMAGES_DIR": "/imgs", "PREWARP_WORKERS": "3",
-                           "MODELS_DIR": "/m", "SEGMENT_MODEL": "m2f_ade20k"})
-    assert (s.storage, s.images_dir, s.render_workers, s.segment_model) == ("local", "/imgs", 3, "m2f_ade20k")
-    assert s.segment_path() == "/m/mask2former_swin_large_ade_panoptic"
+                           "MODELS_DIR": "/m", "SEGMENT_MODEL": "oneformer_coco"})
+    assert (s.storage, s.images_dir, s.render_workers, s.segment_model) == ("local", "/imgs", 3, "oneformer_coco")
+    assert s.segment_path() == "/m/oneformer_coco_swin_large"
     assert Settings.from_env({"SEGMENT_DIR": "/w"}).segment_path() == "/w"
 
 

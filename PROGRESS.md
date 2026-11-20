@@ -10,7 +10,7 @@ The worker turns a listing into a cinematic tour video. The backend (`articulait
 `app/domains/virtual_tour/service.py`) orchestrates the jobs over a RunPod-compatible HTTP API
 (the worker runs as a plain service on a RunPod A100 pod, `tools/runpod/`):
 
-- photo tours: `tour_segment` (Mask2Former masks) -> `tour_plan` (scoring + shot plan) -> `tour_render`
+- photo tours: `tour_segment` (OneFormer COCO masks) -> `tour_plan` (scoring + shot plan) -> `tour_render`
 - 3D tours (a Gaussian-splat scene, `.ply` / `.splat`): `scene_label` (once per scene) ->
   `tour_plan` (the 3D planner; photos are the fallback) -> `tour_render`
 
@@ -24,8 +24,8 @@ Renders are byte-identical for a given plan. Every result carries per-stage timi
 | Cinematic camera engine for photos (2D moves) | Done | `planner/cinematic.py` |
 | 3D tours: true camera travel through a splat scene (gsplat on the GPU) | Done (2026-11-13) | `planner3d/`, `render/splat_*.py` |
 | 3D planner: floor plan, rooms from a point + type, walkways, push / pull, hallway links, reveals, look-back closing, occlusion and room-to-breathe checks | Done; green-house v3 is the shot standard | `planner3d/` |
-| Scene labels: Mask2Former classes voted onto every splat; objects; curtain / plant / flame motion from them | Done | `scene/semantics.py`, `scene/motion_label.py`, `jobs/scene_label.py` |
-| Segmentation: Mask2Former ADE20K panoptic (one pass, fireplaces included), water v4 / flame refinements | Done (2026-11-12) | `vision/segment.py`, `vision/refine.py` |
+| Scene labels: segmentation classes voted onto every splat; objects; curtain / plant motion from them | Done | `scene/semantics.py`, `scene/motion_label.py`, `jobs/scene_label.py` |
+| Segmentation: OneFormer COCO panoptic (one pass, common class names), water v4 refinement; replaced Mask2Former ADE20K (docs/adr/0001) | Done (2026-11-20) | `vision/segment.py`, `vision/refine.py` |
 | Procedural motion (photos): curtains, plants, trees, water, lit fires, sky drift | Done | `motion/` |
 | Finishing: title / end cards, corner logo, room labels, branded + unbranded (MLS) copies, voiceover with ducking | Done (2026-11-11) | `render/overlays.py`, `render/direct.py` |
 | Tour controls: presets, pacing, manual order | Done (2026-11-11) | `planner/` |
@@ -72,8 +72,8 @@ Tests: 476 pass, 4 skipped (`pytest -q`; heavy suites under `tools/safe_run.py`)
 - Beat sync: librosa, not aubio. Any sync change must pass `tools/music/sync_regression.py
   --compare tools/music/sync_baseline.json` (but see Open: the baseline is stale).
 - Audio and video must stay in sync in every player: no MP4 edit lists (`encode.mux_aligned`).
-- Segmentation: Mask2Former only (OneFormer dropped). Bump `SEGMENT_VERSION` when regions change.
-  ADE20K's licence is under legal review (LICENSES.md).
+- Segmentation: OneFormer COCO (docs/adr/0001-segmentation-oneformer-coco.md). Bump `SEGMENT_VERSION`
+  when regions change. Class names reach every reader through `vision/segment.COMMON`.
 - Motion runs in the deterministic OpenCV prewarp for photos; for splats, per-Gaussian offsets.
 - The worker runs as a plain service (no Docker images); RunPod is reached via the backend's
   `RUNPOD_ENDPOINT_URL`.
@@ -99,9 +99,9 @@ the user). Audit + the work of this pass:
 
 | ID | Status | Where |
 |---|---|---|
-| IN-04 auto room classification | started (untyped photos named from Mask2Former scene summary, flagged room_auto) | scoring/autoroom.py |
+| IN-04 auto room classification | started (untyped photos named from the OneFormer scene summary as TourRoomType values, flagged room_auto) | scoring/autoroom.py |
 | PS-07 calibration | started (tool; needs 20-30 listings with human hero picks) | tools/scoring/calibrate.py |
-| CM-04 drone clips | started (ClipShot frame source; plan version + planner + uploads next) | render/clip.py |
+| CM-04 drone clips | done for 3D tours: drone_clips in tour_plan, video_clip shots (entry before the interior, rear after) | render/clip.py, planner3d/plan.py |
 | PM-04 shadows | built, off (cloud shadows in sky_drift; user: "lets not do shadows") | motion/sky.py |
 | MU-06 licence per track | started (track licence echoed per plan; backend keeps it per job) | contract/jobs.py MusicLicence |
 | OR-08 render cache | backend: a completed render with the same plan hash is reused | backend virtual_tour/service.py |

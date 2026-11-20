@@ -69,7 +69,7 @@ PAN_SWEEP = 50.0
 AIM_Z_MAX = EYE - 0.10        # a room shot never looks up: not at a ceiling, not at upper cabinets
 LOW_TOP = 1.4                 # m: an object whose top is below this is a surface a room shot may aim at
 # what a room without a main piece is about: its working surfaces (low objects of these classes)
-ANCHORS = {"kitchen": ("countertop", "sink", "stove", "oven", "dishwasher", "kitchen island", "cabinet"),
+ANCHORS = {"kitchen": ("countertop", "counter", "sink", "stove", "oven", "dishwasher", "kitchen island", "cabinet"),
            "bathroom": ("bathtub", "sink", "shower", "countertop", "cabinet"),
            "ensuite": ("bathtub", "sink", "shower", "countertop", "cabinet"),
            "laundry": ("washer", "cabinet", "countertop", "sink"),
@@ -189,11 +189,11 @@ SINK_M = 0.3                  # a view may not drop this much past what it shows
 # 2026-11-16: the Home Scan's kitchen opened on its dining table - "the camera shows the room its
 # mentioning in the frame")
 TYPE_SIGNS = {"kitchen": ("stove", "oven", "sink", "refrigerator", "dishwasher", "kitchen island", "countertop",
-                          "hood", "microwave"),
+                          "counter", "hood", "microwave", "toaster"),
               "bedroom": ("bed",), "primary_bedroom": ("bed",), "guest_bedroom": ("bed",),
               "bathroom": ("toilet", "bathtub", "shower", "sink"),
               "living_room": ("sofa", "television receiver", "fireplace"), "family_room": ("sofa", "television receiver", "fireplace"),
-              "dining_room": ("table",), "home_office": ("desk", "computer", "monitor", "table")}
+              "dining_room": ("table",), "home_office": ("desk", "computer", "monitor", "keyboard", "mouse", "table")}
 TYPE_WHOLE = ("bed", "sofa")    # ... framed whole, when the room has one
 TOP_VOID_MAX = 0.15           # at most this share of the frame's top fifth may be uncaptured (a missing ceiling; 0.3 let the Home Scan kitchen band through)
 TOP_TILT = (3.0, 6.0)         # deg a shot tilts down to clear it, before it is dropped

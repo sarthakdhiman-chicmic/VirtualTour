@@ -1,14 +1,16 @@
-"""Mask2Former (ADE20K panoptic) object masks for perceptual motion.
+"""OneFormer (COCO panoptic) object masks for perceptual motion, and each photo's scene summary.
 
-Replaced OneFormer on 2026-11-11 (client review: one panoptic model, one licence chain; the M2F
-benchmark: one pass instead of two, ~8.7x faster on CPU, better foliage / water / plane masks).
-Model `facebook/mask2former-swin-large-ade-panoptic`, pinned below. Its Hugging Face card says
-licence "other" (the Mask2Former code is MIT, Meta); it is trained on ADE20K, whose images are for
-non-commercial research / education (MIT CSAIL terms): the same legal question as before.
+OneFormer COCO replaced Mask2Former ADE20K on 2026-11-20 (docs/adr/0001-segmentation-oneformer-coco.md):
+the lit-fire effect is off, so ADE20K's fireplace class is no longer needed, and the other
+pipelines no longer take Mask2Former's masks. Model `shi-labs/oneformer_coco_swin_large`, pinned.
 
-One pass gives every motion class, fireplaces included. Two raw masks are refined
-(tour_worker.vision.refine): pools / water keep the liquid surface only (coping and basin walls
-stay still), and a fireplace returns a "fire" region with its flame core only when it is lit.
+COCO names many classes "<thing>-merged" / "-stuff" / "-other"; the Segmenter renames them once,
+at load (COMMON), so scene summaries, motion regions and 3D labels all speak one vocabulary - the
+one the planner, the room typing and the 3D planner read: "sofa", "table", "windowpane", "ceiling",
+"water", "fence" (COCO's fences take in railings) ...
+
+Water masks keep the liquid surface only (tour_worker.vision.refine: coping and basin walls stay
+still).
 
 Output per photo: the same shape as a detect result, so the planner (tour_worker/planner) treats both alike:
   {object_id, class_name, confidence, bbox: [x1, y1, x2, y2], mask: 0/255 uint8, space: [w, h]}
@@ -24,22 +26,35 @@ import os
 import cv2
 import numpy as np
 
-# Label (Mask2Former ADE20K id2label, exactly as spelled there) -> our class name (the planner's
-# perceptual_effects keys). "fireplace" is not a motion class itself: its lit flames are.
 MODELS = {
-    "m2f_ade20k": {
-        "id": "facebook/mask2former-swin-large-ade-panoptic",
-        "revision": "ae53ed7ab37f8ea74f23d0e4f8c3d83c184a0caa",
-        "weights": "model.safetensors",
-        "sha256": "959905d66e497b8246308f00c4a72dd9e59d3f41e048c2bd0a0b0d5677dfc249",
-        "dir": "mask2former_swin_large_ade_panoptic",
-        "class_map": {"curtain": "curtain", "blind": "blinds", "plant": "potted_plant",
-                      "tree": "tree", "palm": "tree", "water": "water", "sea": "water",
-                      "river": "water", "lake": "water", "swimming pool": "water",
-                      "fireplace": "fireplace", "sky": "sky"},
+    "oneformer_coco": {
+        "id": "shi-labs/oneformer_coco_swin_large",
+        "revision": "3a263017ca5c75adbea145f25f81b118243d4394",
+        "weights": "pytorch_model.bin",
+        "sha256": "36d01ceb971e9b3824bf35de022cd3148aad0c928f6365302db492a4cff6bf2b",
+        "dir": "oneformer_coco_swin_large",
+        # common class name -> our motion class (the planner's perceptual_effects keys)
+        "class_map": {"curtain": "curtain", "blind": "blinds", "plant": "potted_plant", "tree": "tree",
+                      "water": "water", "sea": "water", "river": "water", "sky": "sky"},
     },
 }
-DEFAULT_MODEL = "m2f_ade20k"
+DEFAULT_MODEL = "oneformer_coco"
+# COCO panoptic label -> the common name every reader uses (labels not listed keep their own)
+COMMON = {
+    "couch": "sofa", "dining table": "table", "table-merged": "table", "tv": "television receiver",
+    "laptop": "computer", "window-other": "windowpane", "window-blind": "blind", "potted plant": "plant",
+    "ceiling-merged": "ceiling", "sky-other-merged": "sky", "tree-merged": "tree", "grass-merged": "grass",
+    "mountain-merged": "mountain", "rock-merged": "rock", "dirt-merged": "earth", "pavement-merged": "sidewalk",
+    "fence-merged": "fence", "cabinet-merged": "cabinet", "building-other-merged": "building", "rug-merged": "rug",
+    "mirror-stuff": "mirror", "door-stuff": "door", "water-other": "water", "paper-merged": "paper",
+    "food-other-merged": "food", "wall-brick": "wall", "wall-stone": "wall", "wall-tile": "wall",
+    "wall-wood": "wall", "wall-other-merged": "wall", "floor-wood": "floor", "floor-other-merged": "floor",
+}
+
+
+def common_name(label: str) -> str:
+    label = str(label).strip()
+    return COMMON.get(label, label)
 
 
 def model_id(model: str = DEFAULT_MODEL) -> str:
@@ -60,7 +75,7 @@ def ensure_model(model_dir: str, model: str = DEFAULT_MODEL) -> str:
     if not os.path.exists(weights):
         from huggingface_hub import snapshot_download
         snapshot_download(spec["id"], revision=spec["revision"], local_dir=model_dir,
-                          allow_patterns=["*.json", spec["weights"]])
+                          allow_patterns=["*.json", "*.txt", spec["weights"]])
     h = hashlib.sha256()
     with open(weights, "rb") as f:
         for chunk in iter(lambda: f.read(1 << 22), b""):
@@ -71,38 +86,35 @@ def ensure_model(model_dir: str, model: str = DEFAULT_MODEL) -> str:
 
 
 class Segmenter:
-    """Loads Mask2Former once; call it with a BGR image. model: a MODELS key; model_dir: its folder
-    (Settings.segment_path())."""
+    """Loads OneFormer once; call it with a BGR image. model: a MODELS key; model_dir: its folder
+    (Settings.segment_path()). id2label gives the common names (COMMON)."""
 
     def __init__(self, model_dir: str, model: str = DEFAULT_MODEL, threads: int | None = None):
         import torch
-        from transformers import Mask2FormerForUniversalSegmentation, Mask2FormerImageProcessor
+        from transformers import OneFormerForUniversalSegmentation, OneFormerProcessor
         if threads:
             torch.set_num_threads(threads)
         self.model_name, self.class_map = model, MODELS[model]["class_map"]
         d = ensure_model(model_dir, model)
         self.torch = torch
-        import warnings
-        with warnings.catch_warnings():         # the checkpoint's processor config carries a retired key
-            warnings.filterwarnings("ignore", message=".*_max_size.*")
-            self.processor = Mask2FormerImageProcessor.from_pretrained(d)
-        self.model = Mask2FormerForUniversalSegmentation.from_pretrained(d).eval()
+        self.processor = OneFormerProcessor.from_pretrained(d)
+        self.model = OneFormerForUniversalSegmentation.from_pretrained(d).eval()
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         self.model.to(self.device)
-        self.id2label = self.model.config.id2label
+        self.id2label = {k: common_name(v) for k, v in self.model.config.id2label.items()}
 
     def __call__(self, bgr: np.ndarray) -> list[dict]:
         return self.segment(bgr)[0]
 
     def panoptic(self, bgr: np.ndarray) -> tuple[np.ndarray, np.ndarray, list[dict]]:
-        """(the photo at mask size, the panoptic id map, segments_info) - one Mask2Former pass."""
+        """(the photo at mask size, the panoptic id map, segments_info) - one OneFormer pass."""
         h, w = bgr.shape[:2]
         k = min(1.0, MAX_SIDE / max(w, h))
         if k < 1.0:
             bgr = cv2.resize(bgr, (round(w * k), round(h * k)), interpolation=cv2.INTER_AREA)
         sh, sw = bgr.shape[:2]
         rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
-        inputs = self.processor(images=rgb, return_tensors="pt").to(self.device)
+        inputs = self.processor(images=rgb, task_inputs=["panoptic"], return_tensors="pt").to(self.device)
         with self.torch.no_grad():
             out = self.model(**inputs)
         # label_ids_to_fuse: nothing fused (the default) - said explicitly, or transformers logs a
@@ -112,21 +124,19 @@ class Segmenter:
         return bgr, res["segmentation"].cpu().numpy(), res["segments_info"]
 
     def segment(self, bgr: np.ndarray) -> tuple[list[dict], dict]:
-        """(motion regions, scene summary) - one pass, then the water and fireplace refinements."""
+        """(motion regions, scene summary) - one pass, then the water refinement."""
         bgr, seg, info = self.panoptic(bgr)
         sh, sw = bgr.shape[:2]
         regions = segments_to_regions(seg, info, self.id2label, (sw, sh), self.class_map)
         scene = scene_summary(seg, info, self.id2label, (sw, sh))
-        regions = outdoor_plants(regions, scene)
         return refine_regions(bgr, regions), scene
 
 
 def refine_regions(bgr: np.ndarray, regions: list[dict]) -> list[dict]:
-    """Water regions keep their liquid surface only (dropped when none is left); each fireplace
-    becomes a "fire" region holding its flame core when it is lit, and is dropped when it is not
-    (tour_worker.vision.refine). Other regions pass through."""
-    from tour_worker.vision.refine import refine_fireplace_and_flames, refine_water_surface
-    out, fires = [], 0
+    """Water regions keep their liquid surface only (dropped when none is left;
+    tour_worker.vision.refine). Other regions pass through."""
+    from tour_worker.vision.refine import refine_water_surface
+    out = []
     min_px = MIN_PART_AREA * bgr.shape[0] * bgr.shape[1]
     for r in regions:
         if r["class_name"] == "water":
@@ -134,12 +144,6 @@ def refine_regions(bgr: np.ndarray, regions: list[dict]) -> list[dict]:
             if int((surface > 0).sum()) < min_px:
                 continue
             out.append(dict(r, mask=surface, bbox=_bbox(surface)))
-        elif r["class_name"] == "fireplace":
-            flame, _, _, lit = refine_fireplace_and_flames(bgr, r["mask"])
-            if lit:
-                out.append(dict(r, object_id=f"fire_{fires:03d}", class_name="fire", mask=flame,
-                                bbox=_bbox(flame)))
-                fires += 1
         else:
             out.append(r)
     return out
@@ -148,16 +152,6 @@ def refine_regions(bgr: np.ndarray, regions: list[dict]) -> list[dict]:
 def _bbox(mask: np.ndarray) -> list[int]:
     ys, xs = np.nonzero(mask)
     return [int(xs.min()), int(ys.min()), int(xs.max()) + 1, int(ys.max()) + 1]
-
-
-def outdoor_plants(regions: list[dict], scene: dict) -> list[dict]:
-    """ADE20K's "plant" covers potted plants and shrubs alike. A photo showing sky (1% or more)
-    is outdoors: its plants are shrubs and hedges, which stay still (user decision 2026-10-16), so
-    they are renamed "plant_outdoor" (no effect) rather than dropped."""
-    sky = sum(c["area"] for k, c in scene.get("classes", {}).items() if k.startswith("sky"))
-    if sky < 0.01:
-        return regions
-    return [dict(r, class_name="plant_outdoor") if r["class_name"] == "potted_plant" else r for r in regions]
 
 
 def segments_to_regions(seg: np.ndarray, segments_info: list[dict], id2label: dict,
@@ -170,7 +164,7 @@ def segments_to_regions(seg: np.ndarray, segments_info: list[dict], id2label: di
     parts = []
     sky = None                       # the sky is ONE region (all its pieces: a balcony's openings)
     for s in segments_info:
-        label = id2label.get(s["label_id"], id2label.get(str(s["label_id"]), ""))
+        label = common_name(id2label.get(s["label_id"], id2label.get(str(s["label_id"]), "")))
         cls = (class_map or MODELS[DEFAULT_MODEL]["class_map"]).get(label)
         score = float(s.get("score", 1.0))
         if not cls or score < MIN_SCORE:
@@ -202,15 +196,15 @@ SKY_MIN_AREA = 0.01        # a sky under 1% of the photo is no region (nothing t
 
 def scene_summary(seg: np.ndarray, segments_info: list[dict], id2label: dict,
                   space: tuple[int, int]) -> dict:
-    """What is in the photo, for choosing its camera move (bed, sofa, kitchen island, window,
-    stairs, ceiling, sky, water ...): every Mask2Former class with its share of the photo, the box
+    """What is in the photo, for choosing its camera move (bed, sofa, table, windowpane, stairs,
+    ceiling, sky, water ...): every class (common names) with its share of the photo, the box
     around all its parts and their area-weighted centre, all normalised to the photo (0..1)."""
     sw, sh = space
     acc: dict[str, dict] = {}
     for s in segments_info:
         if float(s.get("score", 1.0)) < MIN_SCORE:
             continue
-        label = id2label.get(s["label_id"], id2label.get(str(s["label_id"]), ""))
+        label = common_name(id2label.get(s["label_id"], id2label.get(str(s["label_id"]), "")))
         ys, xs = np.nonzero(seg == s["id"])
         if not len(ys):
             continue

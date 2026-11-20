@@ -15,7 +15,7 @@ or locally. A tour is `tour_segment` -> `tour_plan` -> `tour_render`; the backen
   `output.hevc` also gets an H.265 copy, `<output_prefix>master_hevc.mp4`. A plan with
   `output.room_labels` draws each room's name; with `output.mls_copy` it also gets
   `<output_prefix>master_mls.mp4`, the same video without the room labels.
-- **`tour_segment`**: runs Mask2Former on a tour's photos before planning. It uploads one PNG mask
+- **`tour_segment`**: runs OneFormer (COCO panoptic) on a tour's photos before planning. It uploads one PNG mask
   per object that can move (curtain, blinds, potted plant, tree, water, lit fire) and returns
   JSON only: the regions and a scene summary per photo.
 
@@ -26,8 +26,8 @@ playback checks use ffprobe). Python 3.10 or later.
 
 ```bash
 uv sync                          # the render job, plus the dev group (pytest)
-uv sync --extra segment          # + Mask2Former on CPU PyTorch (dev machines)
-uv sync --extra segment-gpu      # + Mask2Former on CUDA 12.6 PyTorch (GPU host)
+uv sync --extra segment          # + OneFormer on CPU PyTorch (dev machines)
+uv sync --extra segment-gpu      # + OneFormer on CUDA 12.6 PyTorch (GPU host)
 uv sync --extra music            # + music analysis (librosa 0.10.2.post1, pinned)
 uv sync --extra http             # + the HTTP service (fastapi, uvicorn)
 pip install -e ".[segment,dev]"  # the same with pip
@@ -161,11 +161,11 @@ Result:
                              "mask_url": "s3://.../segments/job1/living.jpg/seg_000.png"}]},
  "scenes": {"living.jpg": {"space": [w, h], "classes": {"bed": {"area": 0.12, "count": 1,
                                                                "bbox": [...], "centroid": [...]}}}},
- "warnings": [], "model": "facebook/mask2former-swin-large-ade-panoptic@ae53ed7ab3", "seconds": 13.2}
+ "warnings": [], "model": "shi-labs/oneformer_coco_swin_large@3a263017ca", "seconds": 13.2}
 ```
 
 `bbox` and the masks are in `space` pixels: the photo scaled to at most 2048 px on its long side.
-The scene summary lists every Mask2Former class in the photo; the planner uses it to choose camera
+The scene summary lists every OneFormer class in the photo (by its common name, `vision/segment.COMMON`); the planner uses it to choose camera
 moves.
 
 ### `tour_plan`
@@ -319,7 +319,7 @@ tour_worker/
   render/probe.py         the playback checks a finished file must pass
   motion/                 perceptual motion: region.py (core, apply_regions), masks.py,
                           loader.py, one module per effect: fabric, foliage, canopy, water, fire
-  vision/segment.py       Mask2Former: pinned checkpoint, Segmenter, scene summary
+  vision/segment.py       OneFormer COCO: pinned checkpoint, Segmenter, common class names, scene summary
   vision/refine.py        water (above-waterline structure out) and flame-core refinements of its masks
   vision/fire_detect.py   lit fires inside fireplace masks
   music/                  beat analysis for beat sync (the `music` extra; offline, not a job);
@@ -352,8 +352,8 @@ tests/                    mirrors tour_worker/
 | `IMAGES_DIR` | `/tmp` | the folder `WORKER_STORAGE=local` reads from and writes to |
 | `PREWARP_WORKERS` | auto | processes that draw and encode frames. Auto is CPUs available - 1, capped by available memory at about 600 MB each. Output is identical for any count. |
 | `MODELS_DIR` | `<repo>/models` | folder holding the model weights, one subfolder per model. Set it when the package is installed outside the repo. |
-| `SEGMENT_MODEL` | `m2f_ade20k` | The `tour_segment` model: Mask2Former ADE20K panoptic, one pass for every motion class, fireplaces included. Water and fireplace masks are refined after it (`tour_worker/vision/refine.py`). |
-| `SEGMENT_DIR` | `MODELS_DIR/mask2former_swin_large_ade_panoptic` | Folder of its weights. |
+| `SEGMENT_MODEL` | `oneformer_coco` | The `tour_segment` model: OneFormer COCO panoptic, one pass for every motion class. Water masks are refined after it (`tour_worker/vision/refine.py`). See `docs/adr/0001-segmentation-oneformer-coco.md`. |
+| `SEGMENT_DIR` | `MODELS_DIR/oneformer_coco_swin_large` | Folder of its weights. |
 | `SPLAT_BACKEND` | `auto` | 3D tours (plan 1.6): `gsplat` (CUDA), `cpu` (the reference rasteriser: seconds a frame, for checking a scene without a GPU) or `auto` (gsplat when CUDA is available, else the render fails with `scene_render_failed`). |
 | `SPLAT_SUPERSAMPLE` | `1.5` | 3D frames are rasterised at this x the output size and reduced (INTER_AREA): less shimmer. 1.0-3.0. |
 | `SPLAT_SH_DEGREE` | `3` | View-dependent colour detail kept from the scene (0-3); lower saves memory. |
@@ -444,7 +444,7 @@ unchanged.
 {"jobs": {"inQueue": 0, "inProgress": 1, "completed": 12, "failed": 1, "cancelled": 0},
  "workers": {"running": 1, "idle": 0, "concurrency": 1},
  "version": "0.3.0", "jobTypes": ["tour_render", "tour_segment", "tour_plan"],
- "segmentModel": "facebook/mask2former-swin-large-ade-panoptic@ae53ed7ab3", "workerId": "<hostname>"}
+ "segmentModel": "shi-labs/oneformer_coco_swin_large@3a263017ca", "workerId": "<hostname>"}
 ```
 
 **Errors.** Every HTTP error has the worker's failure shape,
@@ -474,7 +474,7 @@ The Dockerfiles have not been built yet (they were written without a Docker daem
 ```bash
 docker build -f docker/render.Dockerfile  -t tour-worker-render .     # python 3.12-slim + ffmpeg, no torch
 docker build -f docker/segment.Dockerfile -t tour-worker-segment .    # CUDA 12.6 torch, COCO weights baked in
-docker build -f docker/segment.Dockerfile --build-arg BAKE_ADE20K=1 -t tour-worker-segment .   # + ADE20K
+docker build -f docker/segment.Dockerfile -t tour-worker-segment .
 docker run -p 8000:8000 -e WORKER_API_KEY=... -e AWS_ACCESS_KEY_ID=... -e AWS_SECRET_ACCESS_KEY=... \
     -e AWS_DEFAULT_REGION=... tour-worker-render
 docker compose -f docker/compose.yaml up --build                      # local: render on :8000, key dev-key
@@ -534,7 +534,7 @@ Each bench run is a new process, so it downloads the scene again (nothing is kep
 - **One process per host.** Jobs and their statuses live in the service process; `JOBS_DIR`
   keeps the records across restarts. Behind a proxy with several hosts, every `/status` for a
   job must reach the host that took it. Either use one host, or share `JOBS_DIR` between hosts.
-- **Models:** the Mask2Former weights are fetched to `MODELS_DIR` on first use. Pre-fetch them once on
+- **Models:** the OneFormer weights are fetched to `MODELS_DIR` on first use. Pre-fetch them once on
   the host so a timed run does not include the download.
 - **AWS:** the credentials must allow reading the photos and writing the outputs.
 - **Timing a run:** every job result carries `timings` (stages, total, host). For a cold-cache run,
@@ -609,12 +609,12 @@ On a machine that overheats, wrap heavy commands:
 
 ## Segmentation models
 
-`tour_segment` needs the `segment` (CPU) or `segment-gpu` extra and the pinned Mask2Former
+`tour_segment` needs the `segment` (CPU) or `segment-gpu` extra and the pinned OneFormer
 checkpoint:
 
 | `SEGMENT_MODEL` | Hugging Face model | revision | folder |
 |---|---|---|---|
-| `m2f_ade20k` | `facebook/mask2former-swin-large-ade-panoptic` | `ae53ed7ab37f` | `mask2former_swin_large_ade_panoptic` |
+| `oneformer_coco` | `shi-labs/oneformer_coco_swin_large` | `3a263017ca5c` | `oneformer_coco_swin_large` |
 
 - **Download:** if the weights are missing, the first job downloads them from the pinned revision
   into `SEGMENT_DIR`. Every load checks `model.safetensors` against its pinned sha256.
@@ -633,8 +633,6 @@ checkpoint:
   - Known limits: water the model does not label at all (a dark, mirror-like raised spa) cannot be
     recovered here; mid-tone tile bands on a spa's outer face can ripple; the model's own false
     positives (a railing, a tub shell, steam) pass through.
-  - A fireplace becomes a `fire` region holding only its flame core, and only when it is lit;
-    the mantel and surround stay still.
 
 ## 3D tours (plan 1.6)
 A tour can be rendered from a Gaussian splat scene instead of photos: the backend passes the scene
@@ -670,4 +668,4 @@ or two (use `tools/safe_run.py` on a hot machine).
 
 ## Licences
 
-See `LICENSES.md`: the Mask2Former weights and their training data (ADE20K), and librosa.
+See `LICENSES.md`.

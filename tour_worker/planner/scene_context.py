@@ -22,9 +22,8 @@ ground, sky - that carry no interest of their own. From the features:
   open_floor               visible floor / ground share: depth in front of the camera, which an
                            orbiting gimbal move needs to feel right
 
-Class names differ between the COCO and ADE20K OneFormers ("door-stuff" / "door",
-"light" / "chandelier"); they are matched by keyword, and an unknown class counts as a
-mid-weight thing unless it looks like a surface.
+Class names arrive as common names (vision/segment.COMMON); they are matched by keyword, and an
+unknown class counts as a mid-weight thing unless it looks like a surface.
 """
 
 from __future__ import annotations

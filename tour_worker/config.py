@@ -10,8 +10,8 @@ Every setting, its environment variable and default (also in README.md):
   PREWARP_WORKERS      (auto)     processes drawing + encoding frames; auto = CPUs - 1,
                                   capped by available memory (600 MB each)
   MODELS_DIR           <repo>/models   where model weights live (one folder per model)
-  SEGMENT_MODEL        "m2f_ade20k"  the tour_segment model (tour_worker.vision.segment.MODELS):
-                                  Mask2Former ADE20K panoptic, one pass for every motion class
+  SEGMENT_MODEL        "oneformer_coco"  the tour_segment model (tour_worker.vision.segment.MODELS):
+                                  OneFormer COCO panoptic, one pass for every motion class
   SEGMENT_DIR          (unset)    its weights folder; default MODELS_DIR/<its dir name>
   SPLAT_BACKEND        "auto"     3D tours (plan 1.6): "gsplat" (CUDA), "cpu" (the reference
                                   rasteriser: slow, for checking a scene without a GPU) or "auto"
@@ -59,7 +59,7 @@ class Settings:
     images_dir: str = "/tmp"
     render_workers: int | None = None       # None: automatic
     models_dir: str = os.path.join(REPO_ROOT, "models")
-    segment_model: str = "m2f_ade20k"
+    segment_model: str = "oneformer_coco"
     segment_dir: str | None = None
     # the HTTP service (tour_worker.service)
     api_key: str | None = field(default=None, repr=False)     # never in a repr / log
@@ -91,7 +91,7 @@ class Settings:
             images_dir=env.get("IMAGES_DIR", "/tmp"),
             render_workers=max(1, int(workers)) if workers else None,
             models_dir=env.get("MODELS_DIR") or os.path.join(REPO_ROOT, "models"),
-            segment_model=env.get("SEGMENT_MODEL", "m2f_ade20k"),
+            segment_model=env.get("SEGMENT_MODEL", "oneformer_coco"),
             segment_dir=env.get("SEGMENT_DIR") or None,
             api_key=env.get("WORKER_API_KEY") or None,
             allow_no_auth=env.get("WORKER_ALLOW_NO_AUTH", "") == "1",

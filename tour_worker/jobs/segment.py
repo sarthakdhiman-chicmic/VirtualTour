@@ -1,4 +1,4 @@
-"""`tour_segment` job: Mask2Former masks for a tour's photos, before tour_plan plans.
+"""`tour_segment` job: OneFormer masks for a tour's photos, before tour_plan plans.
 
 Request:  {"job_type": "tour_segment", "job_id": ..., "images": [{"photo_id": ..., "uri": ...}],
            "output_prefix": "s3://bucket/.../segments/<job_id>/"}
@@ -12,9 +12,8 @@ Each region is shaped like a detect result plus `space` (tour_worker.vision.segm
 backend: tour_plan plans from the JSON, and the render job fetches the masks it needs. A photo that cannot
 be fetched or segmented gets None (the tour still renders, without motion on that photo).
 Contracts: tour_worker.contract.jobs (TourSegmentRequest / TourSegmentResult). Settings used:
-SEGMENT_MODEL, SEGMENT_DIR / MODELS_DIR (tour_worker.config). One Mask2Former pass per photo finds
-every motion class, fireplaces included; water and fireplace masks are refined after it
-(tour_worker.vision.refine).
+SEGMENT_MODEL, SEGMENT_DIR / MODELS_DIR (tour_worker.config). One OneFormer pass per photo finds
+every motion class; water masks are refined after it (tour_worker.vision.refine).
 """
 from __future__ import annotations
 
@@ -44,9 +43,10 @@ def get_segmenter(settings: Settings):
 # Bump when the regions or scenes this job returns change for the same models (class maps,
 # merges such as the one sky region, mask clean-up): the backend caches results per photo
 # under segment_version and reuses them only while it matches.
-SEGMENT_VERSION = "3"      # 2: Mask2Former with the water / fireplace refinements (2026-11-11)
+SEGMENT_VERSION = "4"      # 2: Mask2Former with the water / fireplace refinements (2026-11-11)
                            # 3: water keeps the model mask, freezes only walls / rims above the waterline
                            #    (checked on 104 varied water photos, 2026-11-11)
+                           # 4: OneFormer COCO, common class names, no fireplace pass (2026-11-20)
 
 
 def segment_version(settings: Settings) -> str:

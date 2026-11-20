@@ -9,13 +9,16 @@ TIER   = importance (SOW 5.2C): Living > Kitchen > Primary Bedroom > Primary Bat
          the assignment of individual types to groups is OUR PROPOSAL.
 STAGE  = narrative order (SOW 5.2C): exterior -> entry -> living spaces -> private spaces ->
          exterior/amenities. 'service' (garage, laundry) is our addition; the SOW is silent.
+         'circulation' (hallways, stairs) is ours too (2026-11-20): a staircase or landing is how
+         one walks from the living spaces to the bedrooms, not where a tour opens - as the 3D
+         tours treat hallways as links.
 No numpy/cv2 imports here."""
 import re
 
 TIERS = ["living_room", "kitchen", "primary_bedroom", "primary_bathroom",
          "other_bedrooms", "other_bathrooms", "exterior", "other"]
 
-STAGES = ["exterior_open", "entry", "living", "private", "service", "amenity_close"]
+STAGES = ["exterior_open", "entry", "living", "circulation", "private", "service", "amenity_close"]
 
 _TIER_MEMBERS: dict[str, list[str]] = {
     # --- SA live room types (roomTypeEnum values) ---
@@ -39,7 +42,8 @@ _TIER_MEMBERS: dict[str, list[str]] = {
 
 _STAGE_MEMBERS: dict[str, list[str]] = {
     "exterior_open": ["exterior", "front_exterior", "facade", "aerial"],
-    "entry": ["entry", "entryway", "foyer", "hallway", "mudroom", "staircase", "stairs", "stairway"],
+    "entry": ["entry", "entryway", "foyer", "mudroom"],
+    "circulation": ["hallway", "staircase", "stairs", "stairway"],
     "living": ["living_room", "family_room", "great_room", "sunroom", "kitchen", "breakfast_nook",
                "butlers_pantry", "dining_room", "formal_dining_room", "open_concept", "home_office", "study",
                "library", "media_room", "game_room", "home_gym", "basement", "bonus_room"],

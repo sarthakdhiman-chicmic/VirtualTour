@@ -37,7 +37,7 @@ class SegmentImage(BaseModel):
 
 
 class TourSegmentRequest(_Request):
-    """Mask2Former masks for a tour's photos, before tour_plan plans."""
+    """OneFormer masks for a tour's photos, before tour_plan plans."""
     job_type: Literal["tour_segment"]
     images: list[SegmentImage] = Field(min_length=1)
     output_prefix: str = Field(min_length=1)  # masks go to <output_prefix><photo_id>/<object_id>.png
@@ -141,7 +141,7 @@ class PlanRoom(BaseModel):
 
 
 class SceneLabelRequest(_Request):
-    """Label a splat scene once (at upload): what every Gaussian is (Mask2Former classes voted from
+    """Label a splat scene once (at upload): what every Gaussian is (OneFormer classes voted from
     rendered survey views of its rooms) -> <output_prefix>scene_labels.npz, and the scene's motion
     (curtains, plants, lit fireplaces) -> <output_prefix>scene_motion.npz. tour_plan reads the
     labels (scene.labels_uri); tour_render the motion (scene.motion_uri)."""

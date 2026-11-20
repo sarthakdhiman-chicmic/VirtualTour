@@ -38,7 +38,7 @@ def test_run_segment_writes_masks_and_returns_json_only():
     assert st.put_calls == ["s3://b/seg/job1/img_0/seg_000.png"]
     from tour_worker.contract.jobs import TourSegmentResult
     TourSegmentResult.model_validate(res)
-    assert res["model"] == "facebook/mask2former-swin-large-ade-panoptic@ae53ed7ab3"
+    assert res["model"] == "shi-labs/oneformer_coco_swin_large@3a263017ca"
 
 
 def test_a_photo_the_caller_holds_at_this_version_is_not_segmented_again():
@@ -67,7 +67,7 @@ def test_a_photo_the_caller_holds_at_this_version_is_not_segmented_again():
 
     settings = Settings.from_env({})
     v = job.segment_version(settings)
-    assert v == f"seg{job.SEGMENT_VERSION}|facebook/mask2former-swin-large-ade-panoptic@ae53ed7ab3"
+    assert v == f"seg{job.SEGMENT_VERSION}|shi-labs/oneformer_coco_swin_large@3a263017ca"
     req = {"images": [{"photo_id": "img_0", "uri": "s3://b/a.jpg", "known_version": v},
                       {"photo_id": "img_1", "uri": "s3://b/b.jpg", "known_version": "seg0|old"},
                       {"photo_id": "img_2", "uri": "s3://b/c.jpg"}], "output_prefix": "s3://b/seg/j/"}

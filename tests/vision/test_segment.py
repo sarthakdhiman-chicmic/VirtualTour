@@ -14,8 +14,8 @@ def test_segments_to_regions_splits_stuff_and_maps_classes():
     info = [{"id": 1, "label_id": 10, "score": 0.99}, {"id": 2, "label_id": 20, "score": 0.95},
             {"id": 3, "label_id": 30, "score": 0.99}]
     from tour_worker.vision.segment import MODELS
-    regs = segments_to_regions(seg, info, {10: "curtain", 20: "plant", 30: "wall"}, (300, 200),
-                               class_map=MODELS["m2f_ade20k"]["class_map"])
+    regs = segments_to_regions(seg, info, {10: "curtain", 20: "potted plant", 30: "wall-other-merged"}, (300, 200),
+                               class_map=MODELS["oneformer_coco"]["class_map"])
     assert sorted(r["class_name"] for r in regs) == ["curtain", "curtain", "potted_plant"]
     assert all(r["space"] == [300, 200] and r["mask"].shape == (200, 300) for r in regs)
     left = [r for r in regs if r["class_name"] == "curtain" and r["bbox"][0] < 100][0]
@@ -35,24 +35,27 @@ def test_scene_summary_lists_every_class_with_its_place():
     labels = {0: "bed", 1: "ceiling-merged", 2: "window-other", 3: "clock"}
     out = scene_summary(seg, info, labels, (200, 100))
     c = out["classes"]
-    assert set(c) == {"bed", "ceiling-merged", "window-other"}
+    assert set(c) == {"bed", "ceiling", "windowpane"}                 # COCO labels by their common names
     assert c["bed"]["area"] == pytest.approx(0.24) and c["bed"]["bbox"] == [0.2, 0.6, 0.8, 1.0]
     assert c["bed"]["centroid"] == pytest.approx([0.4975, 0.795], abs=1e-3)
-    assert c["window-other"]["centroid"][0] > 0.85
+    assert c["windowpane"]["centroid"][0] > 0.85
 
 
-def test_the_class_map_uses_mask2formers_own_label_spelling():
-    """Mask2Former's ADE20K labels differ from OneFormer's ("blind", "swimming pool", "palm")."""
-    from tour_worker.vision.segment import MODELS, segments_to_regions
+def test_coco_labels_map_to_common_names_and_motion_classes():
+    """OneFormer COCO's "-merged" / "-stuff" / "-other" labels are read by their common names; the
+    motion classes come from those (blinds, plants, trees, water, sea / river as water)."""
+    from tour_worker.vision.segment import MODELS, common_name, segments_to_regions
+    assert [common_name(x) for x in ("couch", "tree-merged", "water-other", "fence-merged", "bed")] == \
+        ["sofa", "tree", "water", "fence", "bed"]
     seg = np.zeros((200, 300), np.int32)
     seg[20:180, 10:60] = 1
     seg[100:190, 120:180] = 2
     seg[60:140, 200:280] = 3
     seg[0:60, 80:110] = 4
     info = [{"id": i, "label_id": i, "score": 0.9} for i in (1, 2, 3, 4)]
-    labels = {1: "blind", 2: "swimming pool", 3: "fireplace", 4: "palm"}
-    regs = segments_to_regions(seg, info, labels, (300, 200), class_map=MODELS["m2f_ade20k"]["class_map"])
-    assert sorted(r["class_name"] for r in regs) == ["blinds", "fireplace", "tree", "water"]
+    labels = {1: "window-blind", 2: "water-other", 3: "sea", 4: "tree-merged"}
+    regs = segments_to_regions(seg, info, labels, (300, 200), class_map=MODELS["oneformer_coco"]["class_map"])
+    assert sorted(r["class_name"] for r in regs) == ["blinds", "tree", "water", "water"]
 
 
 def _pool_photo():
@@ -136,36 +139,14 @@ def test_pale_sunlit_water_at_the_edge_is_not_coping():
     assert (surface[70:190, 310:390] > 0).mean() > 0.95
 
 
-def _fireplace_photo(lit=True):
-    """A stone surround with a dark firebox; a bright orange flame inside it when lit."""
-    img = np.full((240, 320, 3), (170, 175, 180), np.uint8)          # pale stone surround
-    img[90:200, 100:220] = (20, 20, 25)                              # dark firebox
-    if lit:
-        img[130:190, 140:180] = (20, 120, 240)                       # orange flame (BGR)
-        img[150:180, 150:170] = (200, 240, 255)                      # near-white core
-    mask = np.zeros((240, 320), np.uint8)
-    mask[60:220, 70:250] = 255                                       # the raw fireplace: surround and all
-    return img, mask
-
-
-def test_a_lit_fireplace_becomes_its_flame_core_and_an_unlit_one_is_dropped():
+def test_refine_regions_keeps_the_water_surface_and_passes_the_rest():
     from tour_worker.vision.segment import refine_regions
     def region(cls, mask):
         ys, xs = np.nonzero(mask)
         return {"object_id": "seg_000", "class_name": cls, "confidence": 0.9, "space": [320, 240],
                 "bbox": [int(xs.min()), int(ys.min()), int(xs.max()) + 1, int(ys.max()) + 1], "mask": mask}
-    img, raw = _fireplace_photo(lit=True)
-    out = refine_regions(img, [region("fireplace", raw)])
-    assert [r["class_name"] for r in out] == ["fire"] and out[0]["object_id"] == "fire_000"
-    flame = out[0]["mask"]
-    ys, xs = np.nonzero(flame)
-    assert len(ys) >= 30                                             # the orange tongues move ...
-    assert ys.min() >= 90 and ys.max() < 200 and xs.min() >= 100 and xs.max() < 220   # ... inside the firebox
-    assert flame[70, 80] == 0 and flame[100, 110] == 0              # the mantel and the cavity do not
-    x0, y0, x1, y1 = out[0]["bbox"]
-    assert 130 <= x0 and x1 <= 190 and y1 <= 200
-    img, raw = _fireplace_photo(lit=False)
-    assert refine_regions(img, [region("fireplace", raw)]) == []   # unlit: no flames to animate
     img, raw = _pool_photo()
     water = refine_regions(img, [region("water", raw)])[0]
     assert water["mask"][50, 50] == 0 and water["bbox"][0] >= 60   # the coping left the water region
+    curtain = region("curtain", raw)
+    assert refine_regions(img, [curtain]) == [curtain]
