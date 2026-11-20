@@ -149,7 +149,8 @@ def run_tour(request: dict, storage, workdir: str, settings: Settings | None = N
             except SceneInvalid as e:
                 return failure("scene_invalid", str(e))
             scene_motion(plan, splat, storage, image_urls, sw, workdir, warnings)
-        three_d = {"splat": splat, "splat_supersample": settings.splat_supersample} if splat is not None else {}
+        ss = request.get("splat_supersample") or settings.splat_supersample
+        three_d = {"splat": splat, "splat_supersample": float(ss)} if splat is not None else {}
         def chunks_done(done: int, total: int) -> None:       # the log's bar, and the caller's callback
             report.progress(done, total, "chunks")
             if progress:

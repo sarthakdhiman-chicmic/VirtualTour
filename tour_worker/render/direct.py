@@ -429,7 +429,8 @@ def render_direct(plan, workdir: str, warnings: list | None = None, music_path: 
                     st = _STATE["splat_stats"]
                     timings.info.update(splat_backend=getattr(splat, "info", {}), supersample=splat_supersample,
                                         rasterise_s=round(st.get("rasterise_s", 0.0), 3),
-                                        frames_rasterised=st.get("frames", 0))
+                                        frames_rasterised=st.get("frames", 0),
+                                        splat_stages={k: round(v, 2) for k, v in getattr(splat, "stage_s", {}).items()})
             else:
                 with ProcessPoolExecutor(max_workers=min(workers, len(tasks)), mp_context=mp.get_context("spawn"),
                                          initializer=_init, initargs=(plan, images)) as pool:

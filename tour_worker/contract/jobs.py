@@ -24,6 +24,9 @@ class TourRenderRequest(_Request):
     output_prefix: str = Field(min_length=1)  # where master.mp4 goes, e.g. s3://bucket/tours/<id>/
     image_urls: dict[str, str] = Field(default_factory=dict)   # optional: plan URI -> fetch URL
     stills: bool = False                      # SOW EX-03: Instagram feed JPEGs, one a room (<output_prefix>stills/)
+    # tuning only: a 3D render's supersample (1-3) instead of SPLAT_SUPERSAMPLE - to compare settings
+    # on a scene without a restart
+    splat_supersample: Optional[float] = Field(default=None, ge=1.0, le=3.0)
 
 
 class SegmentImage(BaseModel):

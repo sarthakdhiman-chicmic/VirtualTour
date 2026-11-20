@@ -324,10 +324,11 @@ def memory_budget() -> int | None:
 
 def render_workers(configured: int | None = None, width: int = 1920, height: int = 1080,
                    hevc: bool = False, mls: bool = False) -> int:
-    """Processes for drawing + encoding: `configured` (the PREWARP_WORKERS setting) or min(8, CPUs
-    this job may use - 1), never more than MEM_SHARE of the memory budget holds at this output
-    size - a configured count is capped too, so no setting can take the machine down."""
-    n = max(1, int(configured)) if configured else min(8, usable_cpus() - 1)
+    """Processes for drawing + encoding: `configured` (the PREWARP_WORKERS setting) or the CPUs this
+    job may use - 1 (one x264 thread each; the old cap of 8 left the A100 pod's 14-CPU quota idle,
+    client review 2026-11-20 item 22), never more than MEM_SHARE of the memory budget holds at this
+    output size - a configured count is capped too, so no setting can take the machine down."""
+    n = max(1, int(configured)) if configured else max(1, usable_cpus() - 1)
     mem = memory_budget()
     if mem is not None:
         n = min(n, int(mem * MEM_SHARE // worker_mem_bytes(width, height, hevc, mls)))

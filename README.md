@@ -350,7 +350,7 @@ tests/                    mirrors tour_worker/
 |---|---|---|
 | `WORKER_STORAGE` | (unset) | `local`: dev mode for `tour_render` and `tour_plan`. Every image, mask and output URI that is not `file://` or an absolute path (s3://, https://, bare names) is served from `IMAGES_DIR` by basename. A missing image becomes a red placeholder. Unset: URIs are routed by scheme (`s3://` to S3, `https://` to HTTPS, `file://` or a path to the filesystem). `tour_segment` always uses S3 / HTTPS. |
 | `IMAGES_DIR` | `/tmp` | the folder `WORKER_STORAGE=local` reads from and writes to |
-| `PREWARP_WORKERS` | auto | processes that draw and encode frames. Auto is min(8, CPUs available - 1), capped by available memory at about 600 MB each. Output is identical for any count. |
+| `PREWARP_WORKERS` | auto | processes that draw and encode frames. Auto is CPUs available - 1, capped by available memory at about 600 MB each. Output is identical for any count. |
 | `MODELS_DIR` | `<repo>/models` | folder holding the model weights, one subfolder per model. Set it when the package is installed outside the repo. |
 | `SEGMENT_MODEL` | `m2f_ade20k` | The `tour_segment` model: Mask2Former ADE20K panoptic, one pass for every motion class, fireplaces included. Water and fireplace masks are refined after it (`tour_worker/vision/refine.py`). |
 | `SEGMENT_DIR` | `MODELS_DIR/mask2former_swin_large_ade_panoptic` | Folder of its weights. |

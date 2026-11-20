@@ -1,7 +1,7 @@
 """3D shots (plan 1.6): a bezier_path camera flying through a Gaussian splat scene.
 
 SplatShot has ShotWarp's frame interface (frame(f) -> BGR uint8 at the output size), so
-render/direct.py composes 3D shots exactly like photo shots: fades, whip, push, overlays,
+render/direct.py composes 3D shots exactly like photo shots: cuts, fades, overlays,
 chunked encode, audio and join are unchanged.
 
 Backends (SPLAT_BACKEND):
@@ -49,20 +49,37 @@ def area_weights(n_in: int, n_out: int) -> np.ndarray:
     return w
 
 
+def area_taps(n_in: int, n_out: int) -> tuple[np.ndarray, np.ndarray]:
+    """area_weights as taps: (n_out, T) input indices and weights, T = the most inputs one output
+    touches (2-3 at 1.25-1.5x); unused taps point at input 0 with weight 0."""
+    s = n_in / n_out
+    rows = []
+    for i in range(n_out):
+        a, b = i * s, (i + 1) * s
+        rows.append([(j, (min(b, j + 1) - max(a, j)) / s) for j in range(int(math.floor(a)), min(n_in, int(math.ceil(b))))])
+    t = max(len(r) for r in rows)
+    idx, w = np.zeros((n_out, t), np.int64), np.zeros((n_out, t), np.float64)
+    for i, r in enumerate(rows):
+        for k, (j, v) in enumerate(r):
+            idx[i, k], w[i, k] = j, v
+    return idx, w
+
+
 def area_reduce_bgr8(img, ow: int, oh: int, weights: dict | None = None):
     """A torch (H, W, 3) RGB float frame -> (oh, ow, 3) BGR uint8 on the same device: area reduction,
-    then clip(x * 255 + 0.5) - the same formula as the CPU path. weights: a cache of the matrices."""
+    then clip(x * 255 + 0.5) - the same formula as the CPU path. Each output pixel sums its few input
+    taps (area_taps) - a dense resize matrix cost ~260 GFLOP a 4K frame at 1.5x. weights: a cache."""
     import torch
     h, w = int(img.shape[0]), int(img.shape[1])
     if (h, w) != (oh, ow):
         cache = weights if weights is not None else {}
         key = (h, w, oh, ow, str(img.device))
         if key not in cache:
-            cache[key] = (torch.from_numpy(area_weights(h, oh)).float().to(img.device),
-                          torch.from_numpy(area_weights(w, ow)).float().to(img.device))
-        ry, rx = cache[key]
-        img = torch.einsum("ij,jkc->ikc", ry, img)            # rows
-        img = torch.einsum("kj,ijc->ikc", rx, img)            # columns
+            cache[key] = tuple(torch.from_numpy(a).to(img.device, torch.float32 if a.dtype == np.float64 else torch.int64)
+                               for a in (*area_taps(h, oh), *area_taps(w, ow)))
+        yi, yw, xi, xw = cache[key]
+        img = (img[yi] * yw[:, :, None, None]).sum(1)          # rows: (oh, T, W, 3) -> (oh, W, 3)
+        img = (img[:, xi] * xw[None, :, :, None]).sum(2)       # columns: (oh, ow, T, 3) -> (oh, ow, 3)
     return torch.clamp(img[..., [2, 1, 0]] * 255.0 + 0.5, 0, 255).to(torch.uint8)
 
 
@@ -85,6 +102,7 @@ class GsplatRenderer(MotionMixin):
         self.sh = torch.from_numpy(np.ascontiguousarray(model.sh[:, :k])).to(dev)
         self.bg = torch.tensor([background], dtype=torch.float32, device=dev)
         self._weights: dict = {}
+        self.stage_s: dict = {}           # render_bgr8's seconds per stage: raster, reduce, download
         self.info = {"backend": "gsplat", "gsplat_version": getattr(gsplat, "__version__", "?"),
                      "gpu": torch.cuda.get_device_name(0), "cuda": torch.version.cuda,
                      "driver": _nvidia_driver()}
@@ -104,14 +122,25 @@ class GsplatRenderer(MotionMixin):
         """The frame at the output size as BGR uint8: rasterised, reduced and converted on the GPU;
         only the finished frame crosses to the CPU."""
         t = self.torch
+        st = self.stage_s
         with t.no_grad():
+            t0 = time.perf_counter()
             v = t.from_numpy(np.asarray(viewmat, np.float32))[None].cuda()
             k = t.from_numpy(np.asarray(K, np.float32))[None].cuda()
             img, _, _ = self._raster(self.means, self.quats, self.scales, self.opac, self.sh, v, k, width, height,
                                      sh_degree=self.degree, near_plane=0.05, far_plane=1e4,
                                      backgrounds=self.bg, packed=False, rasterize_mode="classic")
+            t.cuda.synchronize()
+            t1 = time.perf_counter()
             out = area_reduce_bgr8(img[0].float(), out_w, out_h, self._weights)
-            return np.ascontiguousarray(out.cpu().numpy())
+            t.cuda.synchronize()
+            t2 = time.perf_counter()
+            frame = np.ascontiguousarray(out.cpu().numpy())
+            t3 = time.perf_counter()
+        st["raster"] = st.get("raster", 0.0) + t1 - t0
+        st["reduce"] = st.get("reduce", 0.0) + t2 - t1
+        st["download"] = st.get("download", 0.0) + t3 - t2
+        return frame
 
 
     def render_bgr8_depth(self, viewmat: np.ndarray, K: np.ndarray, width: int, height: int):

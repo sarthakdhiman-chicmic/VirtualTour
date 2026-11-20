@@ -37,6 +37,15 @@ def test_the_worker_count_fits_the_memory_budget(monkeypatch):
     assert frames.render_workers(None, 3840, 2160) == 1
 
 
+def test_every_cpu_of_the_quota_but_one_encodes_when_memory_allows(monkeypatch):
+    """The A100 pod's container gets 14 CPUs and ~2 TB: 13 workers, not the old cap of 8."""
+    monkeypatch.setattr(os, "sched_getaffinity", lambda pid: set(range(128)))
+    monkeypatch.setattr(cpus, "_quota", lambda: 14)
+    monkeypatch.setattr(frames, "_available_memory", lambda: 2000 * GB)
+    monkeypatch.setattr(frames, "_cgroup_headroom", lambda: None)
+    assert frames.render_workers(None, 3840, 2160, mls=True) == 13
+
+
 def test_the_cgroup_headroom_is_the_tightest_limit_on_the_way_up(monkeypatch, tmp_path):
     root = tmp_path / "cg"
     scope = root / "user.slice" / "job.scope"

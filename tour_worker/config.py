@@ -7,7 +7,7 @@ Every setting, its environment variable and default (also in README.md):
                                   (tour_render and tour_plan; tour_segment always uses S3 / HTTPS).
                                   Anything else: by URI scheme (s3://, https://, file:// or a path)
   IMAGES_DIR           "/tmp"     the folder WORKER_STORAGE=local reads from and writes to
-  PREWARP_WORKERS      (auto)     processes drawing + encoding frames; auto = min(8, CPUs - 1),
+  PREWARP_WORKERS      (auto)     processes drawing + encoding frames; auto = CPUs - 1,
                                   capped by available memory (600 MB each)
   MODELS_DIR           <repo>/models   where model weights live (one folder per model)
   SEGMENT_MODEL        "m2f_ade20k"  the tour_segment model (tour_worker.vision.segment.MODELS):
