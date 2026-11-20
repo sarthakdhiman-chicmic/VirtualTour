@@ -153,6 +153,29 @@ def base_window(src_w: int, src_h: int, out_w: int, out_h: int) -> tuple[float, 
     return (a_out / a_src, 1.0) if a_src >= a_out else (1.0, a_src / a_out)
 
 
+def shot_enlargement(cam, src_w: int, src_h: int, out_w: int, out_h: int) -> float | None:
+    """The most a photo shot's camera enlarges its source: output px per source px at its tightest
+    frame (highest zoom, punches and roll fit included). Over 1: the source has fewer pixels than the
+    frame shows. None for a camera with no zoom (3D, video clips)."""
+    zooms, rolls = [], [0.0]
+    if cam.type == "ken_burns" and cam.start is not None and cam.end is not None:
+        zooms += [cam.start.zoom, cam.end.zoom]
+        rolls += [cam.start.roll_deg or 0.0, cam.end.roll_deg or 0.0]
+    elif cam.type == "keyframe_path":
+        zooms += [k.zoom for k in cam.keyframes or []]
+        rolls += [k.roll_deg or 0.0 for k in cam.keyframes or []]
+    elif cam.type == "compound":
+        zooms += ([cam.start.zoom] if cam.start is not None else []) + [s.zoom for s in cam.segments or []]
+    if not zooms:
+        return None
+    z = max(zooms)
+    for p in getattr(cam, "punches", None) or []:
+        z *= 1.0 + p.amount
+    bw, _ = base_window(src_w, src_h, out_w, out_h)
+    fit = roll_fit_scale(math.radians(max(abs(r) for r in rolls)), out_w, out_h)
+    return out_w * z * fit / (bw * src_w)
+
+
 def margin_out_px(cx: float, cy: float, zoom: float, src_w: int, src_h: int, out_w: int, out_h: int) -> float:
     """Smallest distance from the window to the image edge, in OUTPUT pixels (negative = the
     window leaves the image)."""

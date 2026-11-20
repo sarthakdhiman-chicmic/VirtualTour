@@ -457,6 +457,18 @@ def build_shot_plan(
     # room labels and the staged disclosure (render/overlays.py); unset fields stay out of the JSON
     apply_captions(final_shots, cfg.output_room_labels is not None, cfg.staged_photos)
 
+    # each shot's effective enlargement of its source (output px per source px at its tightest frame);
+    # over 1 the photo is smaller than the frame shows it
+    from tour_worker.render.camera_path import shot_enlargement
+    for s in final_shots:
+        if s.source is None:
+            continue
+        e = shot_enlargement(s.camera, s.source.width, s.source.height, output_params.width, output_params.height)
+        if e is not None:
+            s.enlargement = round(e, 3)
+            if e > 1.0 + 1e-3:
+                warnings.append(f"source_below_output:{s.shot_id}:{e:.2f}x")
+
     prov = PlanProvenance(
         scoring_config_version=report.config.version,
         planner_config_version=cfg.version,

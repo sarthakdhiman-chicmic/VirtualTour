@@ -21,6 +21,7 @@ from tour_worker.render.camera_path import (KeyframePath, base_window, roll_fit_
 from tour_worker.motion.loader import load_regions
 from tour_worker.motion.region import ROI_PROBE, apply_regions, field_align, grid_scale, probe_box
 from tour_worker.cpus import usable_cpus
+from tour_worker.io.images import prepared_scales
 
 def crop_roll_homography(cx, cy, zoom, roll_deg, src_w, src_h, out_w, out_h):
     """OUTPUT px -> SOURCE px for a crop window rolled by roll_deg about the frame centre and scaled
@@ -154,15 +155,23 @@ class ShotWarp:
         sh, sw = self.src.shape[:2]
         pw, ph = shot.source.width, shot.source.height
         if (sw, sh) != (pw, ph):
-            # the browser path drew every image at the plan's size; same here, if it is the same
-            # photo (same aspect) - a different aspect means a different image: refuse
+            # the same photo (same aspect) at another size - a different aspect means a different
+            # image: refuse
             if abs(sw / sh - pw / ph) > 0.01 * (pw / ph):
                 raise RuntimeError(f"prewarp: shot {shot.shot_id} image is {sw}x{sh}, plan says {pw}x{ph}")
-            interp = cv2.INTER_AREA if sw > pw else cv2.INTER_CUBIC
-            self.src = cv2.resize(self.src, (pw, ph), interpolation=interp)
-            if warnings is not None:
-                warnings.append(f"image_resized:{shot.shot_id}:{sw}x{sh}->{pw}x{ph}")
-            sw, sh = pw, ph          # the camera and the masks work on the photo as drawn, not as stored
+            if sw < pw and prepared_scales(plan).get(shot.image_uri.split("/")[-1], 1.0) < 1.0:
+                # a large photo prepared down to what this tour needs (io/images.prepared_scales):
+                # drawn at that size, the motion amplitudes (source px) scaled with it
+                k = sw / pw
+                shot = shot.model_copy(update={"motion_regions": [
+                    r.model_copy(update={"amplitude_px": r.amplitude_px * k}) for r in shot.motion_regions or []] or None})
+                self.shot = shot
+            else:                    # drawn at the plan's size, as the browser path did
+                interp = cv2.INTER_AREA if sw > pw else cv2.INTER_CUBIC
+                self.src = cv2.resize(self.src, (pw, ph), interpolation=interp)
+                if warnings is not None:
+                    warnings.append(f"image_resized:{shot.shot_id}:{sw}x{sh}->{pw}x{ph}")
+                sw, sh = pw, ph      # the camera and the masks work on the photo as drawn, not as stored
         self.sw, self.sh = sw, sh
         self.rotate = cam.projection == "rotate"
         self.hfov = cam.hfov_deg if cam.hfov_deg is not None else DEFAULT_HFOV_DEG

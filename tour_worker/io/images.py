@@ -11,40 +11,38 @@ def fetch_and_prepare(plan, storage, workdir, image_urls=None):
     images_dir = os.path.join(workdir, "images")
     os.makedirs(images_dir, exist_ok=True)
     
+    keep = prepared_scales(plan)
+    prepared = set()
     for shot in plan.shots:
         if shot.image_uri is None:              # a 3D shot (plan 1.6): rendered from the scene
             continue
         basename = shot.image_uri.split("/")[-1]
         dest_path = os.path.join(images_dir, basename)
-        
+
         if not os.path.exists(dest_path):
             try:
                 uri = image_urls.get(shot.image_uri, shot.image_uri)
                 storage.get(uri, dest_path)
             except Exception as e:
                 raise WorkerError("image_fetch_failed", f"failed to fetch shot {shot.shot_id} ({e})")
-                
-        # Prepare
-        try:
-            with Image.open(dest_path) as img:
-                img = ImageOps.exif_transpose(img)
-                w, h = img.size
-                
-                # Check dimensions against plan
-                if w != shot.source.width or h != shot.source.height:
-                    warnings.append(f"Image {basename} dimensions {w}x{h} do not match plan {shot.source.width}x{shot.source.height}. Clamping camera.")
-                
-                # the output's longer side: a portrait frame needs the photo's full height
-                target_max = int(max(plan.output.width, plan.output.height) * 1.2)
-                if max(w, h) > target_max:
-                    scale = target_max / max(w, h)
-                    new_w = int(w * scale)
-                    new_h = int(h * scale)
-                    img = img.resize((new_w, new_h), Image.Resampling.LANCZOS)
-                    # Overwrite
-                    img.save(dest_path, "JPEG", quality=95)
-        except Exception as e:
-            raise RuntimeError(f"image preparation failed: {e}")
+
+        # Prepare: once per photo, down to what its tightest shot needs (never below, so no frame
+        # enlarges the photo more than the plan's own size would)
+        if basename not in prepared:
+            prepared.add(basename)
+            try:
+                with Image.open(dest_path) as img:
+                    img = ImageOps.exif_transpose(img)
+                    w, h = img.size
+                    pw, ph = shot.source.width, shot.source.height
+                    if (w, h) != (pw, ph):
+                        warnings.append(f"Image {basename} dimensions {w}x{h} do not match plan {pw}x{ph}. Clamping camera.")
+                    new_w = min(w, max(1, round(pw * keep[basename])))
+                    if new_w < w - 1:
+                        new_h = max(1, round(h * new_w / w))
+                        img.resize((new_w, new_h), Image.Resampling.LANCZOS).save(dest_path, "JPEG", quality=95)
+            except Exception as e:
+                raise RuntimeError(f"image preparation failed: {e}")
 
         # plan 1.4 motion region masks: a mask that cannot be fetched drops its region (the
         # renderer never fails on it; tour_worker.motion.loader.load_regions skips it)
@@ -85,6 +83,26 @@ def fetch_and_prepare(plan, storage, workdir, image_urls=None):
             warnings.append(f"branding_image_fetch_failed:{type(e).__name__}")
 
     return warnings
+
+
+PREPARE_HEADROOM = 1.05       # sampled at most ~1:1 at the tightest frame
+
+
+def prepared_scales(plan) -> dict[str, float]:
+    """Per photo (basename): the share of the plan's source size to keep - its shots' largest
+    enlargement (render/camera_path.shot_enlargement) with a little headroom, at most 1. A photo
+    much larger than the output is drawn from a copy just big enough for its tightest frame."""
+    from tour_worker.render.camera_path import shot_enlargement
+    out: dict[str, float] = {}
+    for shot in plan.shots:
+        if shot.image_uri is None or shot.source is None:
+            continue
+        e = shot_enlargement(shot.camera, shot.source.width, shot.source.height,
+                             plan.output.width, plan.output.height)
+        k = 1.0 if e is None else min(1.0, e * PREPARE_HEADROOM)
+        name = shot.image_uri.split("/")[-1]
+        out[name] = max(out.get(name, 0.0), k)
+    return out
 
 
 def branding_path(images_dir: str, uri: str) -> str:

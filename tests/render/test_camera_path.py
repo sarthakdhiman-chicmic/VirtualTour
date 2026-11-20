@@ -209,3 +209,33 @@ def test_compound_out_of_bounds_rejected():
     cam["segments"][0].update(cx=0.2, zoom=1.3)   # window leaves the left edge
     with pytest.raises(ValueError, match="out of bounds"):
         parse_plan(_plan_13(cam))
+
+
+def test_shot_enlargement_is_output_px_per_source_px_at_the_tightest_frame():
+    import types
+    from tour_worker.render.camera_path import shot_enlargement
+    kf = [types.SimpleNamespace(zoom=z, roll_deg=None) for z in (1.0, 1.6)]
+    cam = types.SimpleNamespace(type="keyframe_path", keyframes=kf, punches=None)
+    # a 3:2 8K photo in a 16:9 4K frame: zoom 1 shows the full width, 3840 / 8192 px a px
+    assert shot_enlargement(cam, 8192, 5464, 3840, 2160) == pytest.approx(1.6 * 3840 / 8192)
+    assert shot_enlargement(cam, 1536, 1024, 3840, 2160) == pytest.approx(1.6 * 3840 / 1536)   # 4x: too small
+    punch = types.SimpleNamespace(amount=0.1)
+    assert shot_enlargement(types.SimpleNamespace(type="keyframe_path", keyframes=kf, punches=[punch]),
+                            8192, 5464, 3840, 2160) == pytest.approx(1.1 * 1.6 * 3840 / 8192)
+    assert shot_enlargement(types.SimpleNamespace(type="bezier_path", punches=None), 1, 1, 3840, 2160) is None
+
+
+def test_a_large_photo_is_prepared_just_big_enough_for_its_tightest_shot():
+    import types
+    from tour_worker.io.images import PREPARE_HEADROOM, prepared_scales
+    def shot(z):
+        cam = types.SimpleNamespace(type="keyframe_path", punches=None,
+                                    keyframes=[types.SimpleNamespace(zoom=1.0, roll_deg=None), types.SimpleNamespace(zoom=z, roll_deg=None)])
+        return types.SimpleNamespace(image_uri="s3://b/p/big.jpg", camera=cam,
+                                     source=types.SimpleNamespace(width=8192, height=5464))
+    out = types.SimpleNamespace(width=3840, height=2160)
+    k = prepared_scales(types.SimpleNamespace(shots=[shot(1.2), shot(1.6)], output=out))["big.jpg"]
+    assert k == pytest.approx(1.6 * 3840 / 8192 * PREPARE_HEADROOM)        # the tighter shot sets it
+    small = types.SimpleNamespace(image_uri="s3://b/p/s.jpg", camera=shot(1.6).camera,
+                                  source=types.SimpleNamespace(width=1536, height=1024))
+    assert prepared_scales(types.SimpleNamespace(shots=[small], output=out))["s.jpg"] == 1.0   # never upsized

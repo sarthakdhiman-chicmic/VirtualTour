@@ -294,9 +294,9 @@ def test_a_bad_punch_is_rejected():
 
 
 def test_a_photo_stored_smaller_than_the_plan_frames_and_moves_like_the_full_size_one():
-    """The worker may store a photo smaller than the plan's source size; the shot is still drawn
-    at the plan's size, so the camera window and the motion masks must use that size too (they
-    used the stored one: masks shrunk toward the top-left and the window zoomed in, 2026-11-03)."""
+    """A photo larger than the tour needs is prepared smaller (io/images.prepared_scales) and drawn
+    at that size: the camera window, the masks and the motion amplitudes follow it, so the frames
+    match the full-size photo's (2026-11-03: masks once shrank toward the top-left)."""
     plan = _plan()
     shot, n = plan.shots[1], compute_timeline(plan)[1]["render_frames"]
     with tempfile.TemporaryDirectory() as full, tempfile.TemporaryDirectory() as small:
@@ -307,11 +307,13 @@ def test_a_photo_stored_smaller_than_the_plan_frames_and_moves_like_the_full_siz
         warnings = []
         a = ShotWarp(plan, shot, n, os.path.join(full, "images"))
         b = ShotWarp(plan, shot, n, os.path.join(small, "images"), warnings)
-        assert any(w.startswith("image_resized:s02:") for w in warnings)
-        assert (b.sw, b.sh) == (a.sw, a.sh) == (SW, SH)
+        assert not any(w.startswith("image_resized:s02:") for w in warnings)
+        assert (a.sw, a.sh) == (SW, SH) and (b.sw, b.sh) == (SW * 3 // 4, SH * 3 // 4)
         assert len(b.regions) == len(a.regions) == 1
-        assert b.regions[0].feather.shape == a.regions[0].feather.shape == (SH, SW)
-        assert ((b.regions[0].feather > 0.5) == (a.regions[0].feather > 0.5)).mean() > 0.995
+        assert b.regions[0].feather.shape == (SH * 3 // 4, SW * 3 // 4)
+        small = cv2.resize(a.regions[0].feather, (SW * 3 // 4, SH * 3 // 4), interpolation=cv2.INTER_AREA)
+        assert ((b.regions[0].feather > 0.5) == (small > 0.5)).mean() > 0.99
+        assert b.regions[0].amp == pytest.approx(a.regions[0].amp * (SW * 3 // 4) / SW)
         for f in (0, n // 2, n - 1):
             fa, fb = a.frame(f).astype(np.float32), b.frame(f).astype(np.float32)
             assert np.abs(fa - fb).mean() < 4.0                  # same framing; only the lost detail differs

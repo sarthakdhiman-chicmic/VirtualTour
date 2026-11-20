@@ -180,6 +180,7 @@ class Shot(BaseModel):
     motion_regions: Optional[List[MotionRegion]] = None   # plan 1.4
     caption: Optional[str] = None     # the room label, on a room's first shot (output.room_labels)
     staged: bool = False              # the photo is virtually staged: the disclosure label is drawn
+    enlargement: Optional[float] = None   # output px per source px at the tightest frame (information only)
     model_config = ConfigDict(extra='ignore')
 
 class Provenance(BaseModel):

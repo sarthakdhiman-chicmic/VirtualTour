@@ -181,10 +181,11 @@ class Shot(BaseModel):
     motion_regions: list[MotionRegion] | None = None
     caption: str | None = None       # the room label, on a room's first shot (planner/captions.py)
     staged: bool | None = None       # True: a virtually staged photo (the disclosure label)
+    enlargement: float | None = None # photo shots: output px per source px at the tightest frame
 
     @model_serializer(mode="wrap")
     def _omit_unset_additions(self, handler):
-        return _omit_none(handler(self), ("image_uri", "source", "caption", "staged"))
+        return _omit_none(handler(self), ("image_uri", "source", "caption", "staged", "enlargement"))
 
 
 class MusicTrack(BaseModel):
