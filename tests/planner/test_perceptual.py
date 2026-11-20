@@ -241,3 +241,17 @@ def test_fire_regions_from_the_segment_job_plan_as_fire_flicker():
                                   FIRE_CFG, room_type="living_room")
     assert [(r.label, r.effect, r.mask_uri) for r in regions] == [
         ("fire", "fire_flicker", fire["mask_url"])]
+
+
+def test_a_sky_seen_through_a_window_gets_no_cloud_shadows():
+    """2026-11-20: a stair hall with clouds in its window (and a covered patio) had cloud shadows
+    passing over the room. Indoors the sky drifts and billows only; outdoors it keeps all three."""
+    sky = det(3, "sky", [0, 0, 1536, 400])
+    inside = plan_motion_regions("L", "s01", cam(), [sky], W, H, 1920, 1080, CFG, room_type="staircase", indoors=True)
+    outside = plan_motion_regions("L", "s01", cam(), [sky], W, H, 1920, 1080, CFG, room_type="backyard", indoors=False)
+    assert inside[0].effect == "sky_drift" and inside[0].sky_effects == ["drift", "billow"]
+    assert outside[0].sky_effects is None                         # all of them (motion/sky.TOUR_EFFECTS)
+    assert "sky_effects" not in outside[0].model_dump(mode="json")  # older plans keep their bytes
+    # no scene: an interior room type is taken as indoors
+    guessed = plan_motion_regions("L", "s01", cam(), [sky], W, H, 1920, 1080, CFG, room_type="living_room")
+    assert guessed[0].sky_effects == ["drift", "billow"]

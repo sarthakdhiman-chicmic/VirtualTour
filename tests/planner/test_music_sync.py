@@ -306,3 +306,12 @@ def test_cuts_move_onto_the_attack_the_analysis_beat_trails():
     plain = np.round(np.cumsum(frame_align([2.0, 4.02, 6.0], 30)) * 30).tolist()
     moved = np.round(np.cumsum(frame_align([2.0, 4.02, 6.0], 30, 0, 0.027)) * 30).tolist()
     assert plain == [60, 121, 180] and moved == [59, 120, 180]
+
+
+def test_the_synced_tour_stays_under_its_ceiling(report):  # noqa: F811
+    """The sync lengthens shots after they are chosen (2026-11-20: 112 s against the cap): the tour
+    is chosen again with a smaller budget until it fits."""
+    cfg = PlannerConfig(max_total_s=40.0, min_total_s=30.0)
+    plan = build_shot_plan(report, "t", _assets(), cfg=cfg, music_track=track(duration=120.0, bpm=100.0))
+    assert plan.total_duration_s <= 40.0 + 1e-3
+    assert plan.provenance.plan_hash == _compute_plan_hash(plan.model_dump(mode="json"))

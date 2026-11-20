@@ -67,12 +67,46 @@ def test_only_untyped_photos_are_named_and_each_guess_is_flagged():
     assert warn == ["room_auto:b:bedroom"]
 
 
-def test_stairs_and_hallways_play_between_the_living_spaces_and_the_bedrooms():
-    """2026-11-20: a tour with no exterior opened on its spiral stair and landing (typed entry /
-    hallway). Hallways and stairs are circulation: after the living spaces, before the bedrooms;
-    a real entry (foyer) still opens."""
+def test_the_tour_plays_entrance_living_kitchen_dining_primary_suite_then_the_rest():
+    """The user's order (2026-11-20): the entrance (front of the home, then the entry), living room,
+    kitchen, dining, the primary bedroom and its bathroom, then the other rooms; stairs and landings
+    lead from the primary suite to the others (never the opening); every other exterior plays after
+    the house."""
     from tour_worker.scoring.rooms import stage_for, stage_index
-    order = sorted(["bedroom", "staircase", "hallway", "living_room", "kitchen", "foyer"],
-                   key=lambda t: stage_index(stage_for(t)))
-    assert order[0] == "foyer"
-    assert order.index("staircase") > order.index("kitchen") and order.index("hallway") < order.index("bedroom")
+    want = ["front_exterior", "foyer", "living_room", "kitchen", "dining_room", "primary_bedroom",
+            "primary_bathroom", "staircase", "bedroom", "home_office", "garage", "backyard", "exterior"]
+    stages = [stage_index(stage_for(t)) for t in want]
+    assert stages == sorted(stages)
+    assert stage_for("primary_bedroom") == stage_for("primary_bathroom")
+    assert stage_for(None) == stage_for("bedroom")                         # unknown: with the other rooms
+
+
+def _c(area, bbox=None, centroid=None):
+    d = {"area": area, "count": 1}
+    if bbox:
+        d["bbox"] = bbox
+    if centroid:
+        d["centroid"] = centroid
+    return d
+
+
+def test_a_desk_at_a_window_and_a_stair_hall_are_indoors():
+    """2026-11-20: OneFormer saw only sky, buildings, a chair and a book at a desk by a window, and
+    a stair hall with clouds in its window had almost no ceiling: both were called exteriors."""
+    from tour_worker.scoring.autoroom import is_indoors
+    desk = {"classes": {"sky": _c(0.44), "building": _c(0.13), "chair": _c(0.04), "book": _c(0.03)}}
+    stairs = {"classes": {"wall": _c(0.34), "floor": _c(0.19), "stairs": _c(0.12), "sky": _c(0.04), "ceiling": _c(0.01)}}
+    assert is_indoors(desk) and is_indoors(stairs)
+    assert classify(desk)[0] not in ("exterior", "front_exterior")
+    assert classify(stairs)[0] == "staircase"
+    assert is_indoors({"classes": {"sky": _c(0.3), "house": _c(0.2), "tree": _c(0.2)}}) is False
+    assert is_indoors(None) is None
+
+
+def test_a_city_from_a_terrace_is_not_the_front_of_the_house_and_a_path_to_the_door_is():
+    terrace = {"classes": {"sky": _c(0.47, [0, 0, 0.95, 0.52]), "building": _c(0.44, [0, 0, 1, 1], [0.46, 0.70]),
+                           "sidewalk": _c(0.09)}}
+    assert classify(terrace)[0] == "balcony"
+    front = {"classes": {"sky": _c(0.30, [0, 0, 1, 0.39]), "house": _c(0.17, [0, 0.2, 1, 0.7], [0.48, 0.42]),
+                         "sidewalk": _c(0.37), "tree": _c(0.08)}}
+    assert classify(front)[0] == "front_exterior"

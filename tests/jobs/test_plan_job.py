@@ -311,7 +311,9 @@ def test_manual_order_plays_the_rooms_and_photos_as_the_request_lists_them():
             listed.append(p["room_type"])
     assert rooms == [r for r in listed if r in rooms]
     natural = run_job(_request(photos=reordered), storage=FakeStorage())["plan"]
-    assert natural["shots"][0]["room_type"] == "exterior"            # the narrative opens outside
+    # the narrative: only the entrance (front exterior, entry) plays before the house; a plain
+    # exterior closes the tour (user 2026-11-20)
+    assert natural["shots"][0]["room_type"] != "exterior" and natural["shots"][-1]["room_type"] == "exterior"
 
 
 def test_a_voiceover_reaches_the_plan_and_is_absent_otherwise():

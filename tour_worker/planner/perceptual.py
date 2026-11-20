@@ -62,7 +62,12 @@ def plan_motion_regions(
     out_h: int,
     cfg: PlannerConfig,
     room_type: str | None = None,
+    indoors: bool | None = None,
 ) -> list[MotionRegion]:
+    """indoors: the photo is taken inside (scoring/autoroom.is_indoors; None: unknown, then by its
+    room type) - a sky there is seen through a window and gets no cloud shadows."""
+    if indoors is None:
+        indoors = (room_type or "") not in cfg.perceptual_outdoor_rooms
     windows = camera_windows(cam, src_w, src_h, out_w, out_h)
     # detect resizes photos whose long side exceeds perceptual_detect_max_side (aspect kept);
     # its bboxes and masks are in that resized space (measured 2026-10-14: 6240x4160 -> 1600x1067)
@@ -151,6 +156,7 @@ def plan_motion_regions(
                 seed=_seed(listing_id, shot_id, oid),
                 label=str(d.get("class_name")),
                 phase=None if phase is None else round(phase, 5),
+                sky_effects=["drift", "billow"] if (effect == "sky_drift" and indoors) else None,
             )
         )
     return out

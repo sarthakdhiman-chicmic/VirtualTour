@@ -162,6 +162,7 @@ class MotionRegion(BaseModel):
     seed: int
     label: Optional[str] = None
     phase: Optional[float] = None     # sway phase (rad), set by the planner; random when None
+    sky_effects: Optional[List[str]] = None   # sky_drift: the sky's effects; None = all (motion/sky.TOUR_EFFECTS)
     model_config = ConfigDict(extra='ignore')
 
 class Shot(BaseModel):

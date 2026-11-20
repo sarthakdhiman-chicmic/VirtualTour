@@ -232,6 +232,7 @@ def run_plan(request: dict, storage, workdir: str) -> dict:
     opts = req.options
     try:
         report = score_photos(inputs)
+        warnings += [w for w in report.warnings if w.startswith("duplicate_photo:")]
         sw.lap("scoring")
         if opts.photo_order == "manual":           # drag-to-reorder: the request's order, not the narrative
             from tour_worker.scoring.selector import manual_order

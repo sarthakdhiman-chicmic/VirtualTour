@@ -54,7 +54,7 @@ def test_cinematic_plan(report):
     assert plan.plan_version == "1.3" and plan.mode == "cinematic"
     assert all(
         cfg.shot_min_s - 1e-6 <= s.duration_s <= cfg.shot_max_s + 1e-6 or s is plan.shots[-1]
-        for s in plan.shots
+        for s in plan.shots if s.role != "close"            # close-ups are 1.5-2.5 s (planner/lengths.py)
     )
     assert all(s.camera.type in ("keyframe_path", "compound") and s.camera.move for s in plan.shots)
     d = plan.model_dump(mode="json")

@@ -10,10 +10,17 @@ are told by an oven / microwave / toaster or a fridge at a counter, bathrooms by
 towel by a sink, offices by a computer, keyboard or mouse; a pool is water; COCO's "fence" takes in
 railings.
 
+Indoors (is_indoors): a ceiling, or a thing that only stands indoors (a bed, a toilet, a sink, an
+oven, a TV, books, ...), or walls filling the photo with little sky. A desk at a window onto a
+city (2026-11-20: OneFormer saw sky, buildings, a chair and a book, and no wall or ceiling) and a
+stair hall with a window are indoors, not exteriors.
+
 Rules, first match wins:
-  outdoors       no ceiling and sky or a building in view: water -> pool_area, steps up to the
-                 house with little sky -> entry, a railing -> balcony, grass or trees filling the
-                 view -> backyard, a building filling the view -> front_exterior, else exterior
+  outdoors       not indoors and sky or a building in view: water -> pool_area, steps up to the
+                 house with little sky -> entry, a path or drive up to the house ->
+                 front_exterior, a railing -> balcony, buildings below the
+                 skyline (a city seen from a terrace) -> balcony, grass or trees filling the
+                 view -> backyard, the house filling the view -> front_exterior, else exterior
   covered        a railing with the outdoors (sky, trees, water) beyond, under a roof: a sofa ->
                  outdoor_patio, else balcony
   pool_area      water under a ceiling (the enum has no indoor pool)
@@ -41,6 +48,34 @@ COOKING = ("oven", "microwave", "toaster")
 KITCHEN = COOKING + ("sink", "refrigerator", "counter")
 OUTSIDE = ("sky", "tree", "grass", "sea", "water", "river", "mountain")
 BUILT = ("house", "building", "roof")
+APPROACH, APPROACH_MIN = ("sidewalk", "road", "gravel", "pavement"), 0.10   # the way up to the front
+# things that only stand indoors: one of them in the photo means indoors, whatever the window shows
+INDOOR_ONLY = ("bed", "toilet", "sink", "oven", "microwave", "toaster", "refrigerator", "television receiver",
+               "computer", "keyboard", "mouse", "book", "shelf", "mirror")
+WALLS_MIN, WALLS_SKY_MAX = 0.25, 0.10   # walls filling the photo with little sky: a room
+VIEW_DROP = 0.10                       # buildings this far (photo height) below the skyline: a view
+
+
+def is_indoors(scene: dict | None) -> bool | None:
+    """Whether the photo is taken indoors (None: no scene to tell). Used for room types and for
+    which motion a sky in the photo gets (no cloud shadows inside)."""
+    if not scene:
+        return None
+    c = {str(k).strip().lower(): v for k, v in (scene.get("classes") or {}).items()}
+    area = lambda *ks: sum(float((c.get(k) or {}).get("area", 0.0)) for k in ks)   # noqa: E731
+    return bool(area("ceiling") > CEILING_MAX or any(k in c for k in INDOOR_ONLY)
+                or (area("wall") >= WALLS_MIN and area("sky") < WALLS_SKY_MAX))
+
+
+def _a_view(c: dict) -> bool:
+    """Buildings below the skyline: the city seen from a height (a terrace), not the house."""
+    sky = (c.get("sky") or {}).get("bbox")
+    built = [(float(v.get("area", 0.0)), v.get("centroid")) for k, v in c.items() if k in BUILT and v.get("centroid")]
+    if not sky or not built or c.get("house") or c.get("roof"):
+        return False
+    total = sum(a for a, _ in built) or 1.0
+    y = sum(a * float(cen[1]) for a, cen in built) / total
+    return y > float(sky[3]) + VIEW_DROP
 
 
 def classify(scene: dict | None) -> tuple[str | None, str]:
@@ -51,14 +86,18 @@ def classify(scene: dict | None) -> tuple[str | None, str]:
     area = lambda *ks: sum(float((c.get(k) or {}).get("area", 0.0)) for k in ks)   # noqa: E731
     count = lambda k: int((c.get(k) or {}).get("count", 0))                         # noqa: E731
     has = lambda *ks: any(k in c for k in ks)                                        # noqa: E731
-    indoors = area("ceiling") > CEILING_MAX
+    indoors = is_indoors(scene)
     if not indoors and (area("sky") >= SKY_MIN or area(*BUILT) >= BUILDING_MIN):
         if area("water") > POOL_MIN and area("water") > area("sea", "river"):
             return "pool_area", "water, outdoors"
         if area("stairs") >= 0.05 and area("sky") < SKY_MIN:
             return "entry", "steps up to the house"
+        if area("house", "roof") >= 0.02 and area(*APPROACH) >= APPROACH_MIN:
+            return "front_exterior", "a path or drive up to the house"
         if area("fence") >= RAILING_MIN and area("grass") < 0.05:
             return "balcony", "railing, outdoors"
+        if _a_view(c):
+            return "balcony", "a view over the city"
         if area("grass", "tree") >= GREEN_MIN and area(*BUILT) < FRONT_MIN:
             return "backyard", "grass / trees"
         if area(*BUILT) >= FRONT_MIN:

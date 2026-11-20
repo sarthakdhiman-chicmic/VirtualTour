@@ -158,6 +158,13 @@ class MotionRegion(BaseModel):
     # sway phase (radians) for fabric_sway / foliage_sway: curtains and plants of a shot are set
     # half a cycle apart so they swing opposite ways (worker: random phase when None)
     phase: float | None = None
+    # sky_drift only: which of the sky's effects play (motion/sky.py); None = all of them. A sky
+    # seen through a window gets no cloud shadows: they would fall on the room (2026-11-20)
+    sky_effects: list[str] | None = None
+
+    @model_serializer(mode="wrap")
+    def _ser(self, handler):
+        return _omit_none(handler(self), ("sky_effects",))
 
 
 class TransitionParams(BaseModel):

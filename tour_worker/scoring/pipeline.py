@@ -8,8 +8,16 @@ from .selector import build_report
 def analyze(photos: list[PhotoInput], cfg: ScoringConfig | None = None,
             warnings: list[str] | None = None) -> ScoringReport:
     """Score every photo (needs OpenCV), then pick heroes and order rooms (pure Python)."""
+    from .duplicates import find_duplicates, thumb
     cfg = cfg or ScoringConfig()
-    scores = [score_photo(p, cfg) for p in sorted(photos, key=lambda p: p.photo_id)]
+    photos = sorted(photos, key=lambda p: p.photo_id)
+    scores = [score_photo(p, cfg) for p in photos]
+    # the same picture twice is shown once (scoring/duplicates.py)
+    dup = find_duplicates({p.photo_id: thumb(p.image) for p in photos if p.image is not None},
+                          {s.photo_id: s.total for s in scores})
+    if dup:
+        scores = [s for s in scores if s.photo_id not in dup]
+        warnings = list(warnings or []) + [f"duplicate_photo:{a}:{b}" for a, b in sorted(dup.items())]
     return build_report(scores, cfg, warnings)
 
 

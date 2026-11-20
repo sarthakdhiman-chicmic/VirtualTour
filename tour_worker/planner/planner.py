@@ -14,6 +14,7 @@ from .config import PlannerConfig
 from .music_sync import apply_sync, sync_to_music
 from .perceptual import plan_motion_regions
 from .presets import LATERAL_PRESETS, preset_to_camera, select_preset
+from tour_worker.scoring.autoroom import is_indoors
 from .scene_context import blend_grid, from_scene
 from .schemas import (
     CameraEasing,
@@ -43,6 +44,49 @@ def _compute_plan_hash(plan_dict: dict) -> str:
 
 
 def build_shot_plan(
+    report: ScoringReport,
+    listing_id: str,
+    assets: dict[str, dict[str, Any]],
+    preset: str = "property_showcase",
+    budget_blocked: bool = False,
+    cfg: PlannerConfig | None = None,
+    detections_by_photo: dict[str, list[dict] | None] | None = None,
+    music_track: dict | None = None,
+    scenes_by_photo: dict[str, dict | None] | None = None,
+) -> ShotPlan:
+    """The shot plan (_build_shot_plan), never longer than cfg.max_total_s: the music sync
+    lengthens shots (room shots up to 1.25x) after they are chosen, so a tour chosen at the cap
+    can end over it (2026-11-20: 112 s against a 90 s cap) - it is chosen again with the budget
+    cut by the overshoot, at most MAX_RECUT times (warning synced_over_cap_recut)."""
+    cfg = cfg or PlannerConfig()
+    cap = cfg.max_total_s
+    args = (report, listing_id, assets, preset, budget_blocked)
+    kw = dict(detections_by_photo=detections_by_photo, music_track=music_track, scenes_by_photo=scenes_by_photo)
+    plan = _build_shot_plan(*args, cfg=cfg, **kw)
+    budget = cap
+    for _ in range(MAX_RECUT):
+        if plan.total_duration_s <= cap + 1e-3:
+            break
+        budget *= 0.98 * cap / plan.total_duration_s
+        plan = _build_shot_plan(*args, cfg=cfg.model_copy(update={"max_total_s": budget}), **kw)
+        _add_warning(plan, "synced_over_cap_recut")
+    if plan.total_duration_s > cap + 1e-3:
+        _add_warning(plan, "over_max_total")
+    return plan
+
+
+def _add_warning(plan: ShotPlan, w: str) -> None:
+    """A warning added after the plan is built: the hash covers the warnings, so it is redone."""
+    if w not in plan.warnings:
+        plan.warnings = sorted(plan.warnings + [w])
+        plan.provenance.plan_hash = None
+        plan.provenance.plan_hash = _compute_plan_hash(plan.model_dump(mode="json"))
+
+
+MAX_RECUT = 3
+
+
+def _build_shot_plan(
     report: ScoringReport,
     listing_id: str,
     assets: dict[str, dict[str, Any]],
@@ -438,6 +482,7 @@ def build_shot_plan(
                     listing_id, shot.shot_id, shot.camera, dets, shot.source.width,
                     shot.source.height, cfg.output_width, cfg.output_height, cfg,
                     room_type=shot.room_type,
+                    indoors=is_indoors((scenes_by_photo or {}).get(shot.asset_id)),
                 )
                 if regions:
                     shot.motion_regions = regions

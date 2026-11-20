@@ -331,7 +331,8 @@ class SkyMotion:
 
 def load_sky(shot, spec, images_dir: str, src: np.ndarray, duration_s: float) -> SkyMotion:
     """The sky layer of a shot from its sky_drift region: the fetched mask (any size, scaled to
-    the photo), the region's billow strength and rate, and the shot's wind direction."""
+    the photo), the region's billow strength and rate, its effects (sky_effects: a sky seen
+    through a window has no cloud shadows; None = TOUR_EFFECTS) and the shot's wind direction."""
     import os
 
     from tour_worker.motion.masks import mask_relpath
@@ -342,5 +343,6 @@ def load_sky(shot, spec, images_dir: str, src: np.ndarray, duration_s: float) ->
         raise FileNotFoundError("missing")
     h, w = src.shape[:2]
     coarse = cv2.resize(m, (w, h), interpolation=cv2.INTER_NEAREST)
-    return SkyMotion(src, coarse, seed=int(spec.seed), effects=TOUR_EFFECTS, wind=float(shot_wind(shot, w).direction),
+    effects = tuple(e for e in (getattr(spec, "sky_effects", None) or TOUR_EFFECTS) if e in TOUR_EFFECTS)
+    return SkyMotion(src, coarse, seed=int(spec.seed), effects=effects, wind=float(shot_wind(shot, w).direction),
                      duration=duration_s, billow_px=float(spec.amplitude_px), billow_hz=float(spec.freq_hz))

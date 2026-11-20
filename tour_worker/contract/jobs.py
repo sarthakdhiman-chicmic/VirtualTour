@@ -86,7 +86,7 @@ class PlanOptions(BaseModel):
     budget_blocked: bool = False              # True: a slideshow (fallback_reason budget_exceeded)
     output_width: int = Field(1920, gt=0)
     output_height: int = Field(1080, gt=0)
-    max_total_s: float = Field(120.0, gt=0)   # the tour's ceiling (the backend caps it at 120)
+    max_total_s: float = Field(90.0, gt=0)    # the tour's ceiling, music sync included (the backend caps it at 90)
     max_bytes: Optional[int] = Field(None, gt=0)   # a platform's file-size limit (Instagram Reels: 100 MB)
     hevc: bool = False                        # also render an H.265 copy next to the H.264 master
     photo_order: Literal["narrative", "manual"] = "narrative"   # manual: the photos' order in the request

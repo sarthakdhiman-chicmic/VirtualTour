@@ -5,7 +5,7 @@ What the photo planner decides, it decides here too - one source of truth for bo
   screen time  scoring/selector.py: the hero rooms (best living room, kitchen, primary bedroom) 2x,
                exteriors 1.5x; planner/allocate.py splits each room's budget into shots (so a hero
                room gets two angles), the opening and closing shots hold longer, the tour lands at
-               60-120 s (min_total_s / max_total_s) at the chosen pacing
+               60-90 s (min_total_s / max_total_s) at the chosen pacing
   captions     planner/captions.py; branding, room labels, voiceover, HEVC / MLS copies as for photos
   music        planner/music_sync.py, the same beat sync - applied as an even retime of each shot
                (the move is scaled, never warped: no ramps or zoom punches into a cut)
@@ -391,7 +391,7 @@ def plan_tour_3d(model, scene: dict, rooms: list[dict], listing_id: str, cfg: Pl
             moves[-1][0].final_duration, lead_.final_duration = lead_.final_duration, moves[-1][0].final_duration
     # the tour's cap: the coverage shots showing the least new wall go first. Checked with room for
     # the beat sync, which only lengthens room shots afterwards (the Home Scan: 131 s past a 120 s cap)
-    cap = SYNC_HEADROOM * (getattr(c3, "max_total_s", None) or 120.0)
+    cap = SYNC_HEADROOM * (getattr(c3, "max_total_s", None) or 90.0)
     for _, pair in sorted(extras, key=lambda e: e[0]):
         if sum(s_.final_duration for s_, _ in moves) <= cap:
             break

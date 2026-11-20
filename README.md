@@ -224,7 +224,7 @@ Request (example: `examples/tour_plan.json`; contract `TourPlanRequest` in
       multiplier is 2x for the best living room, kitchen and primary bedroom, and 1.5x for exteriors.
     - The budget is split into shots of 3-8 s.
     - The opening shot is at least 5 s and the closing shot at least 5 s.
-    - Tours land at 60-120 s by stretching shots up to 8 s, never by adding padding shots. With Fast
+    - Tours land at 60-90 s (the cap includes the music sync) by stretching shots up to 8 s, never by adding padding shots. With Fast
       pacing the floor is 45 s.
     - Beat sync scales each shot by the music's loudness under it: x1.3 through a breakdown,
       x0.85 into a drop.

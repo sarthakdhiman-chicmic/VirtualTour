@@ -64,7 +64,7 @@ Tests: 476 pass, 4 skipped (`pytest -q`; heavy suites under `tools/safe_run.py`)
   corridors, landings and stairs are links (a pan onto them, then a walk into the next room), not
   stops; the tour opens in the living room.
 - Shot lengths: one table for photo and 3D tours (`planner/lengths.py`). The sync only lengthens
-  room and hero shots; close-ups flex. Tours 60-120 s.
+  room and hero shots; close-ups flex. Tours 60-90 s (the 90 s cap includes the music sync, 2026-11-20).
 - 3D shots: the green-house v3 tour is the standard. One shot a room (a hero room's second angle
   only with room to breathe), at most 2 close-ups a tour, no pans inside rooms, no aims above eye
   level, >= 2.2 m clear in front at both ends of a shot, turns <= 10 deg/s, travel <= 0.8 m/s.

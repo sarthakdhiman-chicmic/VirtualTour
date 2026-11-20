@@ -9,7 +9,7 @@ class PlannerConfig(BaseModel):
     # shot lengths. "content" (client review 2026-11-05): each room gets a time budget - room_base_s
     # x its screen-time multiplier (hero rooms 2x, exteriors 1.5x; scoring/selector.py) x the pacing
     # - split into shots of shot_min_s..shot_max_s (3-8 s); the opening (establishing) and final
-    # shots get the long end; a standard listing lands at min_total_s..max_total_s (60-120 s) by
+    # shots get the long end; a standard listing lands at min_total_s..max_total_s (60-90 s) by
     # stretching shots within shot_max_s, never by padding. "fill" = the old fill-to-target allocation.
     length_mode: str = "content"
     pacing: str = "normal"              # slow | normal | fast (PACING)
@@ -21,7 +21,7 @@ class PlannerConfig(BaseModel):
     hero_shot_s: tuple[float, float] = (3.2, 5.0)
     target_total_s: float = 75.0        # "fill" only
     min_total_s: float = 60.0
-    max_total_s: float = 120.0
+    max_total_s: float = 90.0           # 1 min 30 s at most, music sync included (user 2026-11-20)
     shot_min_s: float = 3.0
     shot_max_s: float = 8.0
     base_shot_s: float = 4.2
