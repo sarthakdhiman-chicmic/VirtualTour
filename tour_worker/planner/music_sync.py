@@ -120,6 +120,12 @@ def snap_durations(
     return path[::-1]
 
 
+def _cut_beats(boundaries_s, cfg) -> list[float] | None:
+    """The musical moment each cut is put on (tour time, the attack: onset lag taken off), cuts only."""
+    b = [round(float(t) - cfg.music_onset_lag_s, 4) for t in list(boundaries_s)[:-1]]
+    return b or None
+
+
 def frame_align(boundaries_s, fps, lead_frames=0, onset_lag_s=0.0):
     """Boundary times -> exact video frames -> per-shot durations (centiseconds) whose cumulative
     sums round back to those frames (the worker: shot k spans round(S_k*fps)..round(S_k+1*fps)).
@@ -222,6 +228,23 @@ def length_bounds(targets: list[float], roles: list[str] | None, cfg: PlannerCon
     # margin so a shot never plays under it
     margin = (cfg.music_cut_lead_frames + 1) / cfg.fps
     lo, hi = [], []
+    if getattr(cfg, "continuous_cuts", False):
+        # continuous cuts (client review 2026-11-20, item 3): every move is planned cut_handle_s
+        # longer than its shot (camera.path_s) and runs at its planned pace; the sync only chooses
+        # where to cut it - within a handle either side of the planned length, never under the floor
+        h_s = cfg.cut_handle_s
+        windows = getattr(cfg, "cut_windows", None) or []
+        for k, t in enumerate(targets):
+            kind = sync_kind(roles[k] if roles else None)
+            # hero shots (the best rooms, the opening and closing) still only grow
+            low = t if kind == "hero" else max(floor_s(kind, cfg.pacing) + margin, t - h_s)
+            low = min(low, t)
+            # where the shot's move is still moving (planner.cut_windows): never cut before it
+            if k < len(windows) and windows[k] is not None:
+                low = max(low, min(float(windows[k]), t + h_s - WINDOW_MIN_S))
+            lo.append(low)
+            hi.append(max(t + h_s, low + WINDOW_MIN_S))
+        return np.array(lo), np.array(hi)
     for k, t in enumerate(targets):
         kind = sync_kind(roles[k] if roles else None)
         f_lo, f_hi = (WIDE_BOUNDS if wide else SYNC_BOUNDS)[kind]
@@ -349,6 +372,7 @@ def _sync_v2(targets, track: dict, cfg: PlannerConfig, roles) -> SyncResult | No
         hooks_required=plan.required_ok, hooks=rows or None, sync_version=2,
         segments=[MusicSegment(from_s=round(a, 4), to_s=round(b, 4)) for a, b in plan.segments],
         crossfade_s=cfg.music_v2_crossfade_s, edits=plan.edits or None, licence=track.get("licence"),
+        cut_beats_s=_cut_beats([plan.times[j] for j in plan.path], cfg),
     )
     return SyncResult(durations, music, f"music_heroes_missed:{missed}" if missed else None,
                       hooks_hit=sum(r.kind == "cut" for r in rows), hooks_reachable=len(rows),
@@ -465,6 +489,7 @@ def _sync_v3(
         cuts_on_bar=(sum(bool(bars[j]) for j in path) if path is not None else None),
         cut_lead_frames=lead if path is not None else 0,
         hooks_required=required_ok, hooks=report or None, licence=track.get("licence"),
+        cut_beats_s=_cut_beats([times[j] for j in path], cfg) if path is not None else None,
     )
     warning = None if path is not None else f"music_not_synced:{reason}"
     if path is not None and not required_ok and clusters:
@@ -479,11 +504,19 @@ def apply_sync(shots, synced: SyncResult, cfg: PlannerConfig) -> None:
     shot cutting on a hook ramps into the cut, the others get the plain time warp; the shot after
     a hook cut opens on a zoom punch and every accent punches mid-shot."""
     hook_cuts = set(synced.hook_cuts or [])
-    for k, (shot, d) in enumerate(zip(shots, synced.durations, strict=True)):
-        warp = time_warp(shot.duration_s, d, cfg, ramp=k in hook_cuts)
-        if warp is not None:
-            shot.camera.time_warp = warp
-        shot.duration_s = d
+    if getattr(cfg, "continuous_cuts", False):
+        # the music decides where each cut falls, never the move's pace (item 3): the shot is cut
+        # inside its path; the last shot's path ends on the tour's last frame, so it settles there
+        for k, (shot, d) in enumerate(zip(shots, synced.durations, strict=True)):
+            shot.duration_s = d
+            if k == len(shots) - 1 and getattr(shot.camera, "path_s", None):
+                shot.camera.path_s = round(float(d), 3)
+    else:
+        for k, (shot, d) in enumerate(zip(shots, synced.durations, strict=True)):
+            warp = time_warp(shot.duration_s, d, cfg, ramp=k in hook_cuts)
+            if warp is not None:
+                shot.camera.time_warp = warp
+            shot.duration_s = d
     if not cfg.music_punches:
         return
     punches: dict[int, list[Punch]] = {}

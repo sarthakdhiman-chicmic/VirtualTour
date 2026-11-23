@@ -147,7 +147,9 @@ def test_category_effects():
     ]
     res = plan_cameras(shots, frames_for(shots), 1920, 1080)
     v = [n["variant"] for n in res.notes]
-    assert v[0] == "aerial_approach" and v[1] == "rise"
+    # (the exterior after the drone approach carries its forward / upward motion on: a rise would pull
+    # back against it - client review 2026-11-20, item 5)
+    assert v[0] == "aerial_approach" and v[1] in ("rise", "tilt_up")
     assert res.cameras[0].type == "keyframe_path" and any(
         k.roll_deg for k in res.cameras[0].keyframes
     )

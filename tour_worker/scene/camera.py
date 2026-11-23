@@ -71,6 +71,7 @@ class BezierCameraPath:
             raise ValueError("bezier_path segments need 4 3D points per curve")
         self.hfov = (float(hfov_deg[0]), float(hfov_deg[1]))
         self.ease = EASINGS.get(easing or "ease_in_out", EASINGS["ease_in_out"])
+        self.easing_name = easing or "ease_in_out"
         self.time_warp = time_warp
         # arc-length table over the whole path: cumulative length at (segment, u) samples
         us = np.linspace(0.0, 1.0, ARC_SAMPLES + 1)
@@ -108,7 +109,18 @@ class BezierCameraPath:
 
     def pose(self, t: float) -> tuple[np.ndarray, np.ndarray, float]:
         """(eye, target, hfov_deg) at output progress t."""
-        s = self.path_fraction(t)
+        return self.pose_at_fraction(self.path_fraction(t))
+
+    def pose_at_frame(self, f: int, n: int, fps: float, path_s: float | None = None):
+        """(eye, target, hfov_deg) on frame f of n: with path_s (continuous cuts, render/camera_path.RAMP)
+        the move at its planned pace, eased only at the tour's ends; else output progress f / (n - 1)."""
+        if path_s:
+            from tour_worker.render.camera_path import path_time, ramp_profile
+            return self.pose_at_fraction(ramp_profile(self.easing_name, path_time(path_s, f, fps)))
+        return self.pose(f / max(1, n - 1))
+
+    def pose_at_fraction(self, s: float) -> tuple[np.ndarray, np.ndarray, float]:
+        """(eye, target, hfov_deg) at path fraction s (0-1 of the arc length)."""
         k, u = self._locate(s)
         eye = bezier(self.eye[k], u)[0]
         target = bezier(self.target[k], u)[0]

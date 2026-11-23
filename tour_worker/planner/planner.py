@@ -86,6 +86,57 @@ def _add_warning(plan: ShotPlan, w: str) -> None:
 MAX_RECUT = 3
 
 
+HEALTHY = 0.5      # a cut where the move runs at under half its own typical pace stops the camera
+
+
+def cut_windows(shots, cfg) -> list:
+    """Per shot, the earliest cut (s) from which its move keeps moving to the end of the sync's window
+    - a move that slows or turns back inside its handles (a pan that comes back to the room's centre)
+    is only cut once it is under way again; None: no limit (planner/speed_band speeds, at the
+    shot's own easing)."""
+    from .speed_band import _ends
+    out = []
+    fps = cfg.fps
+    for s in shots:
+        cam = s.camera
+        if cam.type != "keyframe_path" or not getattr(cam, "path_s", None) or s.source is None:
+            out.append(None)
+            continue
+        w, h = s.source.width, s.source.height
+        lo_s = max(0.5, s.duration_s - cfg.cut_handle_s)
+        hi_s = min(cam.path_s, s.duration_s + cfg.cut_handle_s)
+        steps = max(2, int(round((hi_s - lo_s) * fps / 3)))
+        ds = [lo_s + (hi_s - lo_s) * i / steps for i in range(steps + 1)]
+        v = [_ends(cam, w, h, cfg.output_width, cfg.output_height, d, fps)[1] for d in ds]
+        typical = sorted(v)[len(v) // 2]
+        entry = _ends(cam, w, h, cfg.output_width, cfg.output_height, s.duration_s, fps)[0]
+        ref = max(typical, entry)
+        start = None
+        for d, x in zip(reversed(ds), reversed(v)):
+            if x < HEALTHY * ref:
+                break
+            start = d
+        out.append(None if start is None or start <= lo_s + 1e-6 else round(start, 3))
+    return out
+
+
+def _part(shot) -> str:
+    """The part of the home a shot is in: interior, or exterior (the entrance and the outdoor close)."""
+    return "exterior" if shot.narrative_stage in ("exterior_open", "amenity_close") else "interior"
+
+
+def set_continuous_easing(shots) -> None:
+    """Continuous cuts (client review 2026-11-20, item 2): the camera eases in on the tour's first
+    shot and out on its last, and holds a steady speed through every cut between (linear); a lone
+    shot eases both ways. Only cameras with path_s (render/camera_path.ramp_profile)."""
+    moving = [s for s in shots if getattr(s.camera, "path_s", None)]
+    for s in moving:
+        s.camera.easing = CameraEasing.LINEAR
+    if moving:
+        moving[0].camera.easing = CameraEasing.EASE_IN
+        moving[-1].camera.easing = CameraEasing.EASE_IN_OUT if len(moving) == 1 else CameraEasing.EASE_OUT
+
+
 def _build_shot_plan(
     report: ScoringReport,
     listing_id: str,
@@ -420,19 +471,25 @@ def _build_shot_plan(
         total_dur += sel_shot.final_duration
 
     # Beat sync (plan 1.5): cuts on the track's hooks and beats within each shot's role bounds.
-    # The cameras are planned for the shots' NORMAL lengths (below); each shot then gets its
-    # synced length and a time warp: the first part at normal pace, the rear sped up / slowed so
-    # the move lands on the cut (user 2026-10-19)
-    music, synced_durations = None, None
-    if music_track and final_shots:
-        synced = sync_to_music(
-            [s.duration_s for s in final_shots], music_track, cfg, [s.role for s in final_shots]
-        )
+    # Time-warp sync: the cameras are planned for the shots' NORMAL lengths (below); each shot then
+    # gets its synced length and a time warp (user 2026-10-19). Continuous cuts (client review
+    # 2026-11-20, item 3): the cameras are planned first, a handle long, and the sync cuts each
+    # move only where it is still moving (cut_windows) - never retimed.
+    music, synced_durations, synced = None, None, None
+
+    def run_sync(windows=None):
+        nonlocal music, synced_durations, synced
+        c = cfg if windows is None else cfg.model_copy(update={"cut_windows": windows})
+        synced = sync_to_music([s.duration_s for s in final_shots], music_track, c, [s.role for s in final_shots])
         synced_durations = synced.durations
         music = synced.music
         if synced.warning:
             warnings.append(synced.warning)
         warnings.extend(synced.extra_warnings or [])
+
+    cams_first = cfg.continuous_cuts and cfg.motion_engine == "cinematic" and mode == "cinematic"
+    if music_track and final_shots and not cams_first:
+        run_sync()
 
     chosen_plan_version = "1.2" if cfg.use_motion_presets else "1.1"
 
@@ -440,6 +497,10 @@ def _build_shot_plan(
     # type, role, the photo's motion signals (scoring/motion.py) and the shot's allocated length.
     if cfg.motion_engine == "cinematic" and mode == "cinematic" and final_shots:
         scores = {p.photo_id: p for p in report.photos}
+        # the length each move is planned for: with continuous cuts and music, a handle longer
+        # than the shot (the sync cuts it inside); else the shot's own length
+        handle = cfg.cut_handle_s if (cfg.continuous_cuts and music_track) else 0.0
+        path_len = {shot.shot_id: shot.duration_s + handle for shot in final_shots}
         inputs = []
         for shot in final_shots:
             m = scores[shot.asset_id].motion
@@ -447,7 +508,8 @@ def _build_shot_plan(
             inputs.append(ShotInput(
                 shot_id=shot.shot_id, src_w=shot.source.width, src_h=shot.source.height,
                 room_type=shot.room_type, narrative_stage=shot.narrative_stage, role=shot.role,
-                duration_s=shot.duration_s,
+                duration_s=path_len[shot.shot_id],
+                cut_from_u=max(0.0, 1.0 - 2 * handle / path_len[shot.shot_id]) if handle else 1.0,
                 **({"peak_x": ctx.interest_x if ctx else m.peak_x,
                     "peak_y": ctx.interest_y if ctx else m.peak_y, "spread": m.spread,
                     "coverage_class": m.coverage_class,
@@ -457,17 +519,36 @@ def _build_shot_plan(
         # rendered frames per shot: the worker's timeline for hard cuts (boundaries rounded)
         bounds, cum = [0], 0.0
         for shot in final_shots:
-            cum += shot.duration_s
+            cum += path_len[shot.shot_id]
             bounds.append(round(cum * cfg.fps))
         frames = [b - a for a, b in zip(bounds, bounds[1:], strict=False)]
         result = plan_cameras(
             inputs, frames, cfg.output_width, cfg.output_height, cfg.cinematic_speed
         )
-        for shot, cam in zip(final_shots, result.cameras, strict=True):
+        for k, (shot, cam) in enumerate(zip(final_shots, result.cameras, strict=True)):
             shot.camera = cam
+            # a cut into another part of the home may turn the camera around (item 5): marked, with why
+            if k and _part(final_shots[k - 1]) != _part(shot):
+                shot.cut_reason = f"part_of_home:{_part(final_shots[k - 1])}->{_part(shot)}"
+            if cfg.continuous_cuts and cam.type == "keyframe_path":
+                cam.path_s = round(path_len[shot.shot_id], 3)
         warnings.extend(w for w in result.warnings if w not in warnings)
         chosen_plan_version = "1.3"
 
+    if music_track and final_shots and cams_first:
+        set_continuous_easing(final_shots)          # (the windows judge each move at its own easing)
+        run_sync(cut_windows(final_shots, cfg) if chosen_plan_version == "1.3" else None)
+    if synced_durations is not None:                 # retime every shot to its synced length
+        apply_sync(final_shots, synced, cfg)
+        total_dur = sum(synced_durations)
+    if cfg.continuous_cuts:
+        set_continuous_easing(final_shots)
+    if cfg.continuous_cuts and cfg.speed_band and chosen_plan_version == "1.3":
+        # one speed band per tour, matched across every cut at the cuts as synced (client review
+        # 2026-11-20, item 4; planner/speed_band.py)
+        from .speed_band import apply_speed_band
+        warnings.extend(apply_speed_band(final_shots, cfg.pacing, cfg.output_width, cfg.output_height, cfg.fps))
+    if chosen_plan_version == "1.3":
         # Perceptual motion (plan 1.4): curtains, plants, trees and water move inside their masks.
         if cfg.perceptual_motion and detections_by_photo:
             # every shot, exteriors included: OneFormer finds trees and water as well as
@@ -488,9 +569,7 @@ def _build_shot_plan(
                     shot.motion_regions = regions
                     chosen_plan_version = "1.4"
 
-    if synced_durations is not None:                 # retime every shot to its synced length
-        apply_sync(final_shots, synced, cfg)
-        total_dur = sum(synced_durations)
+
     if music is not None:
         chosen_plan_version = "1.5"
 

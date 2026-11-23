@@ -114,7 +114,7 @@ def test_room_shots_may_shorten_to_3_s_hero_shots_only_grow():
     at any pacing; hero shots only grow; close-ups flex both ways."""
     from tour_worker.planner.music_sync import length_bounds
     for pacing in ("slow", "normal", "fast"):
-        cfg = PlannerConfig(pacing=pacing)
+        cfg = PlannerConfig(pacing=pacing, continuous_cuts=False)
         for wide in (False, True):
             lo, hi = length_bounds([8.0, 5.0, 3.2, 2.0], ["hero", "detail", "room", "close"], cfg, wide=wide)
             assert lo[0] >= 8.0 - 1e-6 and hi[0] > 8.0                      # hero: only grows
@@ -123,3 +123,9 @@ def test_room_shots_may_shorten_to_3_s_hero_shots_only_grow():
             assert lo[3] < 2.0 and hi[3] > 2.0
     lo, hi = length_bounds([8.0], ["hero"], PlannerConfig(music_shot_abs_max_s=6.0))
     assert lo[0] <= hi[0]                                         # never an empty window
+    # continuous cuts (item 3): within a 1 s handle either side, the 3 s floor and heroes only growing kept
+    lo, hi = length_bounds([8.0, 5.0, 3.2, 2.0], ["hero", "detail", "room", "close"], PlannerConfig())
+    assert lo[0] == 8.0 and hi[0] == 9.0
+    assert lo[1] == 4.0 and hi[1] == 6.0
+    assert lo[2] >= 3.0 and hi[2] == 4.2
+    assert abs(lo[3] - (1.2 + 1 / 30)) < 1e-9 and hi[3] == 3.0

@@ -126,6 +126,9 @@ class Camera(BaseModel):
     clip_uri: Optional[str] = None
     in_s: Optional[float] = None
     zoom_end: Optional[float] = None
+    # continuous cuts: the move spans path_s s at its planned pace and the shot is cut inside it
+    # (render/camera_path.ramp_profile); keyframe_path and bezier_path only, never with time_warp
+    path_s: Optional[float] = None
     model_config = ConfigDict(extra='ignore')
 
 class Punch(BaseModel):
@@ -182,6 +185,7 @@ class Shot(BaseModel):
     caption: Optional[str] = None     # the room label, on a room's first shot (output.room_labels)
     staged: bool = False              # the photo is virtually staged: the disclosure label is drawn
     enlargement: Optional[float] = None   # output px per source px at the tightest frame (information only)
+    cut_reason: Optional[str] = None      # a direction reversal into this shot is allowed, and why (render/continuity.py)
     model_config = ConfigDict(extra='ignore')
 
 class Provenance(BaseModel):
@@ -219,6 +223,7 @@ class Music(BaseModel):
     hooks_required: bool = False           # every hook moment got a cut (tools/quality/sync_quality.py)
     hooks: Optional[List[dict]] = None     # [{t, kind: cut|accent|missed, reason}]
     licence: Optional[dict] = None         # the track's licence (contract.jobs.MusicLicence), information only
+    cut_beats_s: Optional[List[float]] = None   # each cut's musical moment, tour time (render/continuity.py)
     model_config = ConfigDict(extra='ignore')
 
 class Voiceover(BaseModel):
@@ -473,6 +478,18 @@ def check_music_segments(plan: Plan):
 def check_easing(plan: Plan):
     valid_easings = {"linear", "ease_in", "ease_out", "ease_in_out"}
     for shot in plan.shots:
+        ps = shot.camera.path_s
+        if ps is not None:
+            if shot.camera.type not in ("keyframe_path", "bezier_path"):
+                raise ValueError(f"invalid_plan: path_s on a {shot.camera.type} camera in shot {shot.shot_id}")
+            if shot.camera.time_warp:
+                raise ValueError(f"invalid_plan: path_s with a time_warp in shot {shot.shot_id}")
+            # the move must last the shot: a path that ends early would hold still before the cut
+            if not ps > 0 or ps < shot.duration_s - 1.0 / plan.output.fps:
+                raise ValueError(f"invalid_plan: path_s {ps} shorter than shot {shot.shot_id} ({shot.duration_s} s)")
+            if shot.camera.easing not in valid_easings:
+                raise ValueError(f"unsupported_easing: {shot.camera.easing}")
+            continue
         if shot.camera.type in ("keyframe_path", "compound"):
             continue  # fixed global time profile (tour_worker/render/camera_path.py)
         if shot.camera.easing not in valid_easings:

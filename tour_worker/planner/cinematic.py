@@ -155,7 +155,7 @@ CROP_VARIANTS = {"crane", "rise", "aerial_orbit", "aerial_approach", "slider", "
 ZOOM_LED = {"pull_back", "crane"}   # + every push-in: the move IS the zoom
 ZOOM_SHARE = 1 / 3                  # at most this share of the tour's shots zoom-led
 ZOOM_OVER_PENALTY = 5.0          # above any fit bonus: the share is a cap, not a preference
-ZOOM_RUN_PENALTY = 2.0
+ZOOM_RUN_PENALTY = 6.0
 ZOOM_IN_VARIANTS = {"aerial_approach"}  # every other variant ends wider than it starts
 COMPOUND_VARIANTS = {"arc"}
 # shortest shot each variant still reads well in (shorter shots get a simpler move)
@@ -222,6 +222,9 @@ class ShotInput:
     coverage_class: str = "medium"
     grid: list[list[float]] = field(default_factory=list)
     ctx: SceneContext | None = None     # what the photo shows (planner/scene_context.py)
+    # continuous cuts: the earliest share of the move's path the beat sync may cut it at (its handles;
+    # 1.0: cut at the path's end)
+    cut_from_u: float = 1.0
 
 
 @dataclass
@@ -755,7 +758,69 @@ def candidates(shot: ShotInput, cat: str, out_w: int, out_h: int) -> list[dict]:
         out.append({"variant": fb, "d": 1, "category": cat, "static": False,
                     "suit": 0.0, "keyframes": kfs, "interest": 0.0, "travel": lateral_travel(kfs),
                     "mode": "reveal"})
+    part = part_of_home(shot, cat)
+    for c in out:
+        c["part"] = part
+        c["ends"] = move_ends(c.get("keyframes"), shot.src_w, shot.src_h, out_w, out_h, shot.cut_from_u)
     return out
+
+
+# ---- direction across cuts (client review 2026-11-20, items 1 and 5) ---------------------------
+# Each move's entry and exit on screen (render/continuity.Motion, % frame width / s per unit of
+# path time - only the direction is compared here). Across a cut the lateral direction turns by at
+# most 45 deg and a forward move never meets a backward one; a reversal is allowed only where the
+# tour changes part of the home (interior <-> exterior), and the plan records why (Shot.cut_reason).
+EXIT_U = 0.8               # where a move is cut: its planned length / (planned length + handle)
+TURN_PENALTY = 8.0         # a cut turning more than 45 deg
+AXIAL_PENALTY = 8.0        # forward into backward (a push-in into a pull-out)
+SAME_WAY_BONUS = 1.0       # a cut that carries the move on (within 20 deg, or forward into forward)
+EXTERIOR_PARTS = ("exterior_open", "amenity_close")
+
+
+def part_of_home(shot: ShotInput, cat: str) -> str:
+    return "exterior" if (shot.narrative_stage in EXTERIOR_PARTS or cat in ("aerial", "exterior")) else "interior"
+
+
+def move_ends(kfs, src_w: int, src_h: int, out_w: int, out_h: int, cut_from_u: float = 1.0):
+    """(entry, exit) Motion of a keyframe move at linear pace (None for a compound move)."""
+    if not kfs:
+        return None
+    from tour_worker.render.continuity import Motion
+    path = KeyframePath([{"t": k["t"], "cx": k["cx"], "cy": k["cy"], "zoom": k["zoom"]} for k in kfs])
+    bw, _ = base_window(src_w, src_h, out_w, out_h)
+
+    def motion(u0, u1):
+        cx0, cy0, z0 = path.at_progress(u0)
+        cx1, cy1, z1 = path.at_progress(u1)
+        win = bw / math.sqrt(z0 * z1)
+        du = u1 - u0
+        return Motion((cx1 - cx0) / win / du, -(cy1 - cy0) * src_h / (win * src_w) / du, math.log(z1 / z0) / du * 0.5)
+    # the sync cuts each shot where its move is still moving (planner/planner.cut_windows): judged at
+    # the planned cut (EXIT_U), or the path's end without handles
+    u = EXIT_U if cut_from_u < 1.0 else 1.0
+    return motion(0.0, 0.05), motion(u - 0.05, u)
+
+
+def cut_cost(prev: dict, c: dict) -> float:
+    """Score change for cutting from candidate prev into c: penalties for a turn over 45 deg or a
+    forward / backward reversal (none where the part of the home changes), a bonus for carrying on."""
+    if not prev.get("ends") or not c.get("ends"):
+        return 0.0
+    from tour_worker.render.continuity import MAX_TURN_DEG, _axial_reversal, _turn_deg
+    a, b = _norm(prev["ends"][1]), _norm(c["ends"][0])
+    turn, rev = _turn_deg(a, b), _axial_reversal(a, b)
+    broken = (turn is not None and turn > MAX_TURN_DEG) or rev
+    if broken:
+        return 0.0 if prev.get("part") != c.get("part") else -(TURN_PENALTY if turn and turn > MAX_TURN_DEG else 0.0) - (AXIAL_PENALTY if rev else 0.0)
+    same = (turn is not None and turn <= 20.0) or (a.f > 0 and b.f > 0 and abs(a.f) > 0.25 * a.speed and abs(b.f) > 0.25 * b.speed)
+    return SAME_WAY_BONUS if same else 0.0
+
+
+def _norm(m):
+    """The direction only: scaled to a speed of 10 (so the 'still' threshold never applies)."""
+    from tour_worker.render.continuity import Motion
+    sp = m.speed
+    return m if sp < 1e-9 else Motion(10 * m.x / sp, 10 * m.y / sp, 10 * m.f / sp)
 
 
 def zoom_led(c: dict) -> bool:
@@ -776,8 +841,8 @@ def select(cands: list[list[dict]]) -> list[dict]:
                         s += MODE_ALTERNATE_BONUS
                     elif len(seq) > 1 and cands[i - 2][seq[-2]]["mode"] == c["mode"]:
                         s -= MODE_RUN_PENALTY
-                    if c["travel"] and c["travel"] == prev["travel"]:
-                        s -= 2.0
+                    # one continuous move (items 1, 5): direction kept across the cut
+                    s += cut_cost(prev, c)
                     if c["variant"] == prev["variant"]:
                         s -= 2.5
                     if len(seq) > 1 and cands[i - 2][seq[-2]]["variant"] == c["variant"]:

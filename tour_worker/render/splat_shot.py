@@ -212,7 +212,7 @@ class SplatShot:
 
     def view(self, f: int) -> tuple[np.ndarray, np.ndarray]:
         """(view matrix, K at the rasterised size) for frame f."""
-        eye, target, hfov = self.path.pose(f / max(1, self.n - 1))
+        eye, target, hfov = self.path.pose_at_frame(f, self.n, self.fps, getattr(self.shot.camera, "path_s", None))
         return look_at(eye, target, self.up), intrinsics(hfov, self.rw, self.rh)
 
     def frame(self, f: int, step: int | None = None) -> np.ndarray:

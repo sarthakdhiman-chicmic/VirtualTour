@@ -344,7 +344,9 @@ def energy_targets(targets, an: dict, segments, cfg: PlannerConfig, roles=None) 
     shorter (they are the long establishing / final shots). No energy data: the targets as they are."""
     from .lengths import ceiling_s, floor_s, sync_kind
     level = _energy_level(an)
-    if level is None:
+    # continuous cuts (client review 2026-11-20, item 3): each move's pace is fixed by the plan
+    # (camera.path_s) - the music only chooses where to cut it, so it does not stretch shots
+    if level is None or getattr(cfg, "continuous_cuts", False):
         return [float(d) for d in targets]
 
     def track_t(t: float) -> float:

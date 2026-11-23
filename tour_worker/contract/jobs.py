@@ -218,6 +218,9 @@ class TourRenderResult(BaseModel):
     hevc_uri: Optional[str] = None            # the H.265 copy, when the plan asked for one
     mls_uri: Optional[str] = None             # the MLS copy (no captions), when the plan asked for one
     stills: Optional[list[dict[str, Any]]] = None   # SOW EX-03: [{uri, room_key, room_type, t}] when asked
+    # cut continuity (render/continuity.py): {summary, cuts: [per cut: out/in motion in % frame
+    # width/s, speed_ratio, turn_deg, axial_reversal, beat_offset_frames, breaks]}
+    continuity: Optional[dict[str, Any]] = None
     timings: Optional[dict[str, Any]] = None  # tour_worker.timing: seconds per stage, total, host
     error: None = None
 

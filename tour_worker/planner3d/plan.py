@@ -254,10 +254,15 @@ def plan_tour_3d(model, scene: dict, rooms: list[dict], listing_id: str, cfg: Pl
     # this gives it room to land each cut on its moment instead of the next beat after a planned end
     # (2026-11-17, Home Scan v8: cuts a beat after a strong hit, one between beats; offline at 0.85:
     # none of either) - the moves are planned for these lengths, so the sync only slows them
-    reach = SYNC_REACH if music_track else 1.0
-    if reach != 1.0:
+    # continuous cuts (client review 2026-11-20, items 2-3): instead, every move is planned a
+    # handle longer than its shot (camera.path_s) at its own pace, and the sync only picks the cut
+    # inside it (planner/music_sync.length_bounds) - never retimes it
+    continuous = bool(getattr(c3, "continuous_cuts", False))
+    handle = c3.cut_handle_s if (continuous and music_track) else 0.0
+    reach = 1.0 if continuous else (SYNC_REACH if music_track else 1.0)
+    if reach != 1.0 or handle:
         for s_ in selected:
-            s_.final_duration = round(s_.final_duration * reach, 3)
+            s_.final_duration = round(s_.final_duration * reach + handle, 3)
     mover = RoomMoves(space, Occlusion(model, space) if check_occlusion else None)
     mover.tour_shots = len(selected)               # the moving-in cap: a third of the tour's shots
     last_room = selected[-1].room_key if selected else None
@@ -282,7 +287,7 @@ def plan_tour_3d(model, scene: dict, rooms: list[dict], listing_id: str, cfg: Pl
         limit = MAX_WIDE - (1 if flies else 0)
         while wide.get(room, 0) < limit and len(walls) and len(covered.get(room, ())) / len(walls) < COVER_ENOUGH:
             kind = lead.kind if lead.kind in ("room", "hero") else "room"
-            dur = round(max(length_range("room", c3.pacing)[0] * reach, 0.85 * lead.final_duration), 2)
+            dur = round(max(length_range("room", c3.pacing)[0] * reach + handle, 0.85 * lead.final_duration), 2)
             earlier_ = [p for k in sorted(space.spaces.get(room, {room})) for p in poses.get(k, [])]
             mover.cover_stats = {}
             mv, cw = mover.best(room, dur, earlier=earlier_, prev=prev, piece_rank=wide.get(room, 0),
@@ -320,7 +325,7 @@ def plan_tour_3d(model, scene: dict, rooms: list[dict], listing_id: str, cfg: Pl
         r = space.route(room, nxt.room_key)
         if not r:
             return prev
-        dur = round(length_range("room", c3.pacing)[1] * reach, 2)  # room to fly it at a walking pace
+        dur = round(length_range("room", c3.pacing)[1] * reach + handle, 2)  # room to fly it at a walking pace
         earlier_ = [p for k in sorted(space.spaces.get(room, {room})) for p in poses.get(k, [])]
         mv, w = mover.exit(room, nxt.room_key, r, dur, prev, earlier_)
         if mv is None:
@@ -393,12 +398,12 @@ def plan_tour_3d(model, scene: dict, rooms: list[dict], listing_id: str, cfg: Pl
     # the beat sync, which only lengthens room shots afterwards (the Home Scan: 131 s past a 120 s cap)
     cap = SYNC_HEADROOM * (getattr(c3, "max_total_s", None) or 90.0)
     for _, pair in sorted(extras, key=lambda e: e[0]):
-        if sum(s_.final_duration for s_, _ in moves) <= cap:
+        if sum(s_.final_duration - handle for s_, _ in moves) <= cap:
             break
         moves = [m for m in moves if m is not pair]
         warnings.append(f"coverage_shot_dropped_for_length:{pair[0].room_key}")
     for pair in exits[::-1]:                      # then the flights on, from the tour's end
-        if sum(s_.final_duration for s_, _ in moves) <= cap:
+        if sum(s_.final_duration - handle for s_, _ in moves) <= cap:
             break
         moves = [m for m in moves if m is not pair]
         warnings.append(f"exit_dropped_for_length:{pair[0].room_key}")
@@ -417,9 +422,10 @@ def plan_tour_3d(model, scene: dict, rooms: list[dict], listing_id: str, cfg: Pl
         role = sel.role                               # hero | detail (a room shot) | close
         shots.append(Shot(shot_id=f"s{n:02d}", order=n, asset_id="scene", room_key=sel.room_key,
                           room_type=rtype[sel.room_key], narrative_stage=stage[sel.room_key], role=role,
-                          duration_s=round(sel.final_duration, 3),
+                          duration_s=round(sel.final_duration - handle, 3),
                           camera=CameraParams(type="bezier_path", easing=mv.easing, move=mv.kind, segments=bz,
-                                              hfov_deg=[HFOV, HFOV]),
+                                              hfov_deg=[HFOV, HFOV],
+                                              path_s=round(sel.final_duration, 3) if continuous else None),
                           transition_in=TransitionParams(type="cut", duration_s=0.0)))
         plan_rows.append({"shot_id": f"s{n:02d}", "room_key": sel.room_key, "move": mv.kind,
                           "planned_s": round(sel.final_duration, 2), "score": round(mv.score, 3),
@@ -436,6 +442,12 @@ def plan_tour_3d(model, scene: dict, rooms: list[dict], listing_id: str, cfg: Pl
             s.duration_s = round(float(d), 4)
         music = r.music
         warnings += [x for x in [r.warning, *(r.extra_warnings or [])] if x]
+    if continuous and shots:
+        # the last shot's move ends on the tour's last frame (it settles there); the ends ease, the
+        # cuts between run at a steady speed
+        from tour_worker.planner.planner import set_continuous_easing
+        shots[-1].camera.path_s = round(shots[-1].duration_s, 3)
+        set_continuous_easing(shots)
 
     # transitions: every interior shot change is a cut - the camera carries the move between parts
     # of the home (client review 2026-11-20, item 8); shots are built with cuts
@@ -444,7 +456,8 @@ def plan_tour_3d(model, scene: dict, rooms: list[dict], listing_id: str, cfg: Pl
     # the speed limits on the shots as they will play (after the sync) — interior shots only;
     # run before drone clip injection so zip(shots, plan_rows) stays aligned
     for s, row in zip(shots, plan_rows):
-        turn, move = speeds_of([x.model_dump() for x in s.camera.segments], s.duration_s, s.camera.easing, fps=cfg.fps)
+        turn, move = speeds_of([x.model_dump() for x in s.camera.segments], s.duration_s,
+                               getattr(s.camera.easing, "value", s.camera.easing), fps=cfg.fps, path_s=s.camera.path_s)
         row.update(played_s=s.duration_s, played_turn_dps=round(turn, 1), played_move_mps=round(move, 2))
         if turn > MAX_TURN_DPS + 0.05 or move > MAX_MOVE_MPS + 0.005:
             warnings.append(f"camera_speed:{s.shot_id}")

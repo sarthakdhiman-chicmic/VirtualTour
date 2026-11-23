@@ -21,6 +21,17 @@ class PlannerConfig(BaseModel):
     hero_shot_s: tuple[float, float] = (3.2, 5.0)
     target_total_s: float = 75.0        # "fill" only
     min_total_s: float = 60.0
+    # continuous cuts (client review 2026-11-20, items 2-3; render/camera_path.ramp_profile): each
+    # move runs at a steady pace over its shot plus cut_handle_s (with music) and the beat sync only
+    # picks the cut inside it - no time warp; eased in on the tour's first shot and out on its last
+    continuous_cuts: bool = True
+    cut_handle_s: float = 1.0
+    # one speed band per tour (item 4, planner/speed_band.py): moves scaled to the pacing's target
+    # speed and matched within 25% across every cut (continuous cuts only)
+    speed_band: bool = True
+    # set by the planner for the sync (planner.cut_windows): per shot, the earliest cut where its move
+    # still moves (None: no limit); not a setting
+    cut_windows: list | None = None
     max_total_s: float = 90.0           # 1 min 30 s at most, music sync included (user 2026-11-20)
     shot_min_s: float = 3.0
     shot_max_s: float = 8.0

@@ -109,6 +109,16 @@ def run_tour(request: dict, storage, workdir: str, settings: Settings | None = N
         except ValueError as e:
             return plan_failure(e)
 
+        # cut continuity (client review 2026-11-20, items 1-9): every cut's speeds, direction change
+        # and beat offset, judged before anything is drawn; enforced only when CONTINUITY_ENFORCE
+        # is set (report-only while the planner is brought within the limits)
+        from tour_worker.render import continuity
+        cuts = continuity.report(plan)
+        broken = continuity.violations(cuts)
+        if broken and settings.continuity_enforce:
+            return failure("cuts_out_of_limits", "cuts_out_of_limits: " + ", ".join(broken[:20]))
+        warnings_cuts = broken
+
         # required (it defaulted to "s3://dummy/out/" before 2026-10: a render nobody could find)
         output_prefix = request.get("output_prefix")
         if not output_prefix:
@@ -120,6 +130,7 @@ def run_tour(request: dict, storage, workdir: str, settings: Settings | None = N
                     + (" · 3D scene" if plan.scene is not None else "") + (" · music" if plan.music else ""))
         sw.lap()
         warnings = fetch_and_prepare(plan, storage, workdir, image_urls)
+        warnings += warnings_cuts
 
         music_path = None
         if plan.music is not None:                 # plan 1.5: fetch the track
@@ -214,6 +225,7 @@ def run_tour(request: dict, storage, workdir: str, settings: Settings | None = N
             "hevc_uri": hevc_uri,
             "mls_uri": mls_uri,
             "stills": stills,
+            "continuity": {"summary": continuity.summary(cuts), "cuts": cuts},
             "timings": sw.result(),
             "error": None
         }

@@ -184,17 +184,18 @@ BATH = {"classes": {
 
 def test_narrow_tall_spaces_get_the_vertical_glide():
     """User 2026-10-19: shots with little width but enough vertical content (the bathroom) need
-    their own move: the vertical glide rises up the room to its interest."""
+    their own move: the vertical glide rises up the room to its interest. It is the room's best fit;
+    whether a tour plays it also depends on the cut from the move before (client review 2026-11-20,
+    item 5: no turn over 45 deg), so it is checked as the room's own first choice."""
+    from tour_worker.planner.cinematic import candidates, category
     s = shot(1, "bathroom", cls="tight", role="detail", dur=3.3)
     s.ctx = from_scene(BATH)
-    shots = [shot(0, "bedroom", cls="medium"), s, shot(2, "living_room")]
-    res = plan_cameras(shots, frames_for(shots), 1920, 1080)
-    assert res.notes[1]["variant"] == "vertical_glide"
-    k = res.cameras[1].keyframes
-    assert k[-1].cy < k[0].cy and k[-1].zoom < k[0].zoom          # rises, easing out
-    assert abs(k[-1].cx - k[0].cx) < 0.05                         # vertical, not sideways
+    best = max(candidates(s, category(s, False), 1920, 1080), key=lambda c: c["suit"] + c["interest"])
+    assert best["variant"] == "vertical_glide"
+    k = best["keyframes"]
+    assert k[-1]["cy"] < k[0]["cy"] and k[-1]["zoom"] < k[0]["zoom"]   # rises, easing out
+    assert abs(k[-1]["cx"] - k[0]["cx"]) < 0.05                         # vertical, not sideways
     wide_room = shot(1, "bedroom", cls="medium", role="detail", dur=3.3)
     wide_room.ctx = from_scene(LIVING)
-    wide = plan_cameras([shots[0], wide_room, shots[2]], frames_for(shots), 1920, 1080)
-    assert wide.notes[1]["variant"] != "vertical_glide"
-    check_contract(shots, res)
+    best_wide = max(candidates(wide_room, category(wide_room, False), 1920, 1080), key=lambda c: c["suit"] + c["interest"])
+    assert best_wide["variant"] != "vertical_glide"

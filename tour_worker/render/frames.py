@@ -79,6 +79,36 @@ def ken_burns_frames(cam, n: int, ts: list | None = None) -> list:
     return out
 
 
+def camera_frames(shot, n: int, out_w: int, out_h: int, fps: float) -> list:
+    """A photo shot's camera on each of its n frames: [((cx, cy, zoom), roll_deg)], with the
+    beat-sync time warp and zoom punches applied. The one place the frames are made: the render
+    (ShotWarp) and the cut measurements (render/continuity.py) both use it."""
+    from tour_worker.contract.plan import compound_path  # plan_io imports camera_path; avoid a cycle
+    cam = shot.camera
+    path = (compound_path(shot, out_w, out_h) if cam.type == "compound"
+            else KeyframePath([k.model_dump() for k in cam.keyframes]) if cam.type == "keyframe_path"
+            else None)                                   # ken_burns: start -> end
+    path_s = getattr(cam, "path_s", None)
+    if path_s and cam.type == "keyframe_path":
+        # continuous cuts: the move at its planned pace, eased only at the tour's ends (camera_path.RAMP)
+        from tour_worker.render.camera_path import path_time, ramp_profile
+        us = [ramp_profile(cam.easing, path_time(path_s, f, fps)) for f in range(n)]
+        frames = [(path.at_progress(u), path.roll_at_progress(u)) for u in us]
+        if getattr(cam, "punches", None):
+            frames = [((cx, cy, z * punch_scale(cam.punches, f / fps)), r) for f, ((cx, cy, z), r) in enumerate(frames)]
+        return frames
+    warp = getattr(cam, "time_warp", None)
+    ts = [time_warp_at(warp, f / max(1, n - 1)) for f in range(n)]    # beat-sync retiming
+    if path is None:
+        frames = ken_burns_frames(cam, n, ts)
+    else:
+        rolls = ([path.roll_deg_at(t) for t in ts] if cam.type == "keyframe_path" else [0.0] * n)
+        frames = list(zip((path.at(t) for t in ts), rolls))
+    if getattr(cam, "punches", None):                                   # beat-sync punches
+        frames = [((cx, cy, z * punch_scale(cam.punches, f / fps)), r) for f, ((cx, cy, z), r) in enumerate(frames)]
+    return frames
+
+
 def punch_scale(punches, t: float) -> float:
     """Zoom factor of the shot's punches at t s into the shot (beat sync): each rises over its
     attack (smoothstep) to 1 + amount at at_s and eases back over decay_s ((1-x)^2, fast then
@@ -142,13 +172,9 @@ class ShotWarp:
     code "prewarp" (unreadable image, wrong aspect) as before."""
 
     def __init__(self, plan, shot, n: int, images: str, warnings: list | None = None):
-        from tour_worker.contract.plan import compound_path  # plan_io imports camera_path; avoid a cycle
         cam = shot.camera
         self.shot, self.n, self.fps = shot, n, plan.output.fps
         self.ow, self.oh = plan.output.width, plan.output.height
-        path = (compound_path(shot, self.ow, self.oh) if cam.type == "compound"
-                else KeyframePath([k.model_dump() for k in cam.keyframes]) if cam.type == "keyframe_path"
-                else None)                                   # ken_burns: start -> end (below)
         self.src = cv2.imread(os.path.join(images, shot.image_uri.split("/")[-1]), cv2.IMREAD_COLOR)
         if self.src is None:
             raise RuntimeError(f"prewarp: cannot read the image for shot {shot.shot_id}")
@@ -175,16 +201,7 @@ class ShotWarp:
         self.sw, self.sh = sw, sh
         self.rotate = cam.projection == "rotate"
         self.hfov = cam.hfov_deg if cam.hfov_deg is not None else DEFAULT_HFOV_DEG
-        warp = getattr(cam, "time_warp", None)
-        ts = [time_warp_at(warp, f / max(1, n - 1)) for f in range(n)]    # beat-sync retiming
-        if path is None:
-            self.frames = ken_burns_frames(cam, n, ts)
-        else:
-            rolls = ([path.roll_deg_at(t) for t in ts] if cam.type == "keyframe_path" else [0.0] * n)
-            self.frames = list(zip((path.at(t) for t in ts), rolls))
-        if getattr(cam, "punches", None):                                   # beat-sync punches
-            self.frames = [((cx, cy, z * punch_scale(cam.punches, f / self.fps)), r)
-                           for f, ((cx, cy, z), r) in enumerate(self.frames)]
+        self.frames = camera_frames(shot, n, self.ow, self.oh, self.fps)
         self.regions, region_warnings = load_regions(shot, images, sw, sh, self.src)
         # the sky (sky_drift): a layer under everything - each frame's photo is the moving sky
         # composited in first; a sky that cannot be prepared stays still (a warning, never a failure)

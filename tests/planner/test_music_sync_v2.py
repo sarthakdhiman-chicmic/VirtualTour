@@ -14,7 +14,8 @@ from tour_worker.planner.music_sync import apply_sync, sync_to_music
 # these tests are about where cuts land, on synthetic tracks planned around ~3.3 s shots: they keep
 # the sync's older 2.5-6 s absolute limits (the planner's 3-8 s room budgets are tested in
 # tests/planner/test_room_budgets.py)
-CFG = PlannerConfig(music_shot_abs_min_s=2.5, music_shot_abs_max_s=6.0, final_shot_min_s=3.5)
+# the sync's musical choices under its ratio windows (the time-warp sync); handle windows: test_music_sync.py
+CFG = PlannerConfig(music_shot_abs_min_s=2.5, music_shot_abs_max_s=6.0, final_shot_min_s=3.5, continuous_cuts=False)
 BEAT = 0.5
 TOL = (1 + CFG.music_cut_lead_frames) / CFG.fps
 
@@ -203,7 +204,7 @@ def test_shots_hold_through_breakdowns_and_cut_faster_in_drops():
     breakdown) is planned longer, over a high section (a drop) shorter; the opening and closing
     shots never get shorter; edits (segments) map tour time to track time."""
     from tour_worker.planner.music_sync_v2 import energy_targets
-    cfg = PlannerConfig()
+    cfg = PlannerConfig(continuous_cuts=False)     # the energy pacing of the time-warp sync
     an = {"sections": [{"start": 0.0, "end": 10.0, "level": "mid"}, {"start": 10.0, "end": 20.0, "level": "low"},
                        {"start": 20.0, "end": 40.0, "level": "high"}, {"start": 40.0, "end": 90.0, "level": "mid"}]}
     out = energy_targets([5.0, 4.0, 4.0, 4.0, 4.0, 4.0, 4.0, 5.0], an, [(0.0, 90.0)], cfg)
@@ -215,6 +216,9 @@ def test_shots_hold_through_breakdowns_and_cut_faster_in_drops():
     late = energy_targets([4.0, 4.0], an, [(10.0, 20.0), (40.0, 60.0)], cfg)   # starts in the breakdown
     assert late[0] >= 4.0 and late == energy_targets([4.0, 4.0], an, [(10.0, 20.0), (40.0, 60.0)], cfg)
     assert energy_targets([4.0, 4.0], {}, [(0.0, 60.0)], cfg) == [4.0, 4.0]
+    # continuous cuts (client review 2026-11-20, item 3): the plan sets each move's pace; the
+    # music only chooses the cut, so it never stretches or squeezes the planned lengths
+    assert energy_targets([5.0, 4.0, 4.0, 4.0], an, [(0.0, 90.0)], PlannerConfig()) == [5.0, 4.0, 4.0, 4.0]
 
 
 
@@ -222,7 +226,7 @@ def test_the_per_beat_loudness_finds_breakdowns_the_sections_miss():
     """Solarflex's sections call 12-132 s "high", but a 12 dB dip at 41-45 s is a breakdown (the
     client heard it at 28-32 s of the demo): beat energy decides, sections are the fallback."""
     from tour_worker.planner.music_sync_v2 import energy_targets
-    cfg = PlannerConfig()
+    cfg = PlannerConfig(continuous_cuts=False)
     beats = np.arange(0.0, 90.0, 0.4)
     loud = np.where((beats >= 41) & (beats < 45), -30.0, -18.0)
     an = {"music_start": 0.0, "rhythm_end": 90.0,

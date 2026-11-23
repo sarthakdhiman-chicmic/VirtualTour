@@ -81,6 +81,9 @@ class Settings:
     # path drew frames one at a time behind the other threads' device work, 1263 s vs the CPU path's
     # 742 s for Turkey Trot 4K, 2026-11-16); "gpu" / "auto" - frames drawn on CUDA (render/frames_gpu.py)
     photo_backend: str = "cpu"
+    # cut continuity (render/continuity.py): fail a render whose cuts break the limits (CONTINUITY_ENFORCE=1);
+    # off: the cuts are reported (result "continuity") and each broken one is a warning
+    continuity_enforce: bool = False
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> "Settings":
@@ -109,6 +112,7 @@ class Settings:
             splat_sh_degree=min(3, max(0, int(env.get("SPLAT_SH_DEGREE") or 3))),
             scene_cache_dir=(env.get("SCENE_CACHE_DIR") or "").strip() or None,
             photo_backend=(env.get("PHOTO_BACKEND") or "cpu").strip().lower(),
+            continuity_enforce=env.get("CONTINUITY_ENFORCE", "") == "1",
         )
 
     def segment_path(self) -> str:

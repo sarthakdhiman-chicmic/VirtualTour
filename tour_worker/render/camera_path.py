@@ -103,7 +103,10 @@ class KeyframePath:
         self.roll_ms = monotone_slopes(self.ts, self.roll)
 
     def roll_deg_at(self, t: float) -> float:
-        return monotone_eval(self.ts, self.roll, self.roll_ms, hermite_profile(t))
+        return self.roll_at_progress(hermite_profile(t))
+
+    def roll_at_progress(self, u: float) -> float:
+        return monotone_eval(self.ts, self.roll, self.roll_ms, u)
 
     def rolls(self, n: int) -> list[float]:
         return [self.roll_deg_at(f / max(1, n - 1)) for f in range(n)]
@@ -126,6 +129,43 @@ def time_warp_at(points, t: float) -> float:
         return t
     xs, ys = [p[0] for p in points], [p[1] for p in points]
     return monotone_eval(xs, ys, monotone_slopes(xs, ys), min(1.0, max(0.0, t)))
+
+
+# ---------------------------------------------------------------------------------------------
+# continuous cuts (client review 2026-11-20, items 2-3): a camera with path_s plays its move at a
+# steady pace over path_s seconds - the move planned a handle longer than the shot's nominal length
+# - and the shot is CUT where the sync puts it (inside the handles), never retimed. Its easing:
+#   linear       the same speed at both ends (every shot between the first and the last)
+#   ease_in      the tour's first shot: rises from still over the first RAMP of the path, then steady
+#   ease_out     the tour's last shot: steady, then settles to still over the last RAMP
+#   ease_in_out  a lone shot: both
+# A camera without path_s keeps its plan version's timing (the 1.6 / 0.8 profile; t^2 easings in 3D).
+# ---------------------------------------------------------------------------------------------
+RAMP = 0.35
+
+
+def ramp_profile(easing: str | None, u: float, ramp: float = RAMP) -> float:
+    """Path progress at path time u (0-1) for a continuous-cut camera."""
+    u = min(1.0, max(0.0, u))
+    e = easing or "linear"
+    if e == "linear":
+        return u
+    if e == "ease_in":
+        v = 1.0 / (1.0 - ramp / 2)
+        return v * u * u / (2 * ramp) if u < ramp else v * (u - ramp / 2)
+    if e == "ease_out":
+        return 1.0 - ramp_profile("ease_in", 1.0 - u, ramp)
+    v = 1.0 / (1.0 - ramp)                                   # ease_in_out: both ramps
+    if u < ramp:
+        return v * u * u / (2 * ramp)
+    if u > 1.0 - ramp:
+        return 1.0 - v * (1.0 - u) ** 2 / (2 * ramp)
+    return v * (u - ramp / 2)
+
+
+def path_time(path_s: float, f: int, fps: float) -> float:
+    """Frame f of a continuous-cut shot -> path time u (0-1): the move runs at its planned pace."""
+    return min(1.0, (f / fps) / path_s) if path_s and path_s > 0 else 0.0
 
 
 def validate_keyframes(keyframes: list[dict]) -> None:

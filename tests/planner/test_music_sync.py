@@ -19,7 +19,8 @@ from tour_worker.planner.planner import _compute_plan_hash, build_shot_plan
 # these tests are about where cuts land, on synthetic tracks planned around ~3.3 s shots: they keep
 # the sync's older 2.5-6 s absolute limits (the planner's 3-8 s room budgets are tested in
 # tests/planner/test_room_budgets.py)
-CFG = PlannerConfig(music_shot_abs_min_s=2.5, music_shot_abs_max_s=6.0, final_shot_min_s=3.5)
+# (the time-warp sync these tests were written for: continuous cuts are tested at the end)
+CFG = PlannerConfig(music_shot_abs_min_s=2.5, music_shot_abs_max_s=6.0, final_shot_min_s=3.5, continuous_cuts=False)
 # cuts sit music_cut_lead_frames before their beat (the tour end does not)
 TOL = (1 + CFG.music_cut_lead_frames) / CFG.fps
 
@@ -117,7 +118,7 @@ def test_planner_plans_cameras_at_normal_length_then_retimes(report, monkeypatch
         return real(inputs, frames, *a, **k)
 
     monkeypatch.setattr(planner_mod, "plan_cameras", spy)
-    FULL = PlannerConfig()      # the whole planner: its own 3-8 s room budgets and sync limits
+    FULL = PlannerConfig(continuous_cuts=False)   # the whole planner (time-warp sync): its own budgets and limits
     planned = [s.duration_s for s in build_shot_plan(report, "t", _assets(), cfg=FULL).shots]
     tr = track(duration=90.0, bpm=100.0)
     plan = build_shot_plan(report, "t", _assets(), cfg=FULL, music_track=tr)
@@ -255,7 +256,7 @@ def test_ramp_warp_speeds_into_the_cut():
 
 
 def test_apply_sync_ramps_hook_cuts_and_punches_the_hit(report):  # noqa: F811
-    cfg = PlannerConfig(music_punches=True)       # punches are off by default (user 2026-10-23)
+    cfg = PlannerConfig(music_punches=True, continuous_cuts=False)   # punches off by default; the time-warp sync
     hooks = [7.35, 15.85, 18.25, 26.75]
     plan = build_shot_plan(report, "t", _assets(), cfg=cfg)
     tr = with_hooks(track(duration=90.0), hooks)
@@ -315,3 +316,62 @@ def test_the_synced_tour_stays_under_its_ceiling(report):  # noqa: F811
     plan = build_shot_plan(report, "t", _assets(), cfg=cfg, music_track=track(duration=120.0, bpm=100.0))
     assert plan.total_duration_s <= 40.0 + 1e-3
     assert plan.provenance.plan_hash == _compute_plan_hash(plan.model_dump(mode="json"))
+
+
+def test_continuous_cuts_plan_each_move_a_handle_long_and_only_choose_the_cut(report):  # noqa: F811
+    """Client review 2026-11-20, items 2-3: the move runs at its planned pace over its shot plus a
+    1 s handle; the sync cuts inside it (no time warp); the first shot eases in, the last eases
+    out and its path ends on the tour's last frame; every shot between is linear."""
+    cfg = PlannerConfig()
+    assert cfg.continuous_cuts
+    plain = build_shot_plan(report, "t", _assets(), cfg=cfg)
+    plan = build_shot_plan(report, "t", _assets(), cfg=cfg, music_track=track(duration=120.0, bpm=100.0))
+    planned = {s.shot_id: s.duration_s for s in plain.shots}
+    assert all(s.camera.time_warp is None for s in plan.shots)
+    for s in plan.shots[:-1]:
+        assert s.camera.path_s == pytest.approx(planned[s.shot_id] + cfg.cut_handle_s, abs=0.01)
+        assert s.camera.path_s - 2 * cfg.cut_handle_s - 0.05 <= s.duration_s <= s.camera.path_s + 1e-6
+    assert plan.shots[-1].camera.path_s == pytest.approx(plan.shots[-1].duration_s, abs=1e-3)
+    easings = [s.camera.easing.value for s in plan.shots]
+    assert easings[0] == "ease_in" and easings[-1] == "ease_out" and set(easings[1:-1]) == {"linear"}
+    assert all(s.camera.path_s == pytest.approx(s.duration_s, abs=1e-3) for s in plain.shots)   # no music: no handle
+
+
+def test_one_speed_band_every_cut_within_25_percent(report):  # noqa: F811
+    """Item 4: moves scaled into the pacing's band and matched across every cut (planner/speed_band.py),
+    measured as the render report measures them (render/continuity.py)."""
+    from tour_worker.contract.plan import parse_plan
+    from tour_worker.render import continuity
+    plan = build_shot_plan(report, "t", _assets(), cfg=PlannerConfig(), music_track=track(duration=120.0, bpm=100.0))
+    rows = continuity.report(parse_plan(plan.model_dump(mode="json")))
+    judged = [r for r in rows if r["judged"] and r["speed_ratio"] is not None]
+    assert judged and all(r["speed_ratio"] <= continuity.SPEED_RATIO + 1e-6 for r in judged)
+    assert not any("stopped" in r["breaks"] for r in rows)
+
+
+def test_one_continuous_move_direction_kept_across_cuts(report):  # noqa: F811
+    """Items 1 and 5: each move is chosen knowing the shot before - its lateral direction turns by at
+    most 45 deg across a cut and forward never meets backward, except where the tour changes part
+    of the home (marked on the shot: cut_reason); the sync never cuts a move where it has stalled."""
+    from tour_worker.contract.plan import parse_plan
+    from tour_worker.render import continuity
+    plan = build_shot_plan(report, "t", _assets(), cfg=PlannerConfig(), music_track=track(duration=120.0, bpm=100.0))
+    rows = continuity.report(parse_plan(plan.model_dump(mode="json")))
+    assert not [r for r in rows if {"direction_turn", "forward_back", "stopped"} & set(r["breaks"])], \
+        [(r["cut"], r["breaks"]) for r in rows if r["breaks"]]
+    for k, s in enumerate(plan.shots[1:], start=1):
+        outside = ("exterior_open", "amenity_close")
+        changes = (plan.shots[k - 1].narrative_stage in outside) != (s.narrative_stage in outside)
+        assert (s.cut_reason is not None) == changes
+
+
+def test_cut_cost_keeps_the_direction_and_allows_a_reset_between_parts_of_the_home():
+    from tour_worker.planner.cinematic import TURN_PENALTY, cut_cost
+    from tour_worker.render.continuity import Motion
+    right, left, fwd, back = Motion(3, 0, 0), Motion(-3, 0, 0), Motion(0, 0, 3), Motion(0, 0, -3)
+    c = lambda a, b, pa="interior", pb="interior": cut_cost({"ends": (None, a), "part": pa}, {"ends": (b, None), "part": pb})  # noqa: E731
+    assert c(right, right) > 0 and c(fwd, fwd) > 0                 # carried on
+    assert c(right, left) <= -TURN_PENALTY                         # a reversal
+    assert c(fwd, back) < 0                                        # push-in into pull-out
+    assert c(right, fwd) == 0                                      # a sideways move may go forward
+    assert c(right, left, "exterior", "interior") == 0             # a change of part of the home

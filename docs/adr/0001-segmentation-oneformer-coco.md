@@ -40,8 +40,7 @@ labelling alike.
 
 - **Keep Mask2Former ADE20K.** Its one advantage over COCO was the fireplace class, which is no
   longer used.
-- **Train our own Mask2Former now (item 19).** Not possible on the current timeline; it stays the
-  long-term target.
+- **Train our own Mask2Former now (item 19).** Not possible on the current timeline;
 - **Mask2Former COCO panoptic.** The same COCO classes in the architecture item 19 names, but it
   brings no benefit to the worker now that no other pipeline shares Mask2Former.
 

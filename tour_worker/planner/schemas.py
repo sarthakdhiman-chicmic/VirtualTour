@@ -126,10 +126,15 @@ class CameraParams(BaseModel):
     clip_uri: str | None = None          # S3 URI of the video clip
     in_s: float | None = None            # trim start in seconds (0 or unset = from the beginning)
     zoom_end: float | None = None        # optional slow push: final zoom multiplier (e.g. 1.05)
+    # continuous cuts (client review 2026-11-20, items 2-3; render/camera_path.ramp_profile): the
+    # move spans path_s seconds at its planned pace - a handle longer than the shot - and the shot
+    # is cut inside it; easing then means linear (between the tour's first and last shots),
+    # ease_in (the first), ease_out (the last). None: the plan version's timing (time_warp etc.)
+    path_s: float | None = None
 
     @model_serializer(mode="wrap")
     def _omit_unset_additions(self, handler):
-        return _omit_none(handler(self), ("clip_uri", "in_s", "zoom_end"))
+        return _omit_none(handler(self), ("clip_uri", "in_s", "zoom_end", "path_s"))
 
 
 class Punch(BaseModel):
@@ -189,10 +194,13 @@ class Shot(BaseModel):
     caption: str | None = None       # the room label, on a room's first shot (planner/captions.py)
     staged: bool | None = None       # True: a virtually staged photo (the disclosure label)
     enlargement: float | None = None # photo shots: output px per source px at the tightest frame
+    # why the cut INTO this shot may reverse the camera's direction (client review 2026-11-20, item 5):
+    # "part_of_home:<from>-><to>" where the tour changes part of the home; None: it must not
+    cut_reason: str | None = None
 
     @model_serializer(mode="wrap")
     def _omit_unset_additions(self, handler):
-        return _omit_none(handler(self), ("image_uri", "source", "caption", "staged", "enlargement"))
+        return _omit_none(handler(self), ("image_uri", "source", "caption", "staged", "enlargement", "cut_reason"))
 
 
 class MusicTrack(BaseModel):
@@ -225,10 +233,14 @@ class MusicTrack(BaseModel):
     # SOW MU-06 / client review 2026-11-20 item 20: the track's licence as the music library holds it
     # (contract.jobs.MusicLicence), recorded in the plan; None: none was sent (music_licence_missing)
     licence: dict | None = None
+    # the musical moment (tour time, s: the attack, onset lag taken off) each cut was put on, in cut
+    # order - what the render report measures each cut's beat offset against (render/continuity.py)
+    cut_beats_s: list[float] | None = None
 
     @model_serializer(mode="wrap")
     def _omit_unset_additions(self, handler):
-        return _omit_none(handler(self), ("sync_version", "segments", "crossfade_s", "edits", "licence"))
+        return _omit_none(handler(self), ("sync_version", "segments", "crossfade_s", "edits", "licence",
+                                          "cut_beats_s"))
 
 
 class MusicSegment(BaseModel):
