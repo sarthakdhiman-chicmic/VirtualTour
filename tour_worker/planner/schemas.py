@@ -42,6 +42,13 @@ class Branding(BaseModel):
     corner_logo: bool = False
 
 
+class MotionBlur(BaseModel):
+    """A film shutter on fast camera frames (client review 2026-11-20, item 7; contract.plan.MotionBlur)."""
+    shutter: float = 0.5
+    min_px_f: float = 3.0
+    max_samples: int = 5
+
+
 class OutputParams(BaseModel):
     width: int
     height: int
@@ -52,10 +59,11 @@ class OutputParams(BaseModel):
     room_labels: RoomLabels | None = None   # room-name captions (render/overlays.py); None: none
     mls_copy: bool | None = None     # True: also the MLS copy, without captions; None when not asked
     branding: Branding | None = None # title card, end card, corner logo; None: none
+    motion_blur: MotionBlur | None = None   # photo shots' fast frames blurred (render/frames.py); None: none
 
     @model_serializer(mode="wrap")
     def _omit_unset_additions(self, handler):
-        return _omit_none(handler(self), ("max_bytes", "hevc", "room_labels", "mls_copy", "branding"))
+        return _omit_none(handler(self), ("max_bytes", "hevc", "room_labels", "mls_copy", "branding", "motion_blur"))
 
 
 class SourceImage(BaseModel):

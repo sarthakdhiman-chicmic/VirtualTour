@@ -18,6 +18,7 @@ from tour_worker.scoring.autoroom import is_indoors
 from .scene_context import blend_grid, from_scene
 from .schemas import (
     CameraEasing,
+    MotionBlur,
     CameraParams,
     CameraPoint,
     OutputParams,
@@ -280,6 +281,8 @@ def _build_shot_plan(
         room_labels=RoomLabels(**cfg.output_room_labels) if cfg.output_room_labels is not None else None,
         mls_copy=cfg.output_mls_copy or None,
         branding=Branding(**cfg.output_branding) if cfg.output_branding else None,
+        motion_blur=MotionBlur(shutter=cfg.motion_blur_shutter, min_px_f=cfg.motion_blur_min_px_f,
+                               max_samples=cfg.motion_blur_max_samples) if cfg.motion_blur else None,
     )
 
     # 3. Assemble Plan

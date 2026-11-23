@@ -44,6 +44,16 @@ class Branding(BaseModel):
     def image_uris(self) -> list[str]:
         return [u for u in (self.agent.photo_uri if self.agent else None, self.logo_uri) if u]
 
+class MotionBlur(BaseModel):
+    """Motion blur (client review 2026-11-20, item 7): a film shutter on fast camera frames of photo
+    shots (tour_worker/render/frames.py). shutter: the open share of the frame interval (0.5 = 180
+    degrees); frames whose camera moves min_px_f output px per frame or less (at 1080p, scaled with the
+    output diagonal) are drawn exactly as without it; at most max_samples warps a frame."""
+    shutter: float = 0.5
+    min_px_f: float = 3.0
+    max_samples: int = 5
+    model_config = ConfigDict(extra='ignore')
+
 class OutputConfig(BaseModel):
     width: int
     height: int
@@ -54,6 +64,7 @@ class OutputConfig(BaseModel):
     room_labels: Optional[RoomLabels] = None   # draw each shot's caption (render/overlays.py)
     mls_copy: bool = False             # also render the MLS copy: no captions, the staged label kept
     branding: Optional[Branding] = None   # title card, end card, corner logo (render/overlays.py)
+    motion_blur: Optional[MotionBlur] = None   # client review 2026-11-20, item 7 (render/frames.py)
     model_config = ConfigDict(extra='ignore')
 
 class Size(BaseModel):
@@ -475,6 +486,11 @@ def check_music_segments(plan: Plan):
     if not 0 <= m.crossfade_s <= 0.2 or total < m.end_s - 0.05:
         raise ValueError("invalid_plan: music segments shorter than the tour, or crossfade out of range")
 
+def check_motion_blur(plan: Plan):
+    mb = plan.output.motion_blur
+    if mb is not None and not (0 < mb.shutter <= 1 and 0.5 <= mb.min_px_f <= 20 and 2 <= mb.max_samples <= 8):
+        raise ValueError("invalid_plan: output.motion_blur out of range")
+
 def check_easing(plan: Plan):
     valid_easings = {"linear", "ease_in", "ease_out", "ease_in_out"}
     for shot in plan.shots:
@@ -582,6 +598,7 @@ def parse_plan(data: dict) -> Plan:
     check_camera_type(plan)
     check_bounds(plan)
     check_easing(plan)
+    check_motion_blur(plan)
     check_transitions(plan)
     check_time_warps(plan)
     check_punches(plan)

@@ -140,6 +140,18 @@ VISIBLE_MOTION_PX = 2.0         # = tools/quality/perceptual_quality LIMITS["mot
 def visible_motion_px(ow: int, oh: int) -> float:
     """The readability floor for this output (reviewed at 1080p; scales with the short side)."""
     return VISIBLE_MOTION_PX * min(ow, oh) / 1080
+
+
+# motion blur (client review 2026-11-20, item 7; plan output.motion_blur): min_px_f is reviewed at
+# 1080p and scales with the output diagonal; samples are spaced at most BLUR_SAMPLE_PX apart
+BLUR_REF_DIAG = math.hypot(1920, 1080)
+BLUR_SAMPLE_PX = 0.5
+BLUR_MIN_SAMPLES = 3
+
+
+def blur_offsets(n: int, shutter: float) -> list[float]:
+    """Fixed sub-frame instants (frames, about the frame's own instant) of an n-sample shutter."""
+    return [shutter * ((i + 0.5) / n - 0.5) for i in range(n)]
 MOTION_PROBE_FRAMES = 9
 MOTION_PROBE_STEP = 6           # output px between probe points (exact field at each point)
 
@@ -202,6 +214,11 @@ class ShotWarp:
         self.rotate = cam.projection == "rotate"
         self.hfov = cam.hfov_deg if cam.hfov_deg is not None else DEFAULT_HFOV_DEG
         self.frames = camera_frames(shot, n, self.ow, self.oh, self.fps)
+        from tour_worker.contract.plan import compound_path  # (avoids an import cycle)
+        self._cam = cam
+        self._path = (compound_path(shot, self.ow, self.oh) if cam.type == "compound"
+                      else KeyframePath([k.model_dump() for k in cam.keyframes]) if cam.type == "keyframe_path"
+                      else None)
         self.regions, region_warnings = load_regions(shot, images, sw, sh, self.src)
         # the sky (sky_drift): a layer under everything - each frame's photo is the moving sky
         # composited in first; a sky that cannot be prepared stays still (a warning, never a failure)
@@ -230,6 +247,12 @@ class ShotWarp:
                      if self.regions else None)
         self.align = field_align(self.regions, grid_scale((self.oh, self.ow)))
         self.probe_ys = np.unique(np.r_[np.arange(0, self.oh, ROI_PROBE), self.oh - 1])
+        # motion blur: whether each frame blurs is decided once, before the first frame (blur_plan)
+        self.blur = getattr(plan.output, "motion_blur", None)
+        self.blur_n = None              # per frame: shutter samples (1 = drawn as without blur)
+        self.blur_extent = None         # per frame: on-screen travel while the shutter is open, px
+        if self.blur is not None and self._path is not None:
+            self.blur_n = self.blur_plan(warnings)
         self.probe_xs = np.unique(np.r_[np.arange(0, self.ow, ROI_PROBE), self.ow - 1])
 
     def homography(self, f: int) -> np.ndarray:
@@ -259,10 +282,85 @@ class ShotWarp:
         c1 = min(self.ow - 1, -(-(max(b[3] for b in boxes) - 1) // a) * a) + 1
         return r0, r1, c0, c1
 
-    def frame(self, f: int, step: int | None = None) -> np.ndarray:
-        """The camera warp of the whole frame, then the window with moving regions redrawn
-        through the displaced maps (warpPerspective and remap agree within 1 level)."""
+    def _homography_of(self, state) -> np.ndarray:
+        (cx, cy, z), r = state
+        return np.array(rotate_homography(cx, cy, z, self.sw, self.sh, self.ow, self.oh, self.hfov) if self.rotate
+                        else crop_roll_homography(cx, cy, z, r, self.sw, self.sh, self.ow, self.oh))
+
+    def state_at(self, fr: float):
+        """The camera ((cx, cy, zoom), roll) at fractional frame fr - the formulas of camera_frames
+        (which holds whole frames): with path_s the move at its planned pace, else the plan's timing."""
+        fr = min(float(self.n - 1), max(0.0, fr))
+        cam, path = self._cam, self._path
+        ps = getattr(cam, "path_s", None)
+        if ps and cam.type == "keyframe_path":
+            from tour_worker.render.camera_path import ramp_profile
+            u = ramp_profile(getattr(cam.easing, "value", cam.easing), min(1.0, fr / self.fps / ps))
+            (cx, cy, z), roll = path.at_progress(u), path.roll_at_progress(u)
+        else:
+            t = time_warp_at(getattr(cam, "time_warp", None), fr / max(1, self.n - 1))
+            cx, cy, z = path.at(t)
+            roll = path.roll_deg_at(t) if cam.type == "keyframe_path" else 0.0
+        if getattr(cam, "punches", None):
+            z *= punch_scale(cam.punches, fr / self.fps)
+        return (cx, cy, z), roll
+
+    def blur_extent_px(self, f: int) -> float:
+        """How far the picture travels on screen while the shutter is open around frame f: RMS
+        over a 3x3 grid of screen points, output px."""
+        half = self.blur.shutter / 2
         m = self.homography(f)
+        a = np.linalg.inv(self._homography_of(self.state_at(f - half)))
+        b = np.linalg.inv(self._homography_of(self.state_at(f + half)))
+        xs, ys = np.meshgrid(np.linspace(0, self.ow, 3), np.linspace(0, self.oh, 3))
+        p = np.stack([xs.ravel(), ys.ravel(), np.ones(9)])
+        q = m @ p                                           # the source points on screen at f
+        pa, pb = a @ q, b @ q
+        d = pa[:2] / pa[2] - pb[:2] / pb[2]
+        return float(np.sqrt((d * d).sum(axis=0).mean()))
+
+    def blur_plan(self, warnings: list | None = None) -> list[int] | None:
+        """Shutter samples per frame (1: drawn exactly as without blur), or None when the shot cannot
+        blur (the reason is a warning; the shot renders as without blur)."""
+        try:
+            k = math.hypot(self.ow, self.oh) / BLUR_REF_DIAG
+            floor = self.blur.min_px_f * k * self.blur.shutter      # extent at the threshold speed
+            out, self.blur_extent = [], []
+            for f in range(self.n):
+                e = self.blur_extent_px(f)
+                self.blur_extent.append(e)
+                out.append(1 if e <= floor else
+                           int(min(self.blur.max_samples, max(BLUR_MIN_SAMPLES, math.ceil(e / BLUR_SAMPLE_PX) + 1))))
+            if max(out) > 1:                                # pre-flight: draw the fastest frame once
+                f = int(np.argmax(out))
+                self._blurred(f, out[f])
+            return out
+        except Exception as e:  # noqa: BLE001 - blur is an addition: without it the shot is as before
+            if warnings is not None:
+                warnings.append(f"enhancement_dropped:{self.shot.shot_id}:motion_blur:error_{type(e).__name__}")
+            return None
+
+    def frame(self, f: int, step: int | None = None) -> np.ndarray:
+        """Frame f: the plain frame (_draw), or with motion blur the mean of its shutter samples."""
+        if self.blur_n is not None and self.blur_n[f] > 1 and step is None:
+            try:
+                return self._blurred(f, self.blur_n[f])
+            except Exception:  # noqa: BLE001 - this process draws the rest of the shot unblurred
+                self.blur_n = None
+        return self._draw(self.homography(f), f, step)
+
+    def _blurred(self, f: int, samples: int) -> np.ndarray:
+        """Mean of `samples` warps at fixed instants across the shutter; the motion regions and the
+        sky keep frame f's own time (their motion within one shutter is far below a pixel)."""
+        acc = None
+        for o in blur_offsets(samples, self.blur.shutter):
+            img = self._draw(self._homography_of(self.state_at(f + o)), f).astype(np.float32)
+            acc = img if acc is None else acc + img
+        return (acc / samples + 0.5).astype(np.uint8)
+
+    def _draw(self, m: np.ndarray, f: int, step: int | None = None) -> np.ndarray:
+        """The camera warp m of the whole frame, then the window with moving regions (at frame f's
+        time) redrawn through the displaced maps (warpPerspective and remap agree within 1 level)."""
         src = self.sky.frame(f / self.fps) if self.sky is not None else self.src
         frame = cv2.warpPerspective(src, m, (self.ow, self.oh), flags=cv2.WARP_INVERSE_MAP | cv2.INTER_LINEAR,
                                     borderMode=cv2.BORDER_REPLICATE)

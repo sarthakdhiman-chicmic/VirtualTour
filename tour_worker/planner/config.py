@@ -29,6 +29,14 @@ class PlannerConfig(BaseModel):
     # one speed band per tour (item 4, planner/speed_band.py): moves scaled to the pacing's target
     # speed and matched within 25% across every cut (continuous cuts only)
     speed_band: bool = True
+    # motion blur (client review 2026-11-20, item 7: "on by default, roughly a 180-degree shutter"): photo
+    # shots' frames moving over motion_blur_min_px_f px/frame at 1080p (scaled with the output) are the
+    # mean of a few warps across the shutter. 3 px/frame = a 1.5 px smear, below which blur cannot be
+    # seen (Turkey mix 2026-10-22: 2.0 blurred 51% of frames for ~1 px smears). 3D shots: not yet
+    motion_blur: bool = True
+    motion_blur_shutter: float = 0.5
+    motion_blur_min_px_f: float = 3.0
+    motion_blur_max_samples: int = 5
     # set by the planner for the sync (planner.cut_windows): per shot, the earliest cut where its move
     # still moves (None: no limit); not a setting
     cut_windows: list | None = None

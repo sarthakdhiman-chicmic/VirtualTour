@@ -18,6 +18,7 @@ every copy; else a silent track (players and platforms expect one).
 """
 from __future__ import annotations
 
+import math
 import os
 import subprocess
 import sys
@@ -32,11 +33,36 @@ from tour_worker.errors import WorkerError
 from tour_worker.io.images import clip_dest
 from tour_worker.render.encode import (CHUNK_GOPS, CRF, GOP_S, PRESET, VBV_INIT_CHUNK, _run,
                                        hevc_args, video_profile)
-from tour_worker.render.frames import ShotWarp, render_workers
+from tour_worker.render.frames import BLUR_REF_DIAG, ShotWarp, render_workers
 from tour_worker.render.overlays import Overlays
 from tour_worker.render.timeline import compute_timeline
 
 AUDIO_BITRATE = "192k"
+# motion blur's extra draws (shutter samples beyond the first) may add at most this share of the
+# tour's frames: above it every blurred frame uses BLUR_CAPPED_SAMPLES, and if that is still too
+# many, only the fastest frames are blurred (the speed threshold rises)
+BLUR_EXTRA_SHARE = 0.25
+BLUR_CAPPED_SAMPLES = 3
+
+
+def blur_budget(sws, n: int, mb, warnings: list | None):
+    """The plan's motion_blur, adjusted so blur adds at most BLUR_EXTRA_SHARE x n extra draws;
+    deterministic (it depends on the plan only), so every render process draws the same frames."""
+    budget = BLUR_EXTRA_SHARE * max(1, n)
+    extents = sorted((e for sw in sws if sw.blur_n is not None
+                      for e, k in zip(sw.blur_extent, sw.blur_n) if k > 1), reverse=True)
+    extra = sum(k - 1 for sw in sws if sw.blur_n is not None for k in sw.blur_n)
+    if extra <= budget:
+        return mb
+    update = {"max_samples": min(mb.max_samples, BLUR_CAPPED_SAMPLES)}
+    keep = int(budget // (update["max_samples"] - 1))
+    if keep < len(extents):
+        # the fastest `keep` frames: the threshold moves to just above the next one's travel
+        k = math.hypot(sws[0].ow, sws[0].oh) / BLUR_REF_DIAG
+        update["min_px_f"] = round(extents[keep] / (k * mb.shutter) + 1e-3, 3)
+    if warnings is not None:
+        warnings.append("motion_blur_budget:" + ",".join(f"{a}={b}" for a, b in sorted(update.items())))
+    return mb.model_copy(update=update)
 _STATE: dict = {}
 
 
@@ -382,10 +408,22 @@ def render_direct(plan, workdir: str, warnings: list | None = None, music_path: 
         raise WorkerError("scene_render_failed", "a 3D plan needs its scene renderer")
     if getattr(splat, "stage_s", None) is not None:    # the renderer is cached across jobs: this job's stages only
         splat.stage_s.clear()
-    for shot, t in zip(plan.shots, tl):                       # validate early; collect warnings once
-        if shot.camera.type not in ("bezier_path", "video_clip"):
-            ShotWarp(plan, shot, t["render_frames"], images, warnings)
+    sws = [ShotWarp(plan, shot, t["render_frames"], images, warnings)   # validate early; warnings once
+           for shot, t in zip(plan.shots, tl) if shot.camera.type not in ("bezier_path", "video_clip")]
     n = total_frames(plan)
+    if getattr(plan.output, "motion_blur", None) is not None:
+        if photo_device is not None:          # the GPU photo path draws no blur (yet): the tour as without it
+            warnings is not None and warnings.append("enhancement_dropped:tour:motion_blur:gpu_photo_path")
+            plan.output.motion_blur = None
+        elif sws:
+            mb = plan.output.motion_blur
+            plan.output.motion_blur = blur_budget(sws, n, mb, warnings)
+            if timings is not None:
+                k = math.hypot(plan.output.width, plan.output.height) / BLUR_REF_DIAG
+                floor = plan.output.motion_blur.min_px_f * k * mb.shutter
+                timings.info["motion_blur_frames"] = sum(e > floor for sw in sws if sw.blur_n is not None
+                                                         for e in sw.blur_extent)
+    del sws
     step = CHUNK_GOPS * GOP_S * plan.output.fps
     # photo tours: worker processes, each drawing and encoding its chunks. 3D tours: the scene lives on
     # the one GPU renderer in this process, so chunks are encoded by threads here instead - one x264
