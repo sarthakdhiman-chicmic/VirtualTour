@@ -366,6 +366,7 @@ The HTTP service (`python -m tour_worker.service`) adds these; `handler.py` igno
 | `WORKER_API_KEY` | (unset) | the key callers send as `Authorization: Bearer <key>` on every endpoint but `/health`. Unset: the service refuses to start, unless `WORKER_ALLOW_NO_AUTH=1`. |
 | `WORKER_ALLOW_NO_AUTH` | `0` | `1`: run without a key (local development only) |
 | `JOB_CONCURRENCY` | `1` | jobs run at once. Keep 1 for renders: one render already uses every CPU it is given (`PREWARP_WORKERS`). |
+| `LIGHT_JOB_CONCURRENCY` | `1` | `tour_segment` / `tour_plan` jobs run on threads of their own, beside the renders, so a quick job never waits behind a render. `0`: one queue for everything. |
 | `JOBS_DIR` | (unset) | folder for job records (one JSON per job) so statuses survive a restart. Unset: memory only. The images set `/var/lib/tour-worker/jobs`. |
 | `JOB_TTL_S` | `86400` | seconds a finished job's status is kept; then `/status` is 404 |
 | `RUNSYNC_TIMEOUT_S` | `300` | seconds `POST /runsync` waits before it returns the job's current status |

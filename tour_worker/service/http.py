@@ -75,7 +75,7 @@ def create_app(settings: Settings | None = None, store: JobStore | None = None) 
     if not settings.api_key:
         log.warning("WORKER_ALLOW_NO_AUTH=1: the service accepts requests without a key")
     store = store or JobStore(concurrency=settings.job_concurrency, jobs_dir=settings.jobs_dir,
-                              ttl_s=settings.job_ttl_s)
+                              ttl_s=settings.job_ttl_s, light_concurrency=settings.light_job_concurrency)
     expected = f"Bearer {settings.api_key}".encode() if settings.api_key else None
 
     @asynccontextmanager
@@ -84,8 +84,9 @@ def create_app(settings: Settings | None = None, store: JobStore | None = None) 
         if os.environ.get("WORKER_WARMUP") == "1":     # the pod: load the heavy libraries now (warmup.py)
             from tour_worker import warmup
             warmup.start()
-        log.info("tour-worker %s: %d job(s) at once, records %s, TTL %ss", package_version(),
-                 store.concurrency, settings.jobs_dir or "in memory", settings.job_ttl_s)
+        log.info("tour-worker %s: %d job(s) at once (+%d segment / plan beside them), records %s, TTL %ss",
+                 package_version(), store.concurrency, store.light_concurrency, settings.jobs_dir or "in memory",
+                 settings.job_ttl_s)
         yield
         store.shutdown(wait=False)
 

@@ -212,3 +212,35 @@ def test_the_webhook_is_retried_and_never_fails_the_job(hook_server, stores):
     store = stores(runner=lambda inp: RENDER_OK)
     job = store.submit({}, webhook="http://127.0.0.1:9/nothing")
     assert store.wait(job.id, 5)["status"] == COMPLETED
+
+
+def test_segment_and_plan_jobs_do_not_wait_behind_a_render(stores):
+    """2026-11-23: a tour's 0.1 s segmentation waited 3 min 48 s behind another tour's render. With a
+    light lane, tour_segment / tour_plan run beside the heavy jobs; without one (0) they queue as before."""
+    gate = threading.Event()
+
+    def runner(inp):
+        if inp["job_type"] == "tour_render":
+            gate.wait(5)
+        return RENDER_OK
+    s = stores(runner=runner, concurrency=1, light_concurrency=1)
+    render = s.submit({"job_type": "tour_render", "job_id": "r"})
+    seg = s.submit({"job_type": "tour_segment", "job_id": "s"})
+    plan = s.submit({"job_type": "tour_plan", "job_id": "p"})
+    assert _wait_for(lambda: s.status(seg.id)["status"] == COMPLETED and s.status(plan.id)["status"] == COMPLETED)
+    assert s.status(render.id)["status"] == IN_PROGRESS
+    gate.set()
+    assert _wait_for(lambda: s.status(render.id)["status"] == COMPLETED)
+
+    gate2 = threading.Event()
+
+    def runner2(inp):
+        if inp["job_type"] == "tour_render":
+            gate2.wait(5)
+        return RENDER_OK
+    one = stores(runner=runner2, concurrency=1)                       # one queue (light_concurrency 0)
+    r2 = one.submit({"job_type": "tour_render", "job_id": "r"})
+    s2 = one.submit({"job_type": "tour_segment", "job_id": "s"})
+    assert not _wait_for(lambda: one.status(s2.id)["status"] == COMPLETED, timeout=0.3)
+    gate2.set()
+    assert _wait_for(lambda: one.status(s2.id)["status"] == COMPLETED and one.status(r2.id)["status"] == COMPLETED)

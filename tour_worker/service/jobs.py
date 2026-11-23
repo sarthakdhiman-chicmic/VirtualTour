@@ -100,10 +100,16 @@ def split_result(result: Any) -> tuple[str, Any, dict | None]:
     return COMPLETED, output, None
 
 
+# quick jobs (seconds to a minute) with a lane of their own, so they never wait behind a render
+# (2026-11-23: a tour's 0.1 s segmentation waited 3 min 48 s behind another tour's render). A photo
+# render is CPU work, segmentation GPU, a plan a few seconds of CPU: they barely compete.
+LIGHT_JOBS = ("tour_segment", "tour_plan")
+
+
 class JobStore:
     def __init__(self, runner: Callable[[dict], dict] | None = None, concurrency: int = 1,
                  jobs_dir: str | None = None, ttl_s: float = 86400.0,
-                 clock: Callable[[], float] = time.time):
+                 clock: Callable[[], float] = time.time, light_concurrency: int = 0):
         self.runner = runner or _default_runner
         self.concurrency = max(1, int(concurrency))
         self.jobs_dir = jobs_dir
@@ -112,6 +118,10 @@ class JobStore:
         self._jobs: dict[str, Job] = {}
         self._cond = threading.Condition()
         self._pool = ThreadPoolExecutor(self.concurrency, thread_name_prefix="tour-job")
+        # light_concurrency > 0: LIGHT_JOBS run on their own threads, beside the heavy jobs
+        self.light_concurrency = max(0, int(light_concurrency))
+        self._light_pool = (ThreadPoolExecutor(self.light_concurrency, thread_name_prefix="tour-light-job")
+                            if self.light_concurrency else None)
         self._stop = threading.Event()
         self._janitor: threading.Thread | None = None
         if jobs_dir:
@@ -176,6 +186,8 @@ class JobStore:
     def shutdown(self, wait: bool = False) -> None:
         self._stop.set()
         self._pool.shutdown(wait=wait, cancel_futures=True)
+        if self._light_pool is not None:
+            self._light_pool.shutdown(wait=wait, cancel_futures=True)
 
     # ---- jobs --------------------------------------------------------------------------------
 
@@ -188,7 +200,8 @@ class JobStore:
             self._persist(job)
         log.info("job %s queued: %s (caller job_id %s)", job.id, job.job_type,
                  redact_text(str(job_input.get("job_id"))) if isinstance(job_input, dict) else None)
-        self._pool.submit(self._execute, job.id)
+        lane = self._light_pool if (self._light_pool is not None and job.job_type in LIGHT_JOBS) else self._pool
+        lane.submit(self._execute, job.id)
         return job
 
     def get(self, job_id: str) -> Job | None:

@@ -65,6 +65,8 @@ class Settings:
     api_key: str | None = field(default=None, repr=False)     # never in a repr / log
     allow_no_auth: bool = False
     job_concurrency: int = 1
+    # tour_segment / tour_plan on threads of their own, beside the renders (service/jobs.LIGHT_JOBS); 0: one queue
+    light_job_concurrency: int = 1
     jobs_dir: str | None = None
     job_ttl_s: float = 86400.0
     runsync_timeout_s: float = 300.0
@@ -99,6 +101,7 @@ class Settings:
             api_key=env.get("WORKER_API_KEY") or None,
             allow_no_auth=env.get("WORKER_ALLOW_NO_AUTH", "") == "1",
             job_concurrency=max(1, int(env.get("JOB_CONCURRENCY") or 1)),
+            light_job_concurrency=max(0, int(env.get("LIGHT_JOB_CONCURRENCY") or 1)),
             jobs_dir=env.get("JOBS_DIR") or None,
             job_ttl_s=max(0.0, float(env.get("JOB_TTL_S") or 86400)),
             runsync_timeout_s=max(0.0, float(env.get("RUNSYNC_TIMEOUT_S") or 300)),
