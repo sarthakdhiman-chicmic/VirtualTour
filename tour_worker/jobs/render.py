@@ -115,7 +115,7 @@ def run_tour(request: dict, storage, workdir: str, settings: Settings | None = N
         from tour_worker.render import continuity
         cuts = continuity.report(plan)
         broken = continuity.violations(cuts)
-        if broken and settings.continuity_enforce:
+        if broken and getattr(settings, "continuity_enforce", False):   # (a service started before this setting existed)
             return failure("cuts_out_of_limits", "cuts_out_of_limits: " + ", ".join(broken[:20]))
         warnings_cuts = broken
 
