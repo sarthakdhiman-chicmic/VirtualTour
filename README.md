@@ -112,7 +112,7 @@ Result:
     The name writes on left to right over 0.9 s. It holds for at most 3.6 s, or until 0.35 s
     before the room ends, then fades out over 0.5 s. A room too short to write its name out gets
     no label.
-  - **`font`:** `sacramento` (default), `mr_dafoe`, `pacifico` or `kaushan_script`. The fonts ship
+  - **`font`:** `sacramento` (default), `mr_dafoe`, `pacifico`, `kaushan_script` or `playfair_display`. The fonts ship
     in `tour_worker/render/fonts` (SIL OFL, `LICENSES.md`).
   - **`scale`:** 0.6–1.0 of the reviewed maximum size; the default is 0.8. Sizes are set for a
     1080 px short side and scale with the output.

@@ -41,6 +41,7 @@ be sold on their own.
 - **Mr Dafoe:** Alejandro Paul (Sudtipos).
 - **Pacifico:** The Pacifico Project Authors.
 - **Kaushan Script:** Pablo Impallari, Igino Marini.
+- **Playfair Display:** The Playfair Display Project Authors (Claus Eggers Sørensen).
 - **Lato** (the room index, the "Virtually Staged" label and the title / end card text): Łukasz
   Dziedzic (tyPoland).
 

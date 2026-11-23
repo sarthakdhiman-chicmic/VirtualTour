@@ -8,7 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 # room labels (overlays, SOW 3.2.1a; user 2026-11-05): the room's name in a script font, drawn by
 # tour_worker/render/overlays.py. The fonts ship in tour_worker/render/fonts (SIL OFL).
-LABEL_FONTS = ("sacramento", "mr_dafoe", "pacifico", "kaushan_script")
+LABEL_FONTS = ("sacramento", "mr_dafoe", "pacifico", "kaushan_script", "playfair_display")
 LABEL_PLACEMENTS = ("bottom_left", "bottom_center", "bottom_right", "top_left", "top_center", "top_right")
 LABEL_SCALE_RANGE = (0.6, 1.0)          # x the reviewed maximum size; the user's default is 0.8
 MAX_CAPTION_CHARS = 40

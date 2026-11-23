@@ -38,7 +38,10 @@ FONT_DIR = os.path.join(os.path.dirname(__file__), "fonts")
 # the script fonts, and each one's size at scale 1.0 for a 1080 px short side: matched by eye so
 # the names read the same size in every font (Sacramento's 76 px is the reviewed maximum)
 SCRIPT_FONTS = {"sacramento": ("Sacramento-Regular.ttf", 76), "mr_dafoe": ("MrDafoe-Regular.ttf", 69),
-                "pacifico": ("Pacifico-Regular.ttf", 48), "kaushan_script": ("KaushanScript-Regular.ttf", 52)}
+                "pacifico": ("Pacifico-Regular.ttf", 48), "kaushan_script": ("KaushanScript-Regular.ttf", 52),
+                # an upright serif (2026-11-23, the AI Studio's choice): the variable font at its default
+                # Regular weight, sized so a room name runs as wide as in Pacifico / Kaushan Script
+                "playfair_display": ("PlayfairDisplay-Regular.ttf", 48)}
 INDEX_FONT, INDEX_PX = "Lato-Regular.ttf", 26
 STAGED_FONT, STAGED_PX = "Lato-Semibold.ttf", 20
 STAGED_TEXT = "VIRTUALLY STAGED"
