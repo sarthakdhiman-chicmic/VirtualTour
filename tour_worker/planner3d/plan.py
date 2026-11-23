@@ -264,6 +264,7 @@ def plan_tour_3d(model, scene: dict, rooms: list[dict], listing_id: str, cfg: Pl
         for s_ in selected:
             s_.final_duration = round(s_.final_duration * reach + handle, 3)
     mover = RoomMoves(space, Occlusion(model, space) if check_occlusion else None)
+    mover.continuous = continuous
     mover.tour_shots = len(selected)               # the moving-in cap: a third of the tour's shots
     last_room = selected[-1].room_key if selected else None
     moves, plan_rows, prev = [], [], None
@@ -400,12 +401,12 @@ def plan_tour_3d(model, scene: dict, rooms: list[dict], listing_id: str, cfg: Pl
     for _, pair in sorted(extras, key=lambda e: e[0]):
         if sum(s_.final_duration - handle for s_, _ in moves) <= cap:
             break
-        moves = [m for m in moves if m is not pair]
+        moves = [m for m in moves if m[1] is not pair[1]]   # (the same move: the tuples differ)
         warnings.append(f"coverage_shot_dropped_for_length:{pair[0].room_key}")
     for pair in exits[::-1]:                      # then the flights on, from the tour's end
         if sum(s_.final_duration - handle for s_, _ in moves) <= cap:
             break
-        moves = [m for m in moves if m is not pair]
+        moves = [m for m in moves if m[1] is not pair[1]]   # (the same move: the tuples differ)
         warnings.append(f"exit_dropped_for_length:{pair[0].room_key}")
     filmed = {s.room_key for s, _ in moves}
     warnings += [f"room_skipped:{k}" for k in sorted({s.room_key for s in selected} - filmed)]
@@ -448,6 +449,10 @@ def plan_tour_3d(model, scene: dict, rooms: list[dict], listing_id: str, cfg: Pl
         from tour_worker.planner.planner import set_continuous_easing
         shots[-1].camera.path_s = round(shots[-1].duration_s, 3)
         set_continuous_easing(shots)
+        if getattr(c3, "speed_band", False):
+            # one speed band, matched within 25% at every cut (item 4): 3D moves are only slowed
+            from tour_worker.planner.speed_band import apply_speed_band_3d
+            warnings += apply_speed_band_3d(shots, c3.pacing, cfg.fps, scene.get("up_axis"))
 
     # transitions: every interior shot change is a cut - the camera carries the move between parts
     # of the home (client review 2026-11-20, item 8); shots are built with cuts

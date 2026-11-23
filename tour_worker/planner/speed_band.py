@@ -206,3 +206,87 @@ def apply_speed_band(shots, pacing: str | None, out_w: int, out_h: int, fps: flo
         if 1e-6 < v < target / SPEED_RATIO - 1e-6:
             warnings.append(f"speed_band_short:{shots[i].shot_id}:{v:.2f}")
     return warnings
+
+
+# ---- 3D shots (bezier_path) -----------------------------------------------------------------
+# A 3D move runs where the room lets it: it can be slowed but not safely sped up (a longer flight
+# meets walls the planner never checked). So the band only slows: a shot faster than the target, or
+# than PLAN_RATIO x its neighbour across a cut, has the START of its flight trimmed (the curve split
+# exactly, de Casteljau) - its end framing kept, the same path_s, so it covers less ground.
+
+def _scene_ends(cam, cut_s: float, fps: float, up) -> tuple[float, float]:
+    from tour_worker.render.continuity import _scene_motion
+    from tour_worker.scene.camera import BezierCameraPath
+    path = BezierCameraPath([s.model_dump() for s in cam.segments], cam.hfov_deg,
+                            easing=getattr(cam.easing, "value", cam.easing))
+    n = max(2, int(round(cut_s * fps)))
+    m = max(1, min(int(round(MEASURE_S * fps)), (n - 1) // 2))
+    a = _scene_motion(path, n, 0, m, fps, up, cam.path_s).speed
+    b = _scene_motion(path, n, n - 1 - m, n - 1, fps, up, cam.path_s).speed
+    return a, b
+
+
+def _split(p, u: float):
+    """The right part (from u) of a cubic Bezier's control points p (4, 3)."""
+    import numpy as np
+    p = np.asarray(p, float)
+    a, b = p[:-1] * (1 - u) + p[1:] * u, None
+    b = a[:-1] * (1 - u) + a[1:] * u
+    c = b[0] * (1 - u) + b[1] * u
+    return np.array([c, b[1], a[2], p[3]])
+
+
+def trim_start(cam, keep: float):
+    """The camera with only the last `keep` share (0-1) of its flight (by the path's arc length)."""
+    from tour_worker.scene.camera import BezierCameraPath
+    path = BezierCameraPath([s.model_dump() for s in cam.segments], cam.hfov_deg)
+    k, u = path._locate(1.0 - keep)
+    segs = [s.model_dump() for s in cam.segments]
+    first = {"eye": _split(segs[k]["eye"], u).round(5).tolist(), "target": _split(segs[k]["target"], u).round(5).tolist()}
+    out = [first] + segs[k + 1:]
+    seg_cls = type(cam.segments[0])
+    return cam.model_copy(update={"segments": [seg_cls(**s) for s in out]})
+
+
+def apply_speed_band_3d(shots, pacing: str | None, fps: float = 30.0, up=None) -> list[str]:
+    """Slow the 3D shots into the band and match them within PLAN_RATIO across every cut (only ever
+    slower - module note above). shots: in tour order, duration_s where each is cut, path_s set."""
+    up = tuple(up) if up else (0.0, 0.0, 1.0)
+    target = target_speed(pacing)
+    idx = [i for i, s in enumerate(shots) if s.camera.type == "bezier_path" and getattr(s.camera, "path_s", None)
+           and s.camera.segments]
+    if not idx:
+        return []
+    for _ in range(PASSES):
+        ends = {i: _scene_ends(shots[i].camera, shots[i].duration_s, fps, up) for i in idx}
+        k = {}
+        for i in idx:
+            rep = _rep(shots[i].camera, ends[i])
+            k[i] = min(1.0, target / rep) if rep > 1e-6 else 1.0
+        for _ in range(4 * len(idx)):
+            changed = False
+            for a, b in zip(idx, idx[1:]):
+                if b != a + 1:
+                    continue
+                out_v, in_v = ends[a][1] * k[a], ends[b][0] * k[b]
+                if min(out_v, in_v) < 1e-6:
+                    continue
+                if out_v > PLAN_RATIO * in_v + 1e-9:
+                    k[a] *= PLAN_RATIO * in_v / out_v
+                    changed = True
+                elif in_v > PLAN_RATIO * out_v + 1e-9:
+                    k[b] *= PLAN_RATIO * out_v / in_v
+                    changed = True
+            if not changed:
+                break
+        moved = False
+        for i in idx:
+            if k[i] < 1.0 - 1e-3:
+                shots[i].camera = trim_start(shots[i].camera, max(k[i], MIN_KEEP))
+                moved = True
+        if not moved:
+            break
+    return []
+
+
+MIN_KEEP = 0.5             # a 3D move keeps at least half its flight (a walk-in trimmed to a fifth only turns)

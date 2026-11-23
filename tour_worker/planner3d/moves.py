@@ -50,7 +50,8 @@ HFOV = 78.0                   # one field of view for the whole tour
 MAX_TURN_DPS, MAX_MOVE_MPS = 10.0, 0.8
 # moves are planned to this share of the limits: the beat sync only lengthens room and hero shots
 # (planner/lengths.SYNC_BOUNDS), but may shorten a close-up to 0.7x
-PRE_SYNC_SHARE = {"room": 0.9, "hero": 0.9, "detail": 0.65}   # 0.9: the planner's 91-sample check vs per frame
+PRE_SYNC_SHARE = {"room": 0.9, "hero": 0.9, "detail": 0.65}
+PEAK_STEADY = 1.1           # continuous cuts: a steady move's peak over its mean speed   # 0.9: the planner's 91-sample check vs per frame
 PITCH_LADDER = (10.0, 12.0)     # (13 / 16 read as looking at the floor - Home Scan v11)
 JUMP_ANGLE, JUMP_DIST = 30.0, 1.5
 RMIN_LADDER = (0.28, 0.22)    # camera body clearance, a little less in small rooms
@@ -154,6 +155,10 @@ ROOM_REPEAT_W = 0.5           # score lost repeating a kind the room already had
 SAME_KIND_W = 1.0             # the previous shot's kind again            (2D: -2.5)
 TWO_BACK_W = 0.4              # the kind of two shots back                (2D: -1.0)
 SAME_SIDE_W = 0.8             # sideways the same way as the previous shot (2D: -2.0, sides alternate)
+# continuous cuts (client review 2026-11-20, item 5; RoomMoves.cut_cost): replaces SAME_SIDE_W
+CUT_TURN_W = 2.5              # entering at a lateral turn over 45 deg from the previous exit
+CUT_AXIAL_W = 2.5             # entering backward after a forward exit (or the reverse)
+CUT_SAME_W = 0.5              # carrying the previous shot's move on
 USED_DIR_W = 0.4              # per earlier use of the kind, same way      (2D: -1.0)
 OVERUSE_W = 0.6               # per use of a kind past its second          (2D: -1.5)
 DOLLY_KINDS = ("push", "pull", "rise", "descend", "enter")   # the moves led by moving in / out (2D: zoom-led)
@@ -233,6 +238,36 @@ DETAIL_DIST = (0.9, 1.15, 1.4)
 DETAIL_PUSH = 0.25
 DETAIL_PITCH_MAX = 30.0
 DETAIL_NOT_PREV = 0.9       # m: a close-up's object this near the previous shot's last aim is what it already showed
+
+
+def move_motion(m, end: bool):
+    """A move's on-screen motion leaving (end) or entering its shot, at a steady pace, in the units
+    of render/continuity.py (only its direction is compared): the eye's travel seen at
+    REF_DEPTH_M and the view's turn over the field of view, over the first / last few samples."""
+    from tour_worker.render.continuity import REF_DEPTH_M, Motion
+    eye, tgt = m.eye3, np.asarray(m.tgt, float)
+    k = min(4, len(eye) - 1)
+    i0, i1 = (len(eye) - 1 - k, len(eye) - 1) if end else (0, k)
+    up = np.array([0.0, 0.0, 1.0])
+    d0 = (tgt[i0] - eye[i0]) / max(np.linalg.norm(tgt[i0] - eye[i0]), 1e-9)
+    d1 = (tgt[i1] - eye[i1]) / max(np.linalg.norm(tgt[i1] - eye[i1]), 1e-9)
+    fwd = (d0 + d1) / max(np.linalg.norm(d0 + d1), 1e-9)
+    right = np.cross(fwd, up)
+    right /= max(np.linalg.norm(right), 1e-9)
+    cam_up = np.cross(right, fwd)
+    v, w = eye[i1] - eye[i0], d1 - d0
+    hf = math.radians(HFOV)
+    half = REF_DEPTH_M * math.tan(hf / 2)
+    return Motion(float(v @ right) / (2 * half) + float(w @ right) / hf,
+                  float(v @ cam_up) / (2 * half) + float(w @ cam_up) / hf,
+                  float(v @ fwd) / REF_DEPTH_M * 0.5)
+
+
+def _unit(mo):
+    """The direction only, at a speed of 10 (the still threshold never applies)."""
+    from tour_worker.render.continuity import Motion
+    sp = mo.speed
+    return mo if sp < 1e-12 else Motion(10 * mo.x / sp, 10 * mo.y / sp, 10 * mo.f / sp)
 
 
 @dataclass
@@ -743,6 +778,15 @@ class RoomMoves:
         if capped:                                 # (a further shot is dropped rather than repeat one)
             c_ids = {id(m) for m in capped}
             tiers = [[m for m in t if id(m) not in c_ids] for t in tiers] + ([capped] if covered is None else [])
+        if self.continuous:
+            # continuous cuts (client review 2026-11-20, items 5-6): a move that would turn the camera
+            # more than 45 deg, or reverse it, across the cut from the previous shot only when no
+            # other move will do - whatever its tier (after an exit the next room is entered on the
+            # same heading)
+            breaks = [m for t in tiers for m in t if (m.why.get("cut") or {}).get("cost", 0.0) > 0]
+            if breaks:
+                b_ids = {id(m) for m in breaks}
+                tiers = [[m for m in t if id(m) not in b_ids] for t in tiers] + [breaks]
         tiers = [t for t in tiers if t]
         stats["to_render_checks"] += _n(tiers)
         if not tiers:
@@ -1037,7 +1081,7 @@ class RoomMoves:
                         continue
                 done.add(id(m))
                 if "turn_dps" not in m.why:
-                    turn, move = trial_speeds(m.eye, m.tgt, dur, m.zs, m.easing)
+                    turn, move = trial_speeds(m.eye, m.tgt, dur, m.zs, "linear" if self.continuous else m.easing)
                     m.why.update(turn_dps=round(turn, 1), move_mps=round(move, 2))
                 if m.why["turn_dps"] > self.turn_budget or m.why["move_mps"] > self.move_budget:
                     st["fail_speed"] += 1
@@ -1181,7 +1225,7 @@ class RoomMoves:
                 if abs(toward) < 0.6:                     # straight toward what it shows, or back from it
                     continue
                 path, plen = self._path(paths, a, b, rmin)
-                if path is None or plen > 1.3 * L or plen / dur * 1.5 > self.move_budget:
+                if path is None or plen > 1.3 * L or plen / dur * self.peak(1.5) > self.move_budget:
                     continue
                 path = resample(path, SAMPLES)
                 tgt = cap_pitch(path, np.repeat(aim[None], len(path), 0), PITCH_LADDER[0])
@@ -1223,7 +1267,7 @@ class RoomMoves:
                 if not (d1 < d0 - 0.5 and d1 >= 1.8):    # toward the next room, not into it
                     continue
                 path, plen = self._path(paths, a, b, rmin)
-                if path is None or plen > 1.25 * L or plen / dur * 1.5 > self.move_budget:
+                if path is None or plen > 1.25 * L or plen / dur * self.peak(1.5) > self.move_budget:
                     continue
                 path = resample(path, SAMPLES)
                 d = path[min(10, len(path) - 1)] - path[0]
@@ -1323,6 +1367,7 @@ class RoomMoves:
             pts_ = np.concatenate([m.eye for m in cands] + [m.tgt[-1:, :2] for m in cands])
             c = pts_.mean(0)
             self.occ.focus(c, float(np.linalg.norm(pts_ - c, axis=1).max()) + OCC_NEAR + 0.5)
+        cands = self.keep_direction(cands)
         best, least = self._check(hall, cands, dur)
         if best is None:
             return None, [f"link_blocked:{hall}"]
@@ -1360,7 +1405,7 @@ class RoomMoves:
             for b in range(len(starts), len(pts)):
                 path, plen = self._path(paths, a, b, rmin)
                 L = float(np.linalg.norm(pts[b] - pts[a]))
-                if path is None or plen > 1.4 * L or plen / dur * 1.5 > self.move_budget:
+                if path is None or plen > 1.4 * L or plen / dur * self.peak(1.5) > self.move_budget:
                     continue
                 path = resample(path, SAMPLES)
                 tgt = cap_pitch(path, np.repeat(aim[None], len(path), 0), PITCH_LADDER[0])
@@ -1540,9 +1585,35 @@ class RoomMoves:
         return 1 if c > 0 else -1
 
     def record(self, m: Move) -> None:
-        """A shot the tour plays: its kind and side, for the next shots' sequence costs."""
+        """A shot the tour plays: its kind and side, for the next shots' sequence costs, and the way
+        it leaves the frame (continuous cuts: the next shot carries it on)."""
         self.__dict__.setdefault("_history", []).append((m.kind, self.side(m)))
         self._last_kind = m.kind
+        self._last_exit = move_motion(m, end=True)
+
+    def keep_direction(self, cands: list) -> list:
+        """Continuous cuts: the candidates that carry the previous shot's move on (cut_cost <= 0),
+        or all of them when none does."""
+        if not self.continuous or self.__dict__.get("_last_exit") is None:
+            return cands
+        ok = [m for m in cands if self.cut_cost(m) <= 0]
+        return ok or cands
+
+    def cut_cost(self, m: Move) -> float:
+        """Continuous cuts (client review 2026-11-20, item 5): entering m from the previous shot's
+        exit - a lateral turn over 45 deg or forward into backward costs CUT_TURN_W / CUT_AXIAL_W,
+        carrying the move on earns CUT_SAME_W. Measured as render/continuity.py measures a cut."""
+        prev = self.__dict__.get("_last_exit")
+        if prev is None:
+            return 0.0
+        from tour_worker.render.continuity import MAX_TURN_DEG, _axial_reversal, _turn_deg
+        a, b = _unit(prev), _unit(move_motion(m, end=False))
+        turn, rev = _turn_deg(a, b), _axial_reversal(a, b)
+        cost = (CUT_TURN_W if turn is not None and turn > MAX_TURN_DEG else 0.0) + (CUT_AXIAL_W if rev else 0.0)
+        if not cost and ((turn is not None and turn <= 20.0) or (a.f > 2.5 and b.f > 2.5)):
+            cost = -CUT_SAME_W
+        m.why["cut"] = {"turn_deg": None if turn is None else round(turn, 1), "forward_back": rev, "cost": cost}
+        return cost
 
     def sequence_cost(self, m: Move) -> float:
         """Score lost to the tour so far (2D: cinematic.py's beam search): the previous kind again,
@@ -1558,7 +1629,9 @@ class RoomMoves:
             cost += SAME_KIND_W
         if len(hist) >= 2 and hist[-2][0] == m.kind:
             cost += TWO_BACK_W
-        if sd and hist[-1][1] == sd:
+        if self.continuous:                       # one continuous move: direction kept across the cut
+            cost += self.cut_cost(m)
+        elif sd and hist[-1][1] == sd:
             cost += SAME_SIDE_W
         cost += USED_DIR_W * sum(1 for k, d in hist if k == m.kind and d == sd)
         cost += OVERUSE_W * max(0, sum(1 for k, _ in hist if k == m.kind) - 1)
@@ -1772,7 +1845,7 @@ class RoomMoves:
                     L = s_[ke] - s_[ks]
                     if not EXIT_LEN[0] <= L <= EXIT_LEN[1] or (ks % 3) or at[ks] not in mine:
                         continue
-                    if L / dur * 2.1 > self.move_budget:          # eased in: its peak ~2x its mean speed
+                    if L / dur * self.peak(2.1) > self.move_budget:   # eased in: its peak ~2x its mean speed
                         continue
                     seg = poly[ks:ke + 1]
                     if min(sp.clearance(q) for q in seg) < rmin * 0.9:
@@ -1795,6 +1868,7 @@ class RoomMoves:
         cands = [m for m in cands if self.moves_enough(m, dur) and sp.clearance(m.eye[0]) >= WALL_CLEAR]
         if not cands:
             return None, [f"exit_no_move:{room}"]
+        cands = self.keep_direction(cands)
         if self.occ is not None:
             pts_ = np.concatenate([m.eye for m in cands])
             c = pts_.mean(0)
@@ -1845,7 +1919,7 @@ class RoomMoves:
             for b in range(len(starts), len(pts)):
                 path, plen = self._path(paths, a, b, rmin)
                 L = float(np.linalg.norm(pts[b] - pts[a]))
-                if path is None or plen > 1.4 * L or plen < 0.8 or plen / dur * 1.5 > self.move_budget:
+                if path is None or plen > 1.4 * L or plen < 0.8 or plen / dur * self.peak(1.5) > self.move_budget:
                     continue
                 path = resample(path, SAMPLES)
                 h0 = path[min(8, SAMPLES - 1)] - path[0]
@@ -2149,6 +2223,15 @@ class RoomMoves:
                                     why={"from_m": round(top, 2), "onto": name, "drift_m": drift}))
         return _keep_best(out, 12)
 
+    # continuous cuts (client review 2026-11-20, items 2-4): every shot between the tour's first and
+    # last plays at a steady pace (render/camera_path.ramp_profile), so a candidate is judged at its
+    # mean speed plus PEAK_STEADY for the arc-length mix of travel and turn - not at the eased peaks
+    continuous = False
+
+    def peak(self, eased: float) -> float:
+        """A move's peak speed over its mean: the eased profile's, or a steady pace's."""
+        return PEAK_STEADY if self.continuous else eased
+
     def moves_enough(self, m: Move, dur: float) -> bool:
         """A room shot is seen to move: it travels MIN_TRAVEL_PS m/s, or turns MIN_TURN_PS deg/s."""
         travel = float(np.linalg.norm(np.diff(m.eye3, axis=0), axis=1).sum())
@@ -2234,7 +2317,7 @@ class RoomMoves:
                     # a walkway's subject is the room's own piece: it may start anywhere in the open
                     # plan (a dining table filmed from the living side is a dining shot)
                     path, plen = self._path(paths, i, j, rmin)
-                    if path is None or plen > 1.3 * L or plen / dur * 1.5 > self.move_budget:
+                    if path is None or plen > 1.3 * L or plen / dur * self.peak(1.5) > self.move_budget:
                         continue
                     path = resample(path, SAMPLES)
                     tgt = cap_pitch(path, np.repeat(top[None], len(path), 0), pitch)
@@ -2265,7 +2348,7 @@ class RoomMoves:
                 if not MOVE_LEN[0] + 0.4 <= L <= MOVE_LEN[1] + 1.4:
                     continue
                 path, plen = self._path(paths, a, b, rmin)
-                if path is None or plen > 1.25 * L or plen / dur * 1.5 > self.move_budget:
+                if path is None or plen > 1.25 * L or plen / dur * self.peak(1.5) > self.move_budget:
                     continue
                 path = resample(path, SAMPLES)
                 d = path[-1] - path[0]
