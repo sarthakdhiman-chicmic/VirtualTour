@@ -29,7 +29,7 @@ PAD = 2                     # output px around a layer's projected box
 STRIP = 256                 # output rows a bent layer is mapped at a time (bounds the float maps' memory)
 MAP_STEP = 4                # output px between a bent layer's solved map samples
 BEND_MIN_PX = 0.5           # (layer px) a smaller bend is not drawn
-VERSION = "v2"              # the stored layers' format (v2: + the seam bends)
+VERSION = "v3"              # the stored layers' format (v2: + the seam bends; v3: upright objects, snapped edges)
 MAX_W = 3840                # layers are built at most this wide (a 4K tour's photo can be ~7000 px: its
                             # layers would take several GB); the framing is scaled to match
 
