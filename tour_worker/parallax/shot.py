@@ -46,24 +46,40 @@ def _planes_at(images: str, name: str, w: int, h: int):
 
 def _layer_files(images: str, name: str, w: int, h: int) -> dict[str, str]:
     base = os.path.join(images, DIRNAME, f"{name}.{w}x{h}")
-    return {k: f"{base}.{k}.npy" for k in ("colour", "alpha", "own", "meta")}
+    return {k: f"{base}.{k}.npy" for k in ("colour", "alpha", "meta")}
+
+
+OWN_A, FILL_A = 255, 254      # alpha codes: the layer's own photo pixels / its opaque hidden fill
 
 
 def _build(images: str, name: str, src: np.ndarray, files: dict[str, str]) -> None:
+    """Each layer cropped to the box its alpha covers (a layer is ~10-20% of the frame: full-frame
+    layers of a 4K tour's photos filled the pod's disk, 2026-11-25), packed into one colour and one
+    alpha buffer; meta: per layer the plane (n, c), box and offset. Alpha 255 marks the layer's own
+    pixels (the photo itself), 254 its opaque fill."""
     h, w = src.shape[:2]
     planes, _, z = _planes_at(images, name, w, h)
     L.PHOTO_DEPTH[0] = z
     layers = L.extended_layers(src, planes)
-    own = np.zeros((len(planes), h, w), np.uint8)
     idx = np.full((h, w), -1, np.int32)
     for i, (_, a) in enumerate(layers):
-        idx[a >= 0.999] = i                                    # near layers win: the pixel's drawn owner ...
-    for i, (col, a) in enumerate(layers):
-        own[i] = (idx == i) & (np.abs(col.astype(np.int16) - src).max(-1) == 0)   # ... showing the photo itself
-    meta = np.array([[p.n[0], p.n[1], p.n[2], p.c] for p in planes], np.float64).reshape(-1, 4)
-    for key, arr in (("colour", np.stack([c for c, _ in layers])),
-                     ("alpha", np.stack([np.round(a * 255).astype(np.uint8) for _, a in layers])),
-                     ("own", own), ("meta", meta)):
+        idx[a >= 0.999] = i                                    # near layers win: the pixel's drawn owner
+    cols, alphas, meta, off = [], [], [], 0
+    for i, ((col, a), p) in enumerate(zip(layers, planes)):
+        a8 = np.round(a * FILL_A).astype(np.uint8)
+        a8[(idx == i) & (a >= 0.999)] = OWN_A
+        ys, xs = np.nonzero(a8.max(axis=1))[0], np.nonzero(a8.max(axis=0))[0]
+        if not len(ys):
+            meta.append([*p.n, p.c, 0, 0, 0, 0, off])
+            continue
+        x0, y0, x1, y1 = xs[0], ys[0], xs[-1] + 1, ys[-1] + 1
+        cols.append(np.ascontiguousarray(col[y0:y1, x0:x1]).ravel())
+        alphas.append(np.ascontiguousarray(a8[y0:y1, x0:x1]).ravel())
+        meta.append([*p.n, p.c, x0, y0, x1, y1, off])
+        off += (y1 - y0) * (x1 - x0)
+    for key, arr in (("colour", np.concatenate(cols) if cols else np.zeros(0, np.uint8)),
+                     ("alpha", np.concatenate(alphas) if alphas else np.zeros(0, np.uint8)),
+                     ("meta", np.array(meta, np.float64).reshape(-1, 9))):
         tmp = files[key] + ".tmp.npy"
         np.save(tmp, arr)
         os.replace(tmp, files[key])
@@ -83,20 +99,25 @@ class ShotParallax:
         if not all(os.path.exists(p) for p in files.values()):
             small = src if self.s == 1.0 else cv2.resize(src, (w, h), interpolation=cv2.INTER_AREA)
             _build(images, name, small, files)
-        self.colour = np.load(files["colour"], mmap_mode="r")
-        self.alpha = np.load(files["alpha"], mmap_mode="r")
-        self.own = np.load(files["own"], mmap_mode="r")
+        colour = np.load(files["colour"], mmap_mode="r")
+        alpha = np.load(files["alpha"], mmap_mode="r")
         meta = np.load(files["meta"])
         self.n, self.c = meta[:, :3], meta[:, 3]
+        # per layer: its box in the photo (x0, y0, x1, y1) and its colour / alpha crops (memory-mapped)
+        self.boxes, self.colour, self.alpha = [], [], []
+        for row in meta:
+            x0, y0, x1, y1, off = (int(v) for v in row[4:9])
+            if x1 <= x0:
+                self.boxes.append(None); self.colour.append(None); self.alpha.append(None)
+                continue
+            n_px = (y1 - y0) * (x1 - x0)
+            self.boxes.append((x0, y0, x1, y1))
+            self.colour.append(colour[off * 3:(off + n_px) * 3].reshape(y1 - y0, x1 - x0, 3))
+            self.alpha.append(alpha[off:off + n_px].reshape(y1 - y0, x1 - x0))
         self.K = L.intrinsics(w, h)
         self.Kinv = np.linalg.inv(self.K)
         self.w, self.h = w, h
         self.progress = progress
-        # each layer's box in the photo (where its alpha is drawn)
-        self.boxes = []
-        for a in self.alpha:
-            ys, xs = np.nonzero(a.max(axis=1) > 0)[0], np.nonzero(a.max(axis=0) > 0)[0]
-            self.boxes.append(None if not len(ys) else (xs[0], ys[0], xs[-1] + 1, ys[-1] + 1))
         # the slide: the window's travel (x right, y down, in window widths) and its zoom
         (cx0, cy0, z0), _ = frames[0]
         (cx1, cy1, z1), _ = frames[-1]
@@ -104,8 +125,13 @@ class ShotParallax:
         direction = np.array([(cx1 - cx0) / win, (cy1 - cy0) * h / (w * win), np.log(z1 / z0) * 0.5])
         self.T = np.zeros(3)
         if np.linalg.norm(direction) > 1e-6:
-            planes = [L.Plane(n=self.n[i], c=float(self.c[i]), mask=self.own[i] > 0, label="", depth=0.0)
-                      for i in range(len(self.c))]
+            planes = []
+            for i in range(len(self.c)):
+                own = np.zeros((h, w), bool)
+                if self.boxes[i] is not None:
+                    x0, y0, x1, y1 = self.boxes[i]
+                    own[y0:y1, x0:x1] = self.alpha[i] == OWN_A
+                planes.append(L.Plane(n=self.n[i], c=float(self.c[i]), mask=own, label="", depth=0.0))
             self.T = L.travel_toward(planes, self.K, direction, cap_px * w / WORK_W)
 
     def homographies(self, fr: float) -> list[np.ndarray]:
@@ -139,16 +165,19 @@ class ShotParallax:
             if box is None:
                 continue
             r0, r1, c0, c1 = box
-            mm = m @ np.array([[1, 0, c0], [0, 1, r0], [0, 0, 1]], float)       # box px -> photo px
+            bx0, by0 = self.boxes[i][:2]
+            # output box px -> photo px -> the layer's crop px
+            mm = np.array([[1, 0, -bx0], [0, 1, -by0], [0, 0, 1]], float) @ m @ np.array([[1, 0, c0], [0, 1, r0], [0, 0, 1]], float)
             size = (c1 - c0, r1 - r0)
             warp = lambda img, border: cv2.warpPerspective(          # noqa: E731
                 np.asarray(img), mm, size, flags=cv2.WARP_INVERSE_MAP | cv2.INTER_LINEAR, borderMode=border)
             col = warp(self.colour[i], cv2.BORDER_REPLICATE).astype(np.float32)
-            a = warp(self.alpha[i], cv2.BORDER_CONSTANT).astype(np.float32)[..., None] / 255.0
+            a8 = warp(self.alpha[i], cv2.BORDER_CONSTANT)
+            a = np.minimum(a8.astype(np.float32) / FILL_A, 1.0)[..., None]
             if dynamic is not None:
                 live = dynamic(i, self.Sinv @ m, box)          # (the live photo is at photo px)
                 if live is not None:
-                    k = warp(self.own[i], cv2.BORDER_CONSTANT).astype(np.float32)[..., None]
+                    k = np.clip(a8.astype(np.float32) - FILL_A, 0.0, 1.0)[..., None]   # own pixels
                     col = col * (1 - k) + live.astype(np.float32) * k
             sub = acc[r0:r1, c0:c1]
             sub *= 1 - a

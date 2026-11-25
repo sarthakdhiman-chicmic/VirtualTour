@@ -395,7 +395,10 @@ class ShotWarp:
         src = self.sky.frame(f / self.fps) if self.sky is not None else self.src
         if self.par is not None:
             dyn = self.par_dynamic
-            live = (lambda i, mi, box: self._live(mi, box, f, step, src) if i in dyn else None) if dyn else None
+            live = None
+            if dyn:
+                img = self._live_src(f, step, src)          # once a frame, warped by every layer that shows it
+                live = lambda i, mi, box: self._warp_box(img, mi, box) if i in dyn else None   # noqa: E731
             return self.par.draw(m, f if fr is None else fr, self.ow, self.oh, live)
         frame = cv2.warpPerspective(src, m, (self.ow, self.oh), flags=cv2.WARP_INVERSE_MAP | cv2.INTER_LINEAR,
                                     borderMode=cv2.BORDER_REPLICATE)
@@ -405,19 +408,40 @@ class ShotWarp:
         frame[win[0]:win[1], win[2]:win[3]] = self._region_patch(m, win, f, step, src)
         return frame
 
-    def _live(self, m: np.ndarray, box, f: int, step, src) -> np.ndarray:
-        """The live photo (moving sky, motion regions at frame f's time) through m over the output box
-        (r0, r1, c0, c1) - one parallax layer's own pixels."""
+    @staticmethod
+    def _warp_box(img: np.ndarray, m: np.ndarray, box) -> np.ndarray:
+        """img through m (output px -> img px) over the output box (r0, r1, c0, c1)."""
         r0, r1, c0, c1 = box
         mm = m @ np.array([[1, 0, c0], [0, 1, r0], [0, 0, 1]], float)
-        out = cv2.warpPerspective(src, mm, (c1 - c0, r1 - r0), flags=cv2.WARP_INVERSE_MAP | cv2.INTER_LINEAR,
-                                  borderMode=cv2.BORDER_REPLICATE)
-        win = self.window(m) if self.regions else None
-        if win is not None:
-            a0, a1, b0, b1 = max(r0, win[0]), min(r1, win[1]), max(c0, win[2]), min(c1, win[3])
-            if a0 < a1 and b0 < b1:
-                patch = self._region_patch(m, win, f, step, src)
-                out[a0 - r0:a1 - r0, b0 - c0:b1 - c0] = patch[a0 - win[0]:a1 - win[0], b0 - win[2]:b1 - win[2]]
+        return cv2.warpPerspective(img, mm, (c1 - c0, r1 - r0), flags=cv2.WARP_INVERSE_MAP | cv2.INTER_LINEAR,
+                                   borderMode=cv2.BORDER_REPLICATE)
+
+    def _live_src(self, f: int, step, src) -> np.ndarray:
+        """The photo (or the sky frame) with the motion regions moved to frame f's time, in photo px:
+        the regions' box redrawn through the identity map plus their displacement (parallax shots draw
+        it once a frame; each layer then warps it with its own homography)."""
+        if not self.regions:
+            return src
+        if getattr(self, "_src_box", None) is None:
+            a = field_align(self.regions, grid_scale((self.sh, self.sw)))
+            pad = max(r.amp for r in self.regions) * 2 + 4
+            x0 = max(0, int(min(r.x0 for r in self.regions) - pad))
+            y0 = max(0, int(min(r.y0 for r in self.regions) - pad))
+            x1 = min(self.sw, int(max(r.x0 + r.bw for r in self.regions) + pad) + 1)
+            y1 = min(self.sh, int(max(r.y0 + r.bh for r in self.regions) + pad) + 1)
+            r0, c0 = y0 // a * a, x0 // a * a
+            r1 = min(self.sh - 1, -(-(y1 - 1) // a) * a) + 1
+            c1 = min(self.sw - 1, -(-(x1 - 1) // a) * a) + 1
+            self._src_box = (r0, r1, c0, c1)
+        r0, r1, c0, c1 = self._src_box
+        map_x, map_y = np.meshgrid(np.arange(c0, c1, dtype=np.float32), np.arange(r0, r1, dtype=np.float32))
+        gain = apply_regions(map_x, map_y, self.regions, f / self.fps, step=step, origin=(r0, c0),
+                             frame_shape=(self.sh, self.sw))
+        patch = cv2.remap(src, map_x, map_y, cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
+        if gain is not None:
+            patch = np.clip(patch.astype(np.float32) * gain[..., None], 0, 255).astype(np.uint8)
+        out = src.copy()
+        out[r0:r1, c0:c1] = patch
         return out
 
     def _region_patch(self, m: np.ndarray, win, f: int, step, src) -> np.ndarray:
