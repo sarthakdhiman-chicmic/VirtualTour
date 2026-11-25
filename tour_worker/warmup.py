@@ -64,6 +64,14 @@ def _warm() -> None:
         log.info("warm-up: segmentation model loaded in %.0f s", time.time() - t1)
     except Exception as e:  # noqa: BLE001 - no weights here (a render-only host): the first job loads it
         log.info("warm-up: segmentation model not loaded (%s)", type(e).__name__)
+    t2 = time.time()
+    try:                                           # the depth model (parallax, client review item 10)
+        from tour_worker.config import get_settings
+        from tour_worker.parallax.prepare import get_depth
+        get_depth(get_settings())
+        log.info("warm-up: depth model loaded in %.0f s", time.time() - t2)
+    except Exception as e:  # noqa: BLE001 - the first parallax render loads it
+        log.info("warm-up: depth model not loaded (%s)", type(e).__name__)
 
 
 def start() -> threading.Thread:

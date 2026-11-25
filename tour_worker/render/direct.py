@@ -408,6 +408,10 @@ def render_direct(plan, workdir: str, warnings: list | None = None, music_path: 
         raise WorkerError("scene_render_failed", "a 3D plan needs its scene renderer")
     if getattr(splat, "stage_s", None) is not None:    # the renderer is cached across jobs: this job's stages only
         splat.stage_s.clear()
+    if getattr(plan.output, "parallax", None) is not None and photo_device is not None:
+        # the GPU photo path draws no parallax (yet): the tour as without it
+        warnings is not None and warnings.append("enhancement_dropped:tour:parallax:gpu_photo_path")
+        plan.output.parallax = None
     sws = [ShotWarp(plan, shot, t["render_frames"], images, warnings)   # validate early; warnings once
            for shot, t in zip(plan.shots, tl) if shot.camera.type not in ("bezier_path", "video_clip")]
     n = total_frames(plan)

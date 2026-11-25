@@ -54,6 +54,13 @@ class MotionBlur(BaseModel):
     max_samples: int = 5
     model_config = ConfigDict(extra='ignore')
 
+class Parallax(BaseModel):
+    """Depth parallax (client review 2026-11-20, item 10): photo shots drawn as the photo's rigid depth
+    layers, sliding against each other the way the shot's move goes (tour_worker/parallax). cap_px: the
+    near-far disparity over the shot at a 1920-wide copy of the photo."""
+    cap_px: float = 16.0
+    model_config = ConfigDict(extra='ignore')
+
 class OutputConfig(BaseModel):
     width: int
     height: int
@@ -65,6 +72,7 @@ class OutputConfig(BaseModel):
     mls_copy: bool = False             # also render the MLS copy: no captions, the staged label kept
     branding: Optional[Branding] = None   # title card, end card, corner logo (render/overlays.py)
     motion_blur: Optional[MotionBlur] = None   # client review 2026-11-20, item 7 (render/frames.py)
+    parallax: Optional[Parallax] = None        # client review 2026-11-20, item 10 (tour_worker/parallax)
     model_config = ConfigDict(extra='ignore')
 
 class Size(BaseModel):
@@ -491,6 +499,11 @@ def check_motion_blur(plan: Plan):
     if mb is not None and not (0 < mb.shutter <= 1 and 0.5 <= mb.min_px_f <= 20 and 2 <= mb.max_samples <= 8):
         raise ValueError("invalid_plan: output.motion_blur out of range")
 
+def check_parallax(plan: Plan):
+    px = plan.output.parallax
+    if px is not None and not (0 < px.cap_px <= 48):
+        raise ValueError("invalid_plan: output.parallax out of range")
+
 def check_easing(plan: Plan):
     valid_easings = {"linear", "ease_in", "ease_out", "ease_in_out"}
     for shot in plan.shots:
@@ -599,6 +612,7 @@ def parse_plan(data: dict) -> Plan:
     check_bounds(plan)
     check_easing(plan)
     check_motion_blur(plan)
+    check_parallax(plan)
     check_transitions(plan)
     check_time_warps(plan)
     check_punches(plan)

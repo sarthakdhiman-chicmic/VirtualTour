@@ -19,6 +19,7 @@ from .scene_context import blend_grid, from_scene
 from .schemas import (
     CameraEasing,
     MotionBlur,
+    Parallax,
     CameraParams,
     CameraPoint,
     OutputParams,
@@ -283,6 +284,7 @@ def _build_shot_plan(
         branding=Branding(**cfg.output_branding) if cfg.output_branding else None,
         motion_blur=MotionBlur(shutter=cfg.motion_blur_shutter, min_px_f=cfg.motion_blur_min_px_f,
                                max_samples=cfg.motion_blur_max_samples) if cfg.motion_blur else None,
+        parallax=Parallax(cap_px=cfg.parallax_cap_px) if cfg.parallax else None,
     )
 
     # 3. Assemble Plan

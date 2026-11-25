@@ -49,6 +49,11 @@ class MotionBlur(BaseModel):
     max_samples: int = 5
 
 
+class Parallax(BaseModel):
+    """Depth parallax on photo shots (client review 2026-11-20, item 10; contract.plan.Parallax)."""
+    cap_px: float = 16.0
+
+
 class OutputParams(BaseModel):
     width: int
     height: int
@@ -60,10 +65,11 @@ class OutputParams(BaseModel):
     mls_copy: bool | None = None     # True: also the MLS copy, without captions; None when not asked
     branding: Branding | None = None # title card, end card, corner logo; None: none
     motion_blur: MotionBlur | None = None   # photo shots' fast frames blurred (render/frames.py); None: none
+    parallax: Parallax | None = None        # photo shots drawn as sliding depth layers (tour_worker/parallax); None: flat
 
     @model_serializer(mode="wrap")
     def _omit_unset_additions(self, handler):
-        return _omit_none(handler(self), ("max_bytes", "hevc", "room_labels", "mls_copy", "branding", "motion_blur"))
+        return _omit_none(handler(self), ("max_bytes", "hevc", "room_labels", "mls_copy", "branding", "motion_blur", "parallax"))
 
 
 class SourceImage(BaseModel):

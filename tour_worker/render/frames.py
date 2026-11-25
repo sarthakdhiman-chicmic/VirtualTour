@@ -247,6 +247,26 @@ class ShotWarp:
                      if self.regions else None)
         self.align = field_align(self.regions, grid_scale((self.oh, self.ow)))
         self.probe_ys = np.unique(np.r_[np.arange(0, self.oh, ROI_PROBE), self.oh - 1])
+        # depth parallax (client review 2026-11-20, item 10; plan output.parallax): the photo's rigid
+        # layers slide against each other the way the move goes (tour_worker/parallax); its inputs are
+        # prepared by the render job (parallax/prepare.py). A shot that cannot have it is drawn flat.
+        self.par, self.par_dynamic = None, set()
+        par = getattr(plan.output, "parallax", None)
+        if par is not None:
+            try:
+                from tour_worker.parallax.shot import ShotParallax
+                self.par = ShotParallax(images, shot.image_uri.split("/")[-1], self.src, self.frames,
+                                        par.cap_px, self.move_progress)
+                # layers with live content: all under a moving sky (its cloud shadows fall on the ground
+                # and the house), else those a motion region reaches
+                pad = 0.02 * sw                                 # (the regions' sway reaches a little past their box)
+                boxes = [(r.x0 - pad, r.y0 - pad, r.x0 + r.bw + pad, r.y0 + r.bh + pad) for r in self.regions]
+                self.par_dynamic = {i for i in range(len(self.par.c))
+                                    if self.sky is not None or self.par.touches(i, boxes)}
+            except Exception as e:  # noqa: BLE001 - parallax is an addition: without it the shot is as before
+                self.par = None
+                if warnings is not None:
+                    warnings.append(f"enhancement_dropped:{shot.shot_id}:parallax:error_{type(e).__name__}")
         # motion blur: whether each frame blurs is decided once, before the first frame (blur_plan)
         self.blur = getattr(plan.output, "motion_blur", None)
         self.blur_n = None              # per frame: shutter samples (1 = drawn as without blur)
@@ -305,6 +325,16 @@ class ShotWarp:
             z *= punch_scale(cam.punches, fr / self.fps)
         return (cx, cy, z), roll
 
+    def move_progress(self, fr: float) -> float:
+        """The planned move's progress (0..1) at fractional frame fr: with path_s its planned pace
+        (ramp_profile), else the shot's own time - the parallax slide follows it."""
+        cam = self._cam
+        ps = getattr(cam, "path_s", None)
+        if ps and cam.type == "keyframe_path":
+            from tour_worker.render.camera_path import ramp_profile
+            return ramp_profile(getattr(cam.easing, "value", cam.easing), min(1.0, max(0.0, fr) / self.fps / ps))
+        return min(1.0, max(0.0, fr / max(1, self.n - 1)))
+
     def blur_extent_px(self, f: int) -> float:
         """How far the picture travels on screen while the shutter is open around frame f: RMS
         over a 3x3 grid of screen points, output px."""
@@ -354,19 +384,44 @@ class ShotWarp:
         sky keep frame f's own time (their motion within one shutter is far below a pixel)."""
         acc = None
         for o in blur_offsets(samples, self.blur.shutter):
-            img = self._draw(self._homography_of(self.state_at(f + o)), f).astype(np.float32)
+            img = self._draw(self._homography_of(self.state_at(f + o)), f, fr=f + o).astype(np.float32)
             acc = img if acc is None else acc + img
         return (acc / samples + 0.5).astype(np.uint8)
 
-    def _draw(self, m: np.ndarray, f: int, step: int | None = None) -> np.ndarray:
+    def _draw(self, m: np.ndarray, f: int, step: int | None = None, fr: float | None = None) -> np.ndarray:
         """The camera warp m of the whole frame, then the window with moving regions (at frame f's
-        time) redrawn through the displaced maps (warpPerspective and remap agree within 1 level)."""
+        time) redrawn through the displaced maps (warpPerspective and remap agree within 1 level).
+        With parallax: the layers at fractional frame fr (default f), the live content per layer."""
         src = self.sky.frame(f / self.fps) if self.sky is not None else self.src
+        if self.par is not None:
+            dyn = self.par_dynamic
+            live = (lambda i, mi, box: self._live(mi, box, f, step, src) if i in dyn else None) if dyn else None
+            return self.par.draw(m, f if fr is None else fr, self.ow, self.oh, live)
         frame = cv2.warpPerspective(src, m, (self.ow, self.oh), flags=cv2.WARP_INVERSE_MAP | cv2.INTER_LINEAR,
                                     borderMode=cv2.BORDER_REPLICATE)
         win = self.window(m) if self.regions else None
         if win is None:
             return frame
+        frame[win[0]:win[1], win[2]:win[3]] = self._region_patch(m, win, f, step, src)
+        return frame
+
+    def _live(self, m: np.ndarray, box, f: int, step, src) -> np.ndarray:
+        """The live photo (moving sky, motion regions at frame f's time) through m over the output box
+        (r0, r1, c0, c1) - one parallax layer's own pixels."""
+        r0, r1, c0, c1 = box
+        mm = m @ np.array([[1, 0, c0], [0, 1, r0], [0, 0, 1]], float)
+        out = cv2.warpPerspective(src, mm, (c1 - c0, r1 - r0), flags=cv2.WARP_INVERSE_MAP | cv2.INTER_LINEAR,
+                                  borderMode=cv2.BORDER_REPLICATE)
+        win = self.window(m) if self.regions else None
+        if win is not None:
+            a0, a1, b0, b1 = max(r0, win[0]), min(r1, win[1]), max(c0, win[2]), min(c1, win[3])
+            if a0 < a1 and b0 < b1:
+                patch = self._region_patch(m, win, f, step, src)
+                out[a0 - r0:a1 - r0, b0 - c0:b1 - c0] = patch[a0 - win[0]:a1 - win[0], b0 - win[2]:b1 - win[2]]
+        return out
+
+    def _region_patch(self, m: np.ndarray, win, f: int, step, src) -> np.ndarray:
+        """The window win of the frame drawn through m with the motion regions' displacement."""
         r0, r1, c0, c1 = win
         map_x, map_y = homography_maps(m, (self.grid[0][r0:r1, c0:c1], self.grid[1][r0:r1, c0:c1]))
         gain = apply_regions(map_x, map_y, self.regions, f / self.fps, step=step, origin=(r0, c0),
@@ -374,8 +429,7 @@ class ShotWarp:
         patch = cv2.remap(src, map_x, map_y, cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
         if gain is not None:            # calm_water light follows the wave slope
             patch = np.clip(patch.astype(np.float32) * gain[..., None], 0, 255).astype(np.uint8)
-        frame[r0:r1, c0:c1] = patch
-        return frame
+        return patch
 
 
 # Frames are independent (frame f depends only on f), so they are drawn in parallel processes
