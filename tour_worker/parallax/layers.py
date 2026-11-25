@@ -61,6 +61,13 @@ EDGE_WIN = 9                    # ... judged against the colours within this man
                                 # chair's mask took the black window frame along as a dark outline)
 ONE_PLANE_SHARE = 0.75          # a window / wall region this much on one plane is that one plane (2026-11-25: a
 ONE_PLANE_TOL = 2.5             # window in three pieces tore its mullion); tolerance x PLANE_TOL
+# soft seams (2026-11-25: one wall / ceiling / tapestry cut into pieces by the segmentation tore along
+# the pieces' ragged edges, at every strength): where two layers meet but the PHOTO's depth runs on
+# across the seam, both bend to one shared depth there, so the seam cannot open
+SEAM_R = 8                      # px (at 1920 wide): the photo's depth compared this far either side ...
+SOFT_JUMP = 0.06                # ... and the seam is soft below this relative jump (at SEAM_R and 2 SEAM_R)
+SEAM_W = 48                     # px (at 1920 wide): the band over which a layer bends to the seam
+SEAM_CELL = 8                   # px (at 1920 wide): the bend is stored on a grid this coarse (it is smooth)
 
 
 @dataclass
@@ -410,7 +417,7 @@ def push_pull_fill(colour: np.ndarray, weight: np.ndarray) -> np.ndarray:
     return filled
 
 
-def extended_layers(img: np.ndarray, planes: list[Plane]):
+def extended_layers(img: np.ndarray, planes: list[Plane], owner_out: list | None = None):
     """Per layer (far to near): its colours and alpha. Every pixel belongs WHOLLY to the nearest
     layer with a share of it over OWN_T (the edge-snapped soft masks): a moving object takes its whole
     edge with it, and nothing of it is left on the layer behind (2026-11-25: the split edge pixels
@@ -441,6 +448,8 @@ def extended_layers(img: np.ndarray, planes: list[Plane]):
         best = np.argmax(np.stack(soft), axis=0).astype(np.int32)
         owner = np.where(owner < 0, best, owner)
     owner = _rim_by_colour(img, planes, owner)
+    if owner_out is not None:
+        owner_out.append(owner)
     kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * FILL_PX + 1,) * 2)
     # what is behind each pixel: the farther layer whose own pixels are NEAREST in the image (a hidden
     # pixel behind the sofa continues the rug next to it, not a console that is merely next in depth -
@@ -596,3 +605,83 @@ def mirror_fill(img: np.ndarray, own: np.ndarray, hidden: np.ndarray, smooth: np
     ok[ok] &= own[my[ok], mx[ok]]
     out[hy[ok], hx[ok]] = img[my[ok], mx[ok]]
     return out
+
+
+def plane_rho(p: Plane, Kinv: np.ndarray) -> np.ndarray:
+    """The plane's inverse depth along each pixel's ray is affine in the pixel: a . (x, y, 1)."""
+    return (Kinv.T @ p.n) / p.c
+
+
+def seam_bend(planes: list[Plane], owner: np.ndarray, z: np.ndarray, K: np.ndarray):
+    """Soft seams: where two layers meet but the photo's depth runs on across the seam (within SOFT_JUMP
+    at SEAM_R and 2 SEAM_R px either side), both layers bend to the same inverse depth there - the
+    two planes' mean at the seam, spread smoothly along it - fading back to their own plane over SEAM_W.
+    A real depth edge (a sofa against the wall) stays a cut.
+
+    Returns (cell px F, per layer the inverse-depth correction on the F-px grid, or None where the layer
+    has no soft seam); cell (gy, gx) is centred on pixel ((gx + .5) F - .5, (gy + .5) F - .5)."""
+    h, w = owner.shape
+    k = w / 1920
+    R, F, W = max(2, round(SEAM_R * k)), max(2, round(SEAM_CELL * k)), SEAM_W * k
+    gh, gw = -(-h // F), -(-w // F)
+    Kinv = np.linalg.inv(K)
+    coef = np.array([plane_rho(p, Kinv) for p in planes])
+    num, den = np.zeros((gh, gw)), np.zeros((gh, gw))
+    seeds = np.zeros((len(planes), gh, gw), bool)
+    pairs = []
+    jsum, jcnt = np.zeros((gh, gw)), np.zeros((gh, gw))
+    for dy, dx in ((0, 1), (1, 0)):
+        a, b = owner[:h - dy, :w - dx], owner[dy:, dx:]
+        ys, xs = np.nonzero(a != b)
+        if not len(ys):
+            continue
+        jump = np.zeros(len(ys))
+        for r in (R, 2 * R):
+            za = z[np.clip(ys - r * dy, 0, h - 1), np.clip(xs - r * dx, 0, w - 1)]
+            zb = z[np.clip(ys + dy + r * dy, 0, h - 1), np.clip(xs + dx + r * dx, 0, w - 1)]
+            jump = np.maximum(jump, np.abs(za - zb) / np.maximum(np.minimum(za, zb), 1e-6))
+        np.add.at(jsum, (ys // F, xs // F), np.minimum(jump, 1.0))
+        np.add.at(jcnt, (ys // F, xs // F), 1.0)
+        pairs.append((dy, dx, ys, xs, a[ys, xs], b[ys, xs]))
+    # soft or hard decided over a stretch of seam, not pixel by pixel: a seam whose depth jump hovered at
+    # the threshold flipped along its length and waved (p42's mirror frame, 2026-11-25)
+    js = cv2.GaussianBlur(jsum, (0, 0), 1.5)
+    jc = cv2.GaussianBlur(jcnt, (0, 0), 1.5)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        soft_cell = np.where(jc > 1e-6, js / jc, 1.0) < SOFT_JUMP
+    for dy, dx, ys, xs, ia, ib in pairs:
+        soft = soft_cell[ys // F, xs // F]
+        ys, xs, ia, ib = ys[soft], xs[soft], ia[soft], ib[soft]
+        ra = coef[ia, 0] * xs + coef[ia, 1] * ys + coef[ia, 2]
+        rb = coef[ib, 0] * (xs + dx) + coef[ib, 1] * (ys + dy) + coef[ib, 2]
+        gy, gx = ys // F, xs // F
+        np.add.at(num, (gy, gx), (ra + rb) / 2)
+        np.add.at(den, (gy, gx), 1.0)
+        seeds[ia, gy, gx] = True
+        seeds[ib, (ys + dy) // F, (xs + dx) // F] = True
+    out: list[np.ndarray | None] = [None] * len(planes)
+    if not den.any():
+        return F, out
+    # everything is smoothed over sig cells (W / 2): a bend that followed the ragged seam pixel by pixel
+    # waved the straight lines beside it (p42's mirror frames, 2026-11-25)
+    sig = max(1.0, W / F / 2)
+    bn, bd = cv2.GaussianBlur(num, (0, 0), sig), cv2.GaussianBlur(den, (0, 0), sig)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        target = np.where(bd > 1e-6, bn / bd, 0.0)             # the shared depth at and near soft seams
+    gys, gxs = np.mgrid[0:gh, 0:gw]
+    cx, cy = (gxs + 0.5) * F - 0.5, (gys + 0.5) * F - 0.5
+    line = 1.0 / (math.sqrt(2 * math.pi) * sig)                 # a straight seam's blurred density on it
+    for i in range(len(planes)):
+        if not seeds[i].any():
+            continue
+        rho = coef[i, 0] * cx + coef[i, 1] * cy + coef[i, 2]
+        sd = seeds[i].astype(np.float64)
+        n_, d_ = cv2.GaussianBlur(sd * (target - rho), (0, 0), sig), cv2.GaussianBlur(sd, (0, 0), sig)
+        with np.errstate(invalid="ignore", divide="ignore"):
+            # the seam's offset carried smoothly off it, full strength on the seam (gaps in it too),
+            # fading over ~2 sig
+            delta = np.where(d_ > 1e-6, n_ / d_, 0.0) * np.clip(2 * d_ / line, 0.0, 1.0)
+        delta = delta.astype(np.float32)
+        if np.abs(delta).max() > 0:
+            out[i] = delta
+    return F, out

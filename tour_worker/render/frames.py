@@ -410,7 +410,10 @@ class ShotWarp:
 
     @staticmethod
     def _warp_box(img: np.ndarray, m: np.ndarray, box) -> np.ndarray:
-        """img through m (output px -> img px) over the output box (r0, r1, c0, c1)."""
+        """img through m (output px -> img px) over the output box (r0, r1, c0, c1); m may be the
+        box's own (map x, map y) in img px (a bent parallax layer)."""
+        if isinstance(m, tuple):
+            return cv2.remap(img, m[0], m[1], cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
         r0, r1, c0, c1 = box
         mm = m @ np.array([[1, 0, c0], [0, 1, r0], [0, 0, 1]], float)
         return cv2.warpPerspective(img, mm, (c1 - c0, r1 - r0), flags=cv2.WARP_INVERSE_MAP | cv2.INTER_LINEAR,
