@@ -65,7 +65,7 @@ OPENING_GLIDE = 1.5          # the tour opens by moving into the home
 # front of it; a glide or pan looks down a room, where walls 1.2 m+ away are the room itself
 # (user 2026-11-16, Home Scan: shots closing in on walls the floor plan does not hold - a poorly
 # captured wall is no "tall" cell - so the rendered check looks 1.8 m out for every room move)
-OCC_NEAR_KIND = {"backout": 0.5, "wall_pan": 1.5, "corner_sweep": 1.8, "panorama": 1.5, "descend": 1.8, "truck": 2.0, "rise": 1.8, "exit": 0.9, "walkway": 2.0, "arc": 2.0, "room_pan": 1.8, "hold_pan": 1.8, "push": 1.8, "pull": 1.8, "reveal": 1.8, "link": 1.2, "enter": 1.5, "glide": 1.8, "pan": 1.2, "detail": 0.7}
+OCC_NEAR_KIND = {"backout": 0.5, "wall_pan": 1.5, "corner_sweep": 1.8, "panorama": 1.5, "descend": 1.8, "truck": 2.0, "rise": 1.8, "exit": 0.9, "through": 0.9, "walk": 0.9, "walkway": 2.0, "arc": 2.0, "room_pan": 1.8, "hold_pan": 1.8, "push": 1.8, "pull": 1.8, "reveal": 1.8, "link": 1.2, "enter": 1.5, "glide": 1.8, "pan": 1.2, "detail": 0.7}
 PAN_SWEEP = 50.0
 AIM_Z_MAX = EYE - 0.10        # a room shot never looks up: not at a ceiling, not at upper cabinets
 LOW_TOP = 1.4                 # m: an object whose top is below this is a surface a room shot may aim at
@@ -148,6 +148,21 @@ EXIT_STOP = 1.0               # m before the doorway an exit ends (door frames s
 EXIT_LEN = (1.2, 3.0)         # m an exit travels along the route
 EXIT_AHEAD = 2.5              # m ahead along the route it looks (where it is going)
 AFTER_EXIT = (0.5, 1.2)       # m into the next room its walk-in starts after an exit
+# room changes (client review 2026-11-20 item 6; user 2026-11-26 option c): the camera flies THROUGH an
+# open-plan seam or a doorway at least THROUGH_MIN_W wide (and clean: the near-lens checks pass) in one
+# move; at a narrower door it cuts, matched - the shot before ends heading for the door, the next starts
+# just past it on the same heading. Between two narrow doors (a bedroom -> hall -> bedroom) a walk
+# along the hall carries the move, so every cut is at a door and keeps its heading.
+THROUGH_MIN_W = 1.2           # m: a doorway this wide is flown through
+THROUGH_BEFORE = (0.8, 1.8)   # m before the opening a through flight starts
+THROUGH_AFTER = (0.9, 2.2)    # m past it it ends, turning onto what the room is about
+THROUGH_TURN_FROM = 0.45      # of the flight: where its look starts turning from ahead onto the room
+FLIGHT_S = (3.0, 5.5)         # s a flight leg lasts (item 9: never under 3 s; short, so the 90 s cap keeps them)
+FLIGHT_PACE = (0.25, 0.45)    # m/s: a leg flies at the previous shot's pace, within these
+WALK_LEN = (0.8, 4.5)         # m a walk between two narrow doors travels (longer: no matched chain)
+MATCH_TURN = 30.0             # deg: a walk-in after a door keeps within this of the heading through it
+AFTER_DOOR_FRONT = 1.0        # m in front a matched walk-in needs at its start (it is mid-flight, just past a door)
+UNFRAMED_W = 1.0              # score a matched walk-in loses ending without its subject framed (kept: the cut matters more)
 PRIOR_W = 0.6                 # score of a kind the room's profile asks for
 ROOM_REPEAT_W = 0.5           # score lost repeating a kind the room already had
 # the photo tours' sequence rules (planner/cinematic.py), on this planner's score scale (x0.4)
@@ -165,7 +180,7 @@ DOLLY_KINDS = ("push", "pull", "rise", "descend", "enter")   # the moves led by 
 DOLLY_CAP_W = 2.0             # past a third of the tour's shots          (2D: -5.0)
 DOLLY_RUN_W = 0.8             # two in a row                              (2D: -2.0)
 HERO_TRAVEL_W = 0.2           # a hero shot that travels                  (2D: +0.5)
-TRAVELS = ("backout", "walkway", "truck", "arc", "rise", "descend", "corner_sweep", "exit", "enter", "push", "pull", "glide")
+TRAVELS = ("backout", "walkway", "truck", "arc", "rise", "descend", "corner_sweep", "exit", "through", "walk", "enter", "push", "pull", "glide")
 MIN_KIND_S = {"backout": 3.0, "wall_pan": 3.0, "room_pan": 3.8, "pan": 3.8, "panorama": 4.5, "truck": 3.5, "arc": 3.5, "rise": 2.8, "descend": 2.8,
               "corner_sweep": 3.5}
 # the move library mixes (user 2026-11-17: "we need like 10 15 camera moves we mix and match. not all
@@ -175,7 +190,7 @@ KIND_CAP = {"backout": 3, "wall_pan": 3, "rise": 2, "descend": 1, "panorama": 2,
             "room_pan": 1, "push": 2, "pull": 2, "glide": 2, "hold_pan": 1}
 KIND_SHARE = 0.25
 CAP_W = 3.0                   # past its cap
-FLIGHT = ("exit", "enter", "link", "reveal")      # the moves between rooms (not capped)
+FLIGHT = ("exit", "through", "walk", "enter", "link", "reveal")      # the moves between rooms (not capped)
 # small rooms (user 2026-11-17: "the bathrooms never got included, even though some shot can be
 # managed, like from the deepest point in the bath escaping backwards towards the hall"): the camera
 # starts deep in the room looking into it and backs out toward its door, the room opening up
@@ -223,7 +238,7 @@ RELAX = 0.8                   # the second try: room to breathe x this ...
 OWN_MIN_RELAXED = 0.35        # ... and this much of its own room in view
 OWN_PIECE_NEAR = 3.5          # m: a walk / arc framing the piece its type is about from this close needs no own share
 OWN_MIN = 0.5                 # a room shot's view is at least half its own room
-OWN_FREE = ("enter", "reveal", "link", "pan", "detail", "exit")   # they look in from outside it, or back over the home
+OWN_FREE = ("enter", "reveal", "link", "pan", "detail", "exit", "through", "walk")   # they look in from outside it, or back over the home
 COVER_OWN_MIN = 0.6           # a room's further shot shows mostly that room (not the hallway beyond)
 COMPOSED = ("walkway", "arc", "room_pan", "push", "pull", "truck", "rise", "corner_sweep", "panorama", "descend",
             "wall_pan", "backout")    # the kinds a room's further shots may be
@@ -261,6 +276,24 @@ def move_motion(m, end: bool):
     return Motion(float(v @ right) / (2 * half) + float(w @ right) / hf,
                   float(v @ cam_up) / (2 * half) + float(w @ cam_up) / hf,
                   float(v @ fwd) / REF_DEPTH_M * 0.5)
+
+
+def _route_point(poly: np.ndarray, s_: np.ndarray, s: float) -> np.ndarray:
+    """The point s m along a route; past its end, straight on along its last stretch (a look ahead
+    does not stop on the eye where the route ends)."""
+    if s <= s_[-1]:
+        return np.array([np.interp(s, s_, poly[:, j]) for j in (0, 1)])
+    k = int(np.searchsorted(s_, s_[-1] - 0.5))
+    d = poly[-1] - poly[min(k, len(poly) - 2)]
+    n = float(np.linalg.norm(d))
+    return poly[-1] + (d / n if n > 1e-9 else 0.0) * (s - s_[-1])
+
+
+def ends_backward(m) -> bool:
+    """The move leaves its shot moving backward (render/continuity.py's forward-back test against a
+    forward move): the shot before a forward flight out of the room would reverse into it."""
+    from tour_worker.render.continuity import Motion, _axial_reversal
+    return _axial_reversal(_unit(move_motion(m, end=True)), Motion(0.0, 0.0, 10.0))
 
 
 def _unit(mo):
@@ -564,7 +597,8 @@ class RoomMoves:
     def _best(self, room: str, dur: float, *, earlier=(), prev=None, piece_rank: int = 0,
              opening: bool = False, closing: bool = False, kind: str = "room",
              next_room: str | None = None, enter_route=None, after_exit: bool = False,
-             final: bool = False, follows_link: bool = False, covered: np.ndarray | None = None) -> tuple[Move | None, list[str]]:
+             final: bool = False, follows_link: bool = False, covered: np.ndarray | None = None,
+             then_forward: bool = False) -> tuple[Move | None, list[str]]:
         """The best move for a shot of `room` lasting dur s. earlier: (first, last) poses of the
         room's earlier shots; prev: the previous shot's last pose; next_room: the tour's next room
         (an opening reveal turns onto it). Returns (move, warnings).
@@ -729,12 +763,14 @@ class RoomMoves:
             # room's kind, then the rest - a room is shown even where no view of its kind passes the
             # render checks (Home Scan v17: six whole-sofa views, all with a door frame at the edge,
             # and the living room was skipped while 1369 other views were never tried)
-            shown = [[m for m in t if m.kind in ("link",) or self.shows_type(room, m)] for t in tiers]
+            # (a walk-in picking up a matched cut at the door counts: the cut is the point of it)
+            shown = [[m for m in t if m.kind in ("link",) or m.why.get("after_exit") or self.shows_type(room, m)]
+                     for t in tiers]
             typed = {id(m) for t in shown for m in t}
             if any(o["class"] in TYPE_WHOLE for o in self.type_signs(room)):
                 # (a walk or arc framing the room's bed / sofa piece counts: a tight room's bed is
                 # framed by bed_seen - most of it and its head - the whole of it fits no frame there)
-                whole = [[m for m in t if m.kind in ("link",) or self.shows_type(room, m, whole=True)
+                whole = [[m for m in t if m.kind in ("link",) or m.why.get("after_exit") or self.shows_type(room, m, whole=True)
                           or (m.kind in ("walkway", "arc") and m.piece is not None and m.piece.cls in TYPE_WHOLE
                               and self.framed(m))] for t in shown]
                 w_ids = {id(m) for t in whole for m in t}
@@ -748,6 +784,11 @@ class RoomMoves:
                     + [[m for m in t if id(m) not in w_ids] for t in shown]
             rest = [[m for m in t if id(m) not in typed] for t in tiers]
             tiers = shown + rest
+        if after_exit:                             # the matched walk-in first: the cut at the door comes first
+            walk_in = [m for t in tiers for m in t if m.why.get("after_exit")]
+            if walk_in:
+                w_ids = {id(m) for m in walk_in}
+                tiers = [walk_in] + [[m for m in t if id(m) not in w_ids] for t in tiers]
         # what the room asks for (its profile) and variety (never the same kind twice running)
         prof = self.profile(room)
         used = self.__dict__.setdefault("_kinds", {}).get(room, [])
@@ -760,6 +801,8 @@ class RoomMoves:
             vr = self.sequence_cost(m) + (ROOM_REPEAT_W if m.kind in used else 0.0)
             if kind == "hero" and m.kind in TRAVELS:
                 pr += HERO_TRAVEL_W
+            if then_forward and ends_backward(m):    # the room is left flying forward (item 5)
+                vr += CUT_AXIAL_W
             if pr or vr:
                 m.score += pr - vr
                 m.why["prior"] = round(pr - vr, 2)
@@ -947,8 +990,9 @@ class RoomMoves:
         if m.kind == "backout":
             return f0 >= BACKOUT_FRONT[0] and f1 >= BACKOUT_FRONT[1]
         front, aim_min = self.breathe(getattr(self, "_room_now", None))
-        return f0 >= k * (min(FRONT_MIN_ENTER, front) if m.kind == "enter" else front) and f1 >= k * front \
-            and aim >= k * aim_min
+        f0_min = (AFTER_DOOR_FRONT if m.why.get("after_exit") else min(FRONT_MIN_ENTER, front) if m.kind == "enter"
+                  else front)
+        return f0 >= k * f0_min and f1 >= k * front and aim >= k * aim_min
 
     def breathe(self, room) -> tuple[float, float]:
         """(room in front, distance to the subject) a shot of `room` needs: FRONT_MIN / AIM_MIN in a
@@ -979,6 +1023,13 @@ class RoomMoves:
             return False                          # (the study's pan onto a bare wall and a door frame)
         if self.pitch_room(m) < -0.5:            # never steeper than the cap (PITCH_MAX_ROOM / _RISE)
             return False
+        if m.why.get("after_exit"):              # a matched walk-in: the cut at the door comes first
+            if not self.moves_enough(m, dur):
+                return False
+            if not (self.framed(m) or getattr(self, "relaxed", False)) and not m.why.get("unframed"):
+                m.why["unframed"] = True
+                m.score -= UNFRAMED_W
+            return True
         return self.moves_enough(m, dur) and (self.framed(m) or getattr(self, "relaxed", False))
 
     def _points(self, room: str, mask: np.ndarray) -> np.ndarray:
@@ -1890,6 +1941,155 @@ class RoomMoves:
         self.record(best)
         return best, []
 
+    def crossings(self, route) -> list[dict]:
+        """Where the walking route passes from one room into the next: {k (first route point past
+        it), s (m along the route), from, to, width_m, open (one open-plan space), narrow (a cut
+        there: not open and narrower than THROUGH_MIN_W)}. The width is twice the clearance to the
+        walls where the route crosses (it keeps to a doorway's middle)."""
+        sp = self.space
+        poly, _ = route
+        s_ = self._along(poly)
+        at = [sp.room_at(q) for q in poly]
+        rdt = getattr(sp, "room_dt", sp.dt)
+        out = []
+        for k in range(1, len(poly)):
+            if at[k] is None or at[k - 1] is None or at[k] == at[k - 1]:
+                continue
+            r = 0.0
+            for q, s in zip(poly, s_):
+                if abs(s - s_[k]) <= 0.25:
+                    i, j = sp.cell(q)
+                    if 0 <= i < rdt.shape[0] and 0 <= j < rdt.shape[1]:
+                        r = max(r, float(rdt[i, j]))
+            open_ = at[k] in sp.spaces.get(at[k - 1], {at[k - 1]})
+            out.append({"k": k, "s": float(s_[k]), "from": at[k - 1], "to": at[k], "width_m": round(2 * r, 2),
+                        "open": open_, "narrow": not open_ and 2 * r < THROUGH_MIN_W})
+        return out
+
+    def flight(self, kind: str, room: str, route, start: tuple[float, float], end: tuple[float, float],
+               pace: float, extra_s: float = 0.0, prev=None, earlier=(), aim=None, piece=None,
+               end_room: str | None = None, matched: bool = False,
+               look_max_s: float | None = None, geometry_only: bool = False) -> tuple[Move | None, list[str]]:
+        """One leg of a room change along the walking route: it starts between start[0] and start[1]
+        m along the route and ends between end[0] and end[1] m, at `pace` m/s (FLIGHT_S long, never
+        under 3 s), looking ahead along the route - and, given `aim` (a through flight into the next
+        room), turning onto it over its second half. matched: it picks up a cut at a door, so it
+        starts on the route's heading (no jump-cut test: the door is the cut). end_room: where it
+        must end. extra_s: the cut handle its path is planned longer by. look_max_s: the look ahead
+        stops there (an exit / a walk keeps looking at the door it heads for, not round the bend past
+        it); a through flight turns onto `aim` only as far as the turn limit allows. geometry_only:
+        a dry run (no render checks, nothing recorded) - its best candidate by score. Returns the move
+        (why.dur_s: its length) or None with why."""
+        sp = self.space
+        self.turn_budget, self.move_budget = MAX_TURN_DPS * PRE_SYNC_SHARE["room"], MAX_MOVE_MPS * PRE_SYNC_SHARE["room"]
+        poly, _ = route
+        s_ = self._along(poly)
+        at = [sp.room_at(q) for q in poly]
+        pace = float(np.clip(pace, *FLIGHT_PACE))
+        u = np.linspace(0, 1, SAMPLES)
+        fp = (piece.frame or piece) if piece is not None else None
+        cands = []
+        st = dict.fromkeys(("starts", "ends", "short", "speed", "clear", "cut", "heading", "still"), 0)
+        for rmin in RMIN_LADDER:
+            ok = [sp.clearance(q) >= rmin and not self.in_doorway(q) for q in poly]
+            ks_ = [k for k in range(len(poly)) if start[0] <= s_[k] <= start[1] and ok[k]]
+            ke_ = [k for k in range(len(poly)) if end[0] <= s_[k] <= end[1] and ok[k]
+                   and (end_room is None or at[k] == end_room)]
+            st["starts"], st["ends"] = max(st["starts"], len(ks_)), max(st["ends"], len(ke_))
+            for ks in ks_[::2]:
+                for ke in ke_[::2]:
+                    L = s_[ke] - s_[ks]
+                    if L < 0.6:
+                        st["short"] += 1
+                        continue
+                    dur = float(np.clip(L / pace, *FLIGHT_S))
+                    if L / (dur + extra_s) * self.peak(2.1) > self.move_budget:
+                        st["speed"] += 1
+                        continue
+                    seg = poly[ks:ke + 1]
+                    if min(sp.clearance(q) for q in seg) < rmin * 0.9:
+                        st["clear"] += 1
+                        continue
+                    path = resample(smooth(sp, seg, rmin), SAMPLES)
+                    d = self._along(path)
+                    s_look = s_[-1] if look_max_s is None else min(s_[-1], look_max_s)
+                    look = np.array([_route_point(poly, s_, min(s_[ks] + x + EXIT_AHEAD, s_look)) for x in d])
+                    close = np.linalg.norm(look - path, axis=1) < 1.0     # the route ends at the eye: straight on
+                    if close.any() and look_max_s is None:
+                        look[close] = [_route_point(poly, s_, s_[ks] + x + EXIT_AHEAD) for x in d[close]]
+                    tgt = np.c_[look, np.full(SAMPLES, EYE - LOOK_DROP)]
+                    if float(np.min(np.linalg.norm(look - path, axis=1))) < 0.8:   # the route ends at the eye
+                        st["short"] += 1
+                        continue
+                    core = 0.0
+                    turn = move = None
+                    if aim is not None:
+                        v = np.clip((u - THROUGH_TURN_FROM) / (1 - THROUGH_TURN_FROM), 0, 1)
+                        w = (v * v * (3 - 2 * v))[:, None]
+                        ahead_t = tgt
+                        for wmax in (1.0, 0.7, 0.45, 0.25, 0.0):     # as far onto the room as the turn limit allows
+                            tgt = cap_pitch(path, (1 - wmax * w) * ahead_t + wmax * w * np.asarray(aim, float)[None], PITCH_LADDER[0])
+                            if float(np.min(np.linalg.norm(tgt[:, :2] - path, axis=1))) < 0.5:
+                                turn = None
+                                break
+                            turn, move = trial_speeds(path, tgt, dur + extra_s, EYE, "linear" if self.continuous else "ease_in_out")
+                            if turn <= self.turn_budget:
+                                break
+                        if turn is None:
+                            st["short"] += 1
+                            continue
+                        if fp is not None:
+                            core = next((c for c in CORES if in_frame(path[-1], tgt[-1], fp, c)), 0.0)
+                    first, last = (path[0], tgt[0]), (path[-1], tgt[-1])
+                    if (not matched and jump_cut(prev, first)) or repeats(first, last, earlier):
+                        st["cut"] += 1
+                        continue
+                    if matched:                     # it keeps the heading through the door it follows
+                        h = path[min(8, SAMPLES - 1)] - path[0]
+                        ahead = look[0] - path[0]
+                        c = float(h @ ahead) / max(float(np.linalg.norm(h) * np.linalg.norm(ahead)), 1e-9)
+                        if c < math.cos(math.radians(MATCH_TURN)):
+                            st["heading"] += 1
+                            continue
+                    # the previous shot's pace kept (item 4), then a deep view ahead, then the room framed
+                    score = 1.0 - abs(L / dur - pace) / pace + 0.1 * min(
+                        sp.view_depth(path[-1], math.atan2(*(tgt[-1][:2] - path[-1])[::-1]), HFOV), 6.0) + 1.0 * core
+                    m = Move(kind, path, tgt, score, piece=piece if aim is not None else None,
+                             subject=piece_box(fp) if (aim is not None and fp is not None) else None,
+                             easing="linear", why={"travel_m": round(L, 2), "dur_s": round(dur, 2),
+                                                   "matched": matched, "core_end": core})
+                    if turn is None:
+                        turn, move = trial_speeds(path, tgt, dur + extra_s, EYE, "linear" if self.continuous else "ease_in_out")
+                    if turn > self.turn_budget or move > self.move_budget:
+                        st["speed"] += 1
+                        continue
+                    m.why.update(turn_dps=round(turn, 1), move_mps=round(move, 2))
+                    if self.moves_enough(m, dur):
+                        cands.append(m)
+                    else:
+                        st["still"] += 1
+            if cands:
+                break
+        if not cands:
+            return None, [f"{kind}_no_move:{room}:" + "/".join(f"{k}{v}" for k, v in st.items() if v)]
+        if geometry_only:
+            return max(cands, key=lambda m: m.score), []
+        if self.occ is not None:
+            pts_ = np.concatenate([m.eye for m in cands])
+            c = pts_.mean(0)
+            self.occ.focus(c, float(np.linalg.norm(pts_ - c, axis=1).max()) + OCC_NEAR + EXIT_AHEAD)
+        # _check's speed test takes one length: the longest leg's (each passed its own above)
+        best, least = self._check(room, cands, max(m.why["dur_s"] for m in cands) + extra_s)
+        if best is None:
+            why = "speed" if least is None else (f"near{least.why['near_lens']}" if "near_lens" in least.why
+                                                 else f"edge{least.why['edge_cover']}" if "edge_cover" in least.why
+                                                 else f"void{least.why['void']}" if least.why.get("void", 0) > VOID_MAX
+                                                 else f"occ{round(least.occ, 2)}")
+            return None, [f"{kind}_blocked:{room}:{why}:{len(cands)}"]
+        best.why.update(candidates=len(cands), occlusion=round(best.occ, 3))
+        self.record(best)
+        return best, []
+
     def _enter_after_exit(self, room, piece, route, rmin, dur, earlier) -> list[Move]:
         sp = self.space
         poly, _ = route
@@ -1923,7 +2123,8 @@ class RoomMoves:
                     continue
                 path = resample(path, SAMPLES)
                 h0 = path[min(8, SAMPLES - 1)] - path[0]
-                if float(h0 @ (ahead - poly[ks])) <= 0:          # it keeps flying the same way
+                a0 = ahead - poly[ks]                            # it keeps flying the same way
+                if float(h0 @ a0) < math.cos(math.radians(MATCH_TURN)) * float(np.linalg.norm(h0) * np.linalg.norm(a0)):
                     continue
                 tgt = cap_pitch(path, (1 - w) * t0 + w * aim, PITCH_LADDER[0])
                 if repeats((path[0], tgt[0]), (path[-1], tgt[-1]), earlier):
@@ -2533,7 +2734,7 @@ class RoomMoves:
             worst = max(worst, self.occ.cover(e, t, HFOV, m.piece, OCC_NEAR_KIND.get(m.kind, OCC_NEAR)))
             if worst > MAX_OCC:                       # already out: the other poses cannot bring it back
                 break
-            if m.kind not in ("link", "detail", "exit", "backout"):     # (an exit / back-out passes door frames)
+            if m.kind not in ("link", "detail", "exit", "walk", "backout"):     # (an exit / walk / back-out passes door frames)
                 # a door frame or a wall at the frame's edge, right at the lens (user 2026-11-16, Krk:
                 # the bedroom shot ended with the door frame over a quarter of the frame)
                 edge = self.occ.cover(e, t, HFOV, m.piece, EDGE_NEAR, region="full")

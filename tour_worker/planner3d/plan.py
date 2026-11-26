@@ -293,7 +293,7 @@ def plan_tour_3d(model, scene: dict, rooms: list[dict], listing_id: str, cfg: Pl
             mover.cover_stats = {}
             mv, cw = mover.best(room, dur, earlier=earlier_, prev=prev, piece_rank=wide.get(room, 0),
                                 kind=kind, covered=covered.get(room, np.zeros(0, np.int64)),
-                                final=room == last_room)
+                                final=room == last_room, then_forward=_leaves_flying(i))
             if mv is None:
                 st = getattr(mover, "cover_stats", {}) or {}
                 seen = len(covered.get(room, ())) / max(len(walls), 1)
@@ -311,35 +311,149 @@ def plan_tour_3d(model, scene: dict, rooms: list[dict], listing_id: str, cfg: Pl
             wide[room] += 1
             prev = mv.last
         return prev
-    exits: list = []                              # the shots flying on toward the next room
-    after_exit: set = set()                       # rooms whose first shot picks an exit's flight up
+    exits: list = []                              # flight chains (lists of (sel, mv)): dropped whole for length
+    after_exit: set = set()                       # rooms whose first shot picks a matched cut at their door up
+    flown_in: set = set()                         # rooms a through flight already entered
+    room_changes: list = []                       # per room change: its doors and how it was crossed (report)
 
-    def _exit_room(room: str, i: int, prev):
-        """The room's last shot flies on toward the next room along the walking route (user
-        2026-11-16: "use the floor plan ... moving toward the next room, a drone shot vibe"); the
-        next room's walk-in, when it is through a doorway, starts inside it on the same heading."""
+    def _rechoose(before, pair):
+        """pair (sel, mv) planned again after `before` - the next room's first shot when the flight
+        into it is dropped; the old move when no other passes."""
+        from tour_worker.planner3d.moves import move_motion
+        sel, old = pair
+        mover._last_exit = move_motion(before[1], end=True)
+        earlier_ = [p for k in sorted(space.spaces.get(sel.room_key, {sel.room_key})) for p in poses.get(k, [])
+                    if p[0] is not old.first[0]]
+        mv, _ = mover.best(sel.room_key, sel.final_duration, earlier=earlier_, prev=before[1].last, piece_rank=0,
+                           kind=sel.kind, enter_route=enters.get(id(sel)), final=sel.room_key == last_room)
+        if mv is None:
+            return pair
+        mv.why["rechosen_after_dropped_flight"] = True
+        return (sel, mv)
+
+    can_fly: dict = {}
+
+    def _leaves_flying(i: int) -> bool:
+        """selected[i] is its room's last planned shot and a flight forward follows it."""
+        nxt = selected[i + 1] if i + 1 < len(selected) else None
+        if not (nxt is not None and nxt.room_key != selected[i].room_key and id(nxt) not in links
+                and nxt.kind != "detail" and id(selected[i]) not in links):
+            return False
+        key = (selected[i].room_key, nxt.room_key)
+        if key not in can_fly:                     # a dry run of the flight (geometry only, no renders)
+            can_fly[key] = bool(_fly_on(selected[i].room_key, i, None, dry=True))
+        return can_fly[key]
+
+    def _fly_on(room: str, i: int, prev, dry: bool = False):
+        """The room change after `room` (client review item 6; user 2026-11-26, option c): along the
+        walking route, cut only at narrow doors (Space doorways under THROUGH_MIN_W, not open plan),
+        each cut matched - the leg before ends heading for the door (an exit, or a walk along a hall),
+        the leg after starts just past it on the same heading. With no narrow door left before the
+        next room, the last leg flies through into it and turns onto what it holds; else the next
+        room's first shot is the matched walk-in (after_exit). A leg that cannot be flown drops the
+        chain: the next room is entered as before."""
         import dataclasses
-        from tour_worker.planner.lengths import length_range
+        from tour_worker.planner3d.moves import (AFTER_EXIT, EXIT_LEN, EXIT_STOP, THROUGH_AFTER,
+                                                 THROUGH_BEFORE, WALK_LEN)
+        DOOR_GAP = EXIT_STOP + AFTER_EXIT[1] + 0.6
         nxt = selected[i + 1] if i + 1 < len(selected) else None
         if nxt is None or id(nxt) in links or nxt.kind == "detail":
             return prev
-        r = space.route(room, nxt.room_key)
+        dst = nxt.room_key
+        r = space.route(room, dst)
         if not r:
             return prev
-        dur = round(length_range("room", c3.pacing)[1] * reach + handle, 2)  # room to fly it at a walking pace
-        earlier_ = [p for k in sorted(space.spaces.get(room, {room})) for p in poses.get(k, [])]
-        mv, w = mover.exit(room, nxt.room_key, r, dur, prev, earlier_)
-        if mv is None:
-            warnings.extend(x for x in w if x not in warnings)
+        cr = mover.crossings(r)
+        into = [c for c in cr if c["to"] == dst]
+        if not into:
             return prev
-        sel = dataclasses.replace(first_s[room], role="detail", kind="room", is_hero=False, is_lead=False,
-                                  final_duration=dur, raw_duration=dur)
-        poses.setdefault(room, []).append((mv.first, mv.last))
-        moves.append((sel, mv))
-        exits.append((sel, mv))
-        if id(nxt) in enters:
+        entry = into[-1]
+        # narrow doors closer than a leg needs between them (EXIT_STOP + AFTER_EXIT + a little) are one
+        # cut: the leg before stops short of the first, the leg after starts past the last
+        cuts = []
+        for c in (c for c in cr if c["narrow"] and c["s"] <= entry["s"]):
+            if cuts and c["s"] - cuts[-1]["last_s"] < DOOR_GAP:
+                cuts[-1]["last_s"], cuts[-1]["to"], cuts[-1]["is_entry"] = c["s"], c["to"], c is entry
+            else:
+                cuts.append({"s": c["s"], "last_s": c["s"], "to": c["to"], "is_entry": c is entry})
+        if dry:
+            log = {"legs": []}
+        else:
+            log = {"from": room, "to": dst, "route_m": round(float(mover._along(r[0])[-1]), 2),
+                   "doors": [{**{k: c[k] for k in ("from", "to", "width_m", "open", "narrow")}, "at_m": round(c["s"], 2)} for c in cr],
+                   "legs": []}
+            room_changes.append(log)
+        # the previous shot's pace (item 4: the speed carries through the cut)
+        if moves and not dry:
+            last_sel, last_mv = moves[-1]
+            pace = float(np.linalg.norm(np.diff(last_mv.eye, axis=0), axis=1).sum()) / max(last_sel.final_duration, 1e-6)
+        else:
+            pace = 0.3
+        pieces = space.main_pieces(dst)
+        piece = pieces[0] if pieces else None
+        fp = (piece.frame or piece) if piece is not None else None
+        aim = np.array([*fp.centre, fp.top]) if fp is not None else mover._goal(dst)
+        chain, p_ = [], prev
+        for j in range(len(cuts) + 1):
+            door = cuts[j] if j < len(cuts) else None
+            if door is None and cuts and cuts[-1]["is_entry"]:
+                break                                  # the next room's own door is the last cut
+            if door is None:
+                kind, end, end_room, aim_, piece_ = "through", (entry["s"] + THROUGH_AFTER[0], entry["s"] + THROUGH_AFTER[1]), dst, aim, piece
+            else:
+                kind = "exit" if j == 0 else "walk"
+                end, end_room, aim_, piece_ = (door["s"] - EXIT_STOP - 0.6, door["s"] - EXIT_STOP), None, None, None
+            if j == 0:
+                start = ((entry["s"] - THROUGH_BEFORE[1], entry["s"] - THROUGH_BEFORE[0]) if door is None
+                         else (end[0] - EXIT_LEN[1], end[1] - EXIT_LEN[0]))
+                start = (max(0.0, start[0]), max(0.3, start[1]))   # a room point near its door: from it
+            else:
+                d0 = cuts[j - 1]["last_s"]
+                start = (d0 + AFTER_EXIT[0], d0 + AFTER_EXIT[1])
+                if end[1] - start[0] > WALK_LEN[1] + (THROUGH_AFTER[1] if door is None else 0.0):
+                    if not dry:
+                        warnings.append(f"flight_too_long:{room}:{dst}")
+                    chain = None
+                    break
+            k_mid = int(np.searchsorted(mover._along(r[0]), 0.5 * (start[0] + end[1])))
+            mid = space.room_at(r[0][min(len(r[0]) - 1, k_mid)])
+            rk = dst if kind == "through" else room if kind == "exit" else (mid if mid in rtype else room)
+            earlier_ = [p for k in sorted(space.spaces.get(rk, {rk})) for p in poses.get(k, [])]
+            mv, w = mover.flight(kind, rk, r, start, end, pace, handle, None if dry else p_, earlier_, aim=aim_,
+                                 piece=piece_, end_room=end_room, matched=j > 0,
+                                 look_max_s=None if door is None else door["s"] + 0.5, geometry_only=dry)
+            if mv is None:
+                if not dry:
+                    warnings.extend(x for x in w if x not in warnings)
+                chain = None
+                break
+            if dry:
+                chain.append((None, mv))
+                p_ = mv.last
+                continue
+            dur = round(mv.why["dur_s"] + handle, 2)
+            sel = dataclasses.replace(first_s[room], room_key=rk, role="detail", kind="room", is_hero=False,
+                                      is_lead=False, final_duration=dur, raw_duration=dur)
+            chain.append((sel, mv))
+            log["legs"].append({"kind": kind, "room": rk, "travel_m": mv.why["travel_m"], "dur_s": mv.why["dur_s"]})
+            p_ = mv.last
+        if dry:
+            return bool(chain)
+        if not chain:
+            log["legs"] = []
+            log["crossed"] = "as_before"
+            return prev
+        for sel, mv in chain:
+            poses.setdefault(sel.room_key, []).append((mv.first, mv.last))
+            moves.append((sel, mv))
+        exits.append(chain)
+        if chain[-1][1].kind == "through":
+            flown_in.add(id(nxt))
+            log["crossed"] = "through"
+        else:
             after_exit.add(id(nxt))
-        return mv.last
+            log["crossed"] = "matched_cut"
+        return p_
 
     for i, sel in enumerate(selected):
         # no repeats across the room's open-plan space: a hall and the living room it opens into
@@ -357,9 +471,11 @@ def plan_tour_3d(model, scene: dict, rooms: list[dict], listing_id: str, cfg: Pl
             mv, w = mover.best(sel.room_key, sel.final_duration, earlier=earlier, prev=prev,
                                piece_rank=len(poses.get(sel.room_key, [])), opening=i == 0,
                                closing=closing, kind=sel.kind, next_room=nxt,
-                               enter_route=enters.get(id(sel)), after_exit=id(sel) in after_exit,
+                               enter_route=None if id(sel) in flown_in else enters.get(id(sel)),
+                               after_exit=id(sel) in after_exit,
                                final=sel.room_key == last_room and i > 0,
-                               follows_link=i > 0 and id(selected[i - 1]) in links)
+                               follows_link=i > 0 and id(selected[i - 1]) in links,
+                               then_forward=_leaves_flying(i))
         if mv is None and poses.get(sel.room_key) and sel.kind != "detail":
             w = [f"second_angle_dropped:{sel.room_key}"]      # no angle with room to breathe: the first keeps the time
         if mv is not None:
@@ -383,7 +499,7 @@ def plan_tour_3d(model, scene: dict, rooms: list[dict], listing_id: str, cfg: Pl
         if last_of_room and sel.room_key in first_s and id(sel) not in links \
                 and canon(rtype.get(sel.room_key)) not in LOOK_BACK:
             prev = _cover_room(sel.room_key, i, prev)
-            prev = _exit_room(sel.room_key, i, prev)
+            prev = _fly_on(sel.room_key, i, prev)
     if not moves:
         raise ValueError("no room allows a camera move")
     # a room is never shown by a close-up alone: without a room shot its close-up goes too
@@ -403,11 +519,18 @@ def plan_tour_3d(model, scene: dict, rooms: list[dict], listing_id: str, cfg: Pl
             break
         moves = [m for m in moves if m[1] is not pair[1]]   # (the same move: the tuples differ)
         warnings.append(f"coverage_shot_dropped_for_length:{pair[0].room_key}")
-    for pair in exits[::-1]:                      # then the flights on, from the tour's end
+    for chain in exits[::-1]:                     # then the flights on, from the tour's end, whole
         if sum(s_.final_duration - handle for s_, _ in moves) <= cap:
             break
-        moves = [m for m in moves if m[1] is not pair[1]]   # (the same move: the tuples differ)
-        warnings.append(f"exit_dropped_for_length:{pair[0].room_key}")
+        gone = {id(mv) for _, mv in chain}
+        k_after = next((n + 1 for n, (_, mv) in enumerate(moves) if mv is chain[-1][1]), None)
+        moves = [m for m in moves if id(m[1]) not in gone]
+        warnings.append(f"flight_dropped_for_length:{chain[0][0].room_key}")
+        # the shot that followed the flight was chosen to carry it on: chosen again after what now
+        # comes before it (the next room's first shot, entered as before)
+        k_after = None if k_after is None else k_after - len(chain)
+        if k_after is not None and 0 < k_after < len(moves):
+            moves[k_after] = _rechoose(moves[k_after - 1], moves[k_after])
     filmed = {s.room_key for s, _ in moves}
     warnings += [f"room_skipped:{k}" for k in sorted({s.room_key for s in selected} - filmed)]
     for sel, _ in moves:              # a dropped angle gives its time to the room's shot: the same move, slower
@@ -542,6 +665,7 @@ def plan_tour_3d(model, scene: dict, rooms: list[dict], listing_id: str, cfg: Pl
                   for k in space.room_keys],
         "sequence": [r for r in report.sequence],
         "shots": plan_rows,
+        "room_changes": room_changes,
     }
     return plan, rep, report
 
