@@ -43,12 +43,15 @@ def run_scene_label(request: dict, storage, workdir: str, settings: Settings | N
     sc = req.scene
     sw = Stopwatch()
     try:
+        keep = bool(settings.scene_cache_dir)          # the scene cache (SCENE_CACHE_DIR): fetched once
         with sw.stage("scene_fetch"):
-            path = ensure_scene(sc.uri, sc.sha256, sc.format, storage, os.path.join(workdir, "scene"),
+            path = ensure_scene(sc.uri, sc.sha256, sc.format, storage,
+                                settings.scene_cache_dir if keep else os.path.join(workdir, "scene"),
                                 req.image_urls.get(sc.uri))
         with sw.stage("scene_load"):
             model = load_scene(path, sc.format, max_sh_degree=settings.splat_sh_degree)
-        os.remove(path)
+        if not keep:
+            os.remove(path)
     except SceneInvalid as e:
         return failure("scene_invalid", str(e))
     report.note(f"scene: {len(model):,} splats; " + (f"{len(req.rooms)} room(s)" if req.rooms else "no rooms given"))
@@ -75,11 +78,20 @@ def run_scene_label(request: dict, storage, workdir: str, settings: Settings | N
         from tour_worker.jobs.segment import get_segmenter
         with sw.stage("model_load"):
             segmenter = get_segmenter(settings)
-    with sw.stage("survey_segment_vote"):
-        labels, stats, seen = label_scene(model, space, renderer, segmenter, keys, sc.sha256,
-                                          progress=lambda d, n: report.progress(d, n, "views"),
-                                          depth_tol=tuple(req.depth_tol) if req.depth_tol else None,
-                                          moving_vote=tuple(req.moving_vote) if req.moving_vote else None)
+    # the survey views in half precision on the GPU (~2x faster); the shared segmenter goes back to
+    # full precision after, for photo tours' masks
+    fp16_was = getattr(segmenter, "fp16", None)
+    if fp16_was is not None:
+        segmenter.fp16 = True
+    try:
+        with sw.stage("survey_segment_vote"):
+            labels, stats, seen = label_scene(model, space, renderer, segmenter, keys, sc.sha256,
+                                              progress=lambda d, n: report.progress(d, n, "views"),
+                                              depth_tol=tuple(req.depth_tol) if req.depth_tol else None,
+                                              moving_vote=tuple(req.moving_vote) if req.moving_vote else None)
+    finally:
+        if fp16_was is not None:
+            segmenter.fp16 = fp16_was
     report.note(f"labelled {stats['labelled']:,} of {stats['seen']:,} seen Gaussians; {stats['objects']} objects")
     with sw.stage("motion"):
         motion = motion_from_labels(model, labels, seen, space.local, space.up_scene, space.R, sc.sha256)

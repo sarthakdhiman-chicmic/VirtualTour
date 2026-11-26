@@ -114,12 +114,15 @@ def _run_plan_3d(req: TourPlanRequest, storage, workdir: str, sw, t0: float) -> 
     from tour_worker.scene.splat_io import load_scene
     sc = req.scene
     try:
+        from tour_worker.config import get_settings
+        cache = get_settings().scene_cache_dir         # the scene cache (SCENE_CACHE_DIR): fetched once
         with sw.stage("scene_fetch"):
-            path = ensure_scene(sc.uri, sc.sha256, sc.format, storage, os.path.join(workdir, "scene"),
+            path = ensure_scene(sc.uri, sc.sha256, sc.format, storage, cache or os.path.join(workdir, "scene"),
                                 req.image_urls.get(sc.uri))
         with sw.stage("scene_load"):
             model = load_scene(path, sc.format, max_sh_degree=0)
-        os.remove(path)
+        if not cache:
+            os.remove(path)
     except SceneInvalid as e:
         return failure("scene_invalid", str(e))
     except Exception as e:  # noqa: BLE001

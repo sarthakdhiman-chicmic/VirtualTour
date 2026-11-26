@@ -41,6 +41,7 @@ FADE_S = 0.5
 CONNECTORS = {"hallway", "corridor", "landing", "staircase", "stairs", "stairway"}
 LOOK_BACK = {"balcony", "patio", "outdoor_patio", "terrace", "deck", "porch", "garden", "backyard", "rooftop"}
 MAX_WIDE = 3                  # wide shots a room at most (coverage: user 2026-11-16)
+PLAN_BUDGET_S = 240.0         # s of planning before each shot settles for its best within LATE_CHECKS renders
 SYNC_REACH = 0.85            # with music: shots planned at this share of their lengths (the sync lengthens)
 SYNC_HEADROOM = 0.88          # the cap is met before the sync with this share of it
 COVER_ENOUGH = 0.85           # a room whose walls are this covered gets no further shot
@@ -276,6 +277,7 @@ def plan_tour_3d(model, scene: dict, rooms: list[dict], listing_id: str, cfg: Pl
         for s_ in selected:
             s_.final_duration = round(s_.final_duration * reach + handle, 3)
     mover = RoomMoves(space, Occlusion(model, space) if check_occlusion else None)
+    mover.deadline = time.perf_counter() + PLAN_BUDGET_S      # past it: each shot's best within a few checks
     mover.continuous = continuous
     mover.tour_shots = len(selected)               # the moving-in cap: a third of the tour's shots
     last_room = selected[-1].room_key if selected else None

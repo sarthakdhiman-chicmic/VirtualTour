@@ -102,6 +102,9 @@ class Segmenter:
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         self.model.to(self.device)
         self.id2label = {k: common_name(v) for k, v in self.model.config.id2label.items()}
+        # half precision on the GPU (set by the scene_label job for its survey views: ~2x faster;
+        # photo tours' masks stay full precision)
+        self.fp16 = False
 
     def __call__(self, bgr: np.ndarray) -> list[dict]:
         return self.segment(bgr)[0]
@@ -116,7 +119,11 @@ class Segmenter:
         rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
         inputs = self.processor(images=rgb, task_inputs=["panoptic"], return_tensors="pt").to(self.device)
         with self.torch.no_grad():
-            out = self.model(**inputs)
+            if self.fp16 and self.device == "cuda":
+                with self.torch.autocast("cuda", dtype=self.torch.float16):
+                    out = self.model(**inputs)
+            else:
+                out = self.model(**inputs)
         # label_ids_to_fuse: nothing fused (the default) - said explicitly, or transformers logs a
         # line for every image (160 a scene_label run)
         res = self.processor.post_process_panoptic_segmentation(out, target_sizes=[(sh, sw)],

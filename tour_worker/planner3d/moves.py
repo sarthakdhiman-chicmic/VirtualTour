@@ -59,7 +59,13 @@ MOVE_LEN = (0.6, 2.6)
 CORES = (0.75, 0.6, 0.5, 0.4)
 SIT_BACK = 2.4                # m from the piece at the start of a walkway move
 OCC_NEAR, MAX_OCC, OCC_W, OCC_CHECK_KIND = 2.0, 0.20, 3.0, 30
-SHOT_CHECKS = 160             # rendered checks (lens / void) one shot's choice may spend over all its tiers
+SHOT_CHECKS = 60              # rendered checks (lens / void) one shot's choice may spend over all its tiers
+                              # (160 until 2026-11-26: the Home Scan's plan took 19 min on the pod)
+FLIGHT_CHECKS = 40            # ... and a room change's flight, its own (it used to get what the room's
+                              # last shot left - often nothing, and the flight failed unchecked)
+LATE_CHECKS = 6               # past the planning budget (plan.PLAN_BUDGET_S): a shot's last few checks
+PLAN_NEAR_SHARE = 0.5         # floor-plan pre-test: a move whose middle view is this much blocked within
+                              # its near-lens distance (tall cells / walls) is dropped before any render
 OPENING_GLIDE = 1.5          # the tour opens by moving into the home
 # near-lens distance per move: a walkway composes on a piece, so nothing may stand within 2 m in
 # front of it; a glide or pan looks down a room, where walls 1.2 m+ away are the room itself
@@ -1114,6 +1120,9 @@ class RoomMoves:
         sp = self.space
         cands = sorted(cands, key=lambda m: -m.score)
         bud = getattr(self, "_budget", None) or {"kinds": {}, "left": SHOT_CHECKS}
+        import time as _time
+        if _time.perf_counter() > getattr(self, "deadline", float("inf")):
+            bud["left"] = min(bud["left"], LATE_CHECKS)   # over the planning budget: the best so far
         least, checked, done = None, bud["kinds"], set()
         st = self.stage_stats(room, getattr(self, "_cov_now", False))
         while True:
@@ -1129,6 +1138,10 @@ class RoomMoves:
                 if bud["left"] <= 0:                            # the shot's checks are spent
                     st["budget_out"] += 1
                     break
+                if self.occ is not None and self.plan_blocked(m):   # blocked on the floor plan: no render
+                    done.add(id(m))
+                    st["fail_plan"] += 1
+                    continue
                 if m.kind in OWN_SHARE and "own_share" not in m.why:    # it films its own room
                     k = len(m.eye) // 2
                     share = sp.own_share(room, m.eye[k], math.atan2(*(m.tgt[k][:2] - m.eye[k])[::-1]), HFOV)
@@ -2106,7 +2119,9 @@ class RoomMoves:
             pts_ = np.concatenate([m.eye for m in cands])
             c = pts_.mean(0)
             self.occ.focus(c, float(np.linalg.norm(pts_ - c, axis=1).max()) + OCC_NEAR + EXIT_AHEAD)
-        # _check's speed test takes one length: the longest leg's (each passed its own above)
+        # _check's speed test takes one length: the longest leg's (each passed its own above); the
+        # flight's own render budget
+        self._budget = {"kinds": {}, "left": FLIGHT_CHECKS}
         best, least = self._check(room, cands, max(m.why["dur_s"] for m in cands) + extra_s)
         if best is None:
             why = "speed" if least is None else (f"near{least.why['near_lens']}" if "near_lens" in least.why
@@ -2751,6 +2766,27 @@ class RoomMoves:
                     return w2
                 m.tgt = old
         return 1.0
+
+    def plan_blocked(self, m: Move) -> bool:
+        """The floor plan already shows the lens blocked: at the start, middle or end of the move,
+        over PLAN_NEAR_SHARE of the view's middle (the rendered check's CENTRE_X) ends on a wall or
+        tall thing nearer than the move's near-lens distance. Cheap (sight lines on the floor plan);
+        only clear cases - the render decides the rest."""
+        if m.kind in ("detail", "link", "backout", "exit", "walk", "through"):   # (they pass close to walls)
+            return False
+        sp = self.space
+        near = OCC_NEAR_KIND.get(m.kind, OCC_NEAR)
+        half = math.radians(HFOV) / 2
+        offs = np.arctan(np.linspace(-0.6, 0.6, 9) * math.tan(half))      # the frame's middle 60%
+        past = (m.piece.frame or m.piece) if m.piece is not None else None
+        for k in (0, len(m.eye) // 2, len(m.eye) - 1):
+            e, t = m.eye[k], m.tgt[k]
+            h = math.atan2(t[1] - e[1], t[0] - e[0])
+            d = sp.rays(e, h + offs, max_m=near + 0.2, past=past)
+            if float(np.mean(d < near)) > PLAN_NEAR_SHARE:
+                m.why["plan_blocked"] = round(float(np.mean(d < near)), 2)
+                return True
+        return False
 
     def _cover(self, m: Move) -> float:
         if self.occ is None:
