@@ -1969,13 +1969,15 @@ class RoomMoves:
     def flight(self, kind: str, room: str, route, start: tuple[float, float], end: tuple[float, float],
                pace: float, extra_s: float = 0.0, prev=None, earlier=(), aim=None, piece=None,
                end_room: str | None = None, matched: bool = False,
-               look_max_s: float | None = None, geometry_only: bool = False) -> tuple[Move | None, list[str]]:
+               look_max_s: float | None = None, geometry_only: bool = False,
+               start_room: str | None = None) -> tuple[Move | None, list[str]]:
         """One leg of a room change along the walking route: it starts between start[0] and start[1]
         m along the route and ends between end[0] and end[1] m, at `pace` m/s (FLIGHT_S long, never
         under 3 s), looking ahead along the route - and, given `aim` (a through flight into the next
         room), turning onto it over its second half. matched: it picks up a cut at a door, so it
         starts on the route's heading (no jump-cut test: the door is the cut). end_room: where it
-        must end. extra_s: the cut handle its path is planned longer by. look_max_s: the look ahead
+        must end; start_room: where it must start (a room change's first leg starts in the room being
+        left - never across the house from it, user 2026-11-26). extra_s: the cut handle its path is planned longer by. look_max_s: the look ahead
         stops there (an exit / a walk keeps looking at the door it heads for, not round the bend past
         it); a through flight turns onto `aim` only as far as the turn limit allows. geometry_only:
         a dry run (no render checks, nothing recorded) - its best candidate by score. Returns the move
@@ -1992,7 +1994,8 @@ class RoomMoves:
         st = dict.fromkeys(("starts", "ends", "short", "speed", "clear", "cut", "heading", "still"), 0)
         for rmin in RMIN_LADDER:
             ok = [sp.clearance(q) >= rmin and not self.in_doorway(q) for q in poly]
-            ks_ = [k for k in range(len(poly)) if start[0] <= s_[k] <= start[1] and ok[k]]
+            ks_ = [k for k in range(len(poly)) if start[0] <= s_[k] <= start[1] and ok[k]
+                   and (start_room is None or at[k] == start_room)]
             ke_ = [k for k in range(len(poly)) if end[0] <= s_[k] <= end[1] and ok[k]
                    and (end_room is None or at[k] == end_room)]
             st["starts"], st["ends"] = max(st["starts"], len(ks_)), max(st["ends"], len(ke_))

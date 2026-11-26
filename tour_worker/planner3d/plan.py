@@ -421,7 +421,8 @@ def plan_tour_3d(model, scene: dict, rooms: list[dict], listing_id: str, cfg: Pl
             earlier_ = [p for k in sorted(space.spaces.get(rk, {rk})) for p in poses.get(k, [])]
             mv, w = mover.flight(kind, rk, r, start, end, pace, handle, None if dry else p_, earlier_, aim=aim_,
                                  piece=piece_, end_room=end_room, matched=j > 0,
-                                 look_max_s=None if door is None else door["s"] + 0.5, geometry_only=dry)
+                                 look_max_s=None if door is None else door["s"] + 0.5, geometry_only=dry,
+                                 start_room=room if j == 0 else None)
             if mv is None:
                 if not dry:
                     warnings.extend(x for x in w if x not in warnings)
