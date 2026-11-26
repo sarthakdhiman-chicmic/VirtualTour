@@ -237,8 +237,19 @@ def run_tour(request: dict, storage, workdir: str, settings: Settings | None = N
             "mls_uri": mls_uri,
             "stills": stills,
             "continuity": {"summary": continuity.summary(cuts), "cuts": cuts},
+            "sky": _sky_report(plan, warnings),
             "timings": sw.result(),
             "error": None
         }
     except Exception as e:
         return from_exception(e)
+
+
+def _sky_report(plan, warnings: list) -> list[dict]:
+    """The sky effects and their strengths per shot (motion/sky.sky_report); never fails a render."""
+    try:
+        from tour_worker.motion.sky import sky_report
+        return sky_report(plan)
+    except Exception as e:  # noqa: BLE001
+        warnings.append(f"sky_report_failed:{type(e).__name__}")
+        return []

@@ -346,3 +346,35 @@ def load_sky(shot, spec, images_dir: str, src: np.ndarray, duration_s: float) ->
     effects = tuple(e for e in (getattr(spec, "sky_effects", None) or TOUR_EFFECTS) if e in TOUR_EFFECTS)
     return SkyMotion(src, coarse, seed=int(spec.seed), effects=effects, wind=float(shot_wind(shot, w).direction),
                      duration=duration_s, billow_px=float(spec.amplitude_px), billow_hz=float(spec.freq_hz))
+
+
+def sky_report(plan) -> list[dict]:
+    """Per photo shot with a sky (client review item 14: "send the strengths used"): the sky
+    effects drawn, the wind direction, the nearest clouds' drift on screen (% of the frame's width
+    a second, at the shot's widest frame - the item 12 limit is 0.8), the billow (px at the photo's
+    size) and the cloud shadows' strength (how much darker a sunlit surface gets under one, and how
+    much faster than the clouds they sweep). Computed from the plan as the renderer draws it."""
+    from tour_worker.motion.wind import shot_wind
+    from tour_worker.render.camera_path import base_window
+    out = []
+    for shot in plan.shots:
+        src = getattr(shot, "source", None)
+        if src is None:
+            continue
+        for spec in getattr(shot, "motion_regions", None) or []:
+            if spec.effect != "sky_drift":
+                continue
+            effects = [e for e in (getattr(spec, "sky_effects", None) or TOUR_EFFECTS) if e in TOUR_EFFECTS]
+            cam = shot.camera
+            zooms = ([k.zoom for k in cam.keyframes or []] if cam.type == "keyframe_path"
+                     else [z for z in (getattr(cam.start, "zoom", None), getattr(cam.end, "zoom", None)) if z])
+            bw, _ = base_window(src.width, src.height, plan.output.width, plan.output.height)
+            screen = 100.0 * DRIFT_FRAC * min(zooms or [1.0]) / bw
+            row = {"shot_id": shot.shot_id, "room_type": shot.room_type, "region": spec.id, "effects": effects,
+                   "wind": "left_to_right" if shot_wind(shot, src.width).direction > 0 else "right_to_left",
+                   "cloud_drift_pct_fw_s": round(screen, 2) if "drift" in effects else 0.0,
+                   "billow_px": round(float(spec.amplitude_px), 2) if "billow" in effects else 0.0}
+            if "shadows" in effects:
+                row.update(shadow_depth=SHADOW_DEPTH, shadow_speed_x_clouds=[SHADOW_SPEED, SHADOW_SPEED * SHADOW_NEAR])
+            out.append(row)
+    return out
