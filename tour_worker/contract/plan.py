@@ -51,7 +51,7 @@ class MotionBlur(BaseModel):
     degrees); frames whose camera moves min_px_f output px per frame or less (at 1080p, scaled with the
     output diagonal) are drawn exactly as without it; at most max_samples warps a frame."""
     shutter: float = 0.5
-    min_px_f: float = 3.0
+    min_px_f: float = 1.0
     max_samples: int = 5
     model_config = ConfigDict(extra='ignore')
 

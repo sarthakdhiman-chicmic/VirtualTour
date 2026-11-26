@@ -35,7 +35,7 @@ class PlannerConfig(BaseModel):
     # seen (Turkey mix 2026-10-22: 2.0 blurred 51% of frames for ~1 px smears). 3D shots: not yet
     motion_blur: bool = True
     motion_blur_shutter: float = 0.5
-    motion_blur_min_px_f: float = 3.0
+    motion_blur_min_px_f: float = 1.0      # user 2026-11-26: 1 px (at 3 px almost no frame blurred at the tours' pace)
     motion_blur_max_samples: int = 5
     # depth parallax (client review 2026-11-20, item 10; tour_worker/parallax): photo shots' near things
     # slide against far ones the way the move goes; parallax_cap_px is the near-far disparity at a

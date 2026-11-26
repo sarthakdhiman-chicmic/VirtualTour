@@ -45,7 +45,7 @@ class Branding(BaseModel):
 class MotionBlur(BaseModel):
     """A film shutter on fast camera frames (client review 2026-11-20, item 7; contract.plan.MotionBlur)."""
     shutter: float = 0.5
-    min_px_f: float = 3.0
+    min_px_f: float = 1.0
     max_samples: int = 5
 
 
