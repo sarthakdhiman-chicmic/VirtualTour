@@ -63,9 +63,7 @@ SHOT_CHECKS = 60              # rendered checks (lens / void) one shot's choice 
                               # (160 until 2026-11-26: the Home Scan's plan took 19 min on the pod)
 FLIGHT_CHECKS = 40            # ... and a room change's flight, its own (it used to get what the room's
                               # last shot left - often nothing, and the flight failed unchecked)
-LATE_CHECKS = 6               # past the planning budget (plan.PLAN_BUDGET_S): a shot's last few checks
-PLAN_NEAR_SHARE = 0.5         # floor-plan pre-test: a move whose middle view is this much blocked within
-                              # its near-lens distance (tall cells / walls) is dropped before any render
+LATE_CHECKS = 6               # past the planning budget (plan.PLAN_BUDGET_S): a further angle's / flight's last few checks
 OPENING_GLIDE = 1.5          # the tour opens by moving into the home
 # near-lens distance per move: a walkway composes on a piece, so nothing may stand within 2 m in
 # front of it; a glide or pan looks down a room, where walls 1.2 m+ away are the room itself
@@ -127,7 +125,7 @@ DOOR_CLEAR = 0.45            # m: a room shot never starts or ends in a doorway 
 EDGE_NEAR, EDGE_MAX = 0.8, 0.12   # anything within EDGE_NEAR m covering EDGE_MAX of the whole frame blocks it
 NEAR_ANY = 1.0                # m: anything this close to the lens ...
 NEAR_ANY_MAX = 0.25           # ... over this share of the frame, at any of NEAR_ANY_POSES, fails a move
-NEAR_ANY_POSES = 5
+NEAR_ANY_POSES = 3            # (5 until 2026-11-26: renders per candidate, the planning time)
 VOID_MAX = 0.12              # at most this share of a view may be what the scan never captured
 CEIL_PITCH = 0.0             # deg the aim drops when the scan has no ceiling (its black band stays out)
 ANCHOR_HALF = 0.8           # m: the working area a push / pull must show whole
@@ -580,8 +578,12 @@ class RoomMoves:
         """_best; a room with no view under the full rules gets a second try with the softest ones
         eased (room to breathe x RELAX, own-room share OWN_MIN_RELAXED, framing not required) - a
         room skipped is worse than a room shown a little closer (v10: the green house's dining
-        room, study and hall had no shot)."""
-        mv, w = self._best(room, dur, **kw)
+        room, study and hall had no shot). A further angle (covered=) is held to the planning budget."""
+        self._late_ok = kw.get("covered") is not None
+        try:
+            mv, w = self._best(room, dur, **kw)
+        finally:
+            self._late_ok = False
         if mv is None and kw.get("covered") is None and kw.get("kind", "room") != "detail" and self.confident(room):
             self.relaxed = True
             try:
@@ -1121,8 +1123,10 @@ class RoomMoves:
         cands = sorted(cands, key=lambda m: -m.score)
         bud = getattr(self, "_budget", None) or {"kinds": {}, "left": SHOT_CHECKS}
         import time as _time
-        if _time.perf_counter() > getattr(self, "deadline", float("inf")):
-            bud["left"] = min(bud["left"], LATE_CHECKS)   # over the planning budget: the best so far
+        # over the planning budget: further angles and flights settle for their best so far - never a
+        # room's first shot (2026-11-26: four Home Scan rooms were skipped with 6 checks each)
+        if _time.perf_counter() > getattr(self, "deadline", float("inf")) and getattr(self, "_late_ok", False):
+            bud["left"] = min(bud["left"], LATE_CHECKS)
         least, checked, done = None, bud["kinds"], set()
         st = self.stage_stats(room, getattr(self, "_cov_now", False))
         while True:
@@ -1138,10 +1142,6 @@ class RoomMoves:
                 if bud["left"] <= 0:                            # the shot's checks are spent
                     st["budget_out"] += 1
                     break
-                if self.occ is not None and self.plan_blocked(m):   # blocked on the floor plan: no render
-                    done.add(id(m))
-                    st["fail_plan"] += 1
-                    continue
                 if m.kind in OWN_SHARE and "own_share" not in m.why:    # it films its own room
                     k = len(m.eye) // 2
                     share = sp.own_share(room, m.eye[k], math.atan2(*(m.tgt[k][:2] - m.eye[k])[::-1]), HFOV)
@@ -2122,7 +2122,11 @@ class RoomMoves:
         # _check's speed test takes one length: the longest leg's (each passed its own above); the
         # flight's own render budget
         self._budget = {"kinds": {}, "left": FLIGHT_CHECKS}
-        best, least = self._check(room, cands, max(m.why["dur_s"] for m in cands) + extra_s)
+        self._late_ok = True
+        try:
+            best, least = self._check(room, cands, max(m.why["dur_s"] for m in cands) + extra_s)
+        finally:
+            self._late_ok = False
         if best is None:
             why = "speed" if least is None else (f"near{least.why['near_lens']}" if "near_lens" in least.why
                                                  else f"edge{least.why['edge_cover']}" if "edge_cover" in least.why
@@ -2766,27 +2770,6 @@ class RoomMoves:
                     return w2
                 m.tgt = old
         return 1.0
-
-    def plan_blocked(self, m: Move) -> bool:
-        """The floor plan already shows the lens blocked: at the start, middle or end of the move,
-        over PLAN_NEAR_SHARE of the view's middle (the rendered check's CENTRE_X) ends on a wall or
-        tall thing nearer than the move's near-lens distance. Cheap (sight lines on the floor plan);
-        only clear cases - the render decides the rest."""
-        if m.kind in ("detail", "link", "backout", "exit", "walk", "through"):   # (they pass close to walls)
-            return False
-        sp = self.space
-        near = OCC_NEAR_KIND.get(m.kind, OCC_NEAR)
-        half = math.radians(HFOV) / 2
-        offs = np.arctan(np.linspace(-0.6, 0.6, 9) * math.tan(half))      # the frame's middle 60%
-        past = (m.piece.frame or m.piece) if m.piece is not None else None
-        for k in (0, len(m.eye) // 2, len(m.eye) - 1):
-            e, t = m.eye[k], m.tgt[k]
-            h = math.atan2(t[1] - e[1], t[0] - e[0])
-            d = sp.rays(e, h + offs, max_m=near + 0.2, past=past)
-            if float(np.mean(d < near)) > PLAN_NEAR_SHARE:
-                m.why["plan_blocked"] = round(float(np.mean(d < near)), 2)
-                return True
-        return False
 
     def _cover(self, m: Move) -> float:
         if self.occ is None:
