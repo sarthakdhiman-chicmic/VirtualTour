@@ -27,6 +27,6 @@ item 17 keeps anything near the lens to a sliver.
 ## Consequences
 
 - Room changes read as one move through the home; the matched cut is the fallback.
-- A few 3D cuts stay outside item 5's limits (green house: 11 of 13 within, local plan) - in very
+- A few 3D cuts stay outside item 5's limits (green house: 9-11 of 13 within, local plans) - in very
   small rooms, reported per cut.
 - The near-lens limit is not a "sliver" for flights through doors.

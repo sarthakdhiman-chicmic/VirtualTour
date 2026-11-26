@@ -137,6 +137,7 @@ ARC_R = (2.3, 2.7, 3.1, 3.5)
 ARC_SWEEP = (30.0, 40.0, 50.0, 65.0)     # an orbit: wider sweeps where the speed limit allows
 HOLD_SWEEP = 25.0
 NO_AIM = ("door", "curtain", "windowpane", "blind")   # never what a room shot ends on
+ACROSS_ZONE_MAX = 0.25        # a room's first shot looking more than this share across another zone goes last
 END_CONE_DEG = 12.0           # the middle of the view a shot ends on (ends_on_door)
 DOOR_END_W = 2.0              # score a room's first shot loses ending on a door (an extra angle: dropped)
 REVEAL_SWING = 40.0           # deg: the most a reveal turns (from down its path onto the next room)
@@ -812,6 +813,14 @@ class RoomMoves:
                     + [[m for m in t if id(m) not in w_ids] for t in shown]
             rest = [[m for m in t if id(m) not in typed] for t in tiers]
             tiers = shown + rest
+        # a room's first shot does not look across another zone's floor at its subject (the Home Scan's
+        # living room was filmed from beyond the dining table, through its chairs, user 2026-11-26):
+        # such views go last, used only when nothing else shows the room
+        if piece_rank == 0 and covered is None and kind != "detail" and len(sp.spaces.get(room, {room})) > 1:
+            across = [m for t in tiers for m in t if m.kind not in FLIGHT and self.across_zone(room, m) > ACROSS_ZONE_MAX]
+            if across:
+                a_ids = {id(m) for m in across}
+                tiers = [[m for m in t if id(m) not in a_ids] for t in tiers] + [across]
         if after_exit:                             # the matched walk-in first: the cut at the door comes first
             walk_in = [m for t in tiers for m in t if m.why.get("after_exit")]
             if walk_in:
@@ -1214,6 +1223,20 @@ class RoomMoves:
         """The frame shows something beyond a door, a window or a curtain (a further angle onto a bare
         wall and a door frame - the green house study, v13 - is no shot)."""
         return self.features_seen(room, eye2, tgt, skip=("door", "windowpane", "curtain", "blind"), own=True) >= COVER_FEATURE_MIN
+
+    def across_zone(self, room: str, m: Move) -> float:
+        """Share of the move's last line of sight (eye to target, on the floor plan) over the floor of
+        another room of its open plan (a dining, kitchen or living area; hallways do not count) - a
+        view across it."""
+        sp = self.space
+        types = getattr(sp, "room_types", {}) or {}
+        mine = sp.spaces.get(room, {room})
+        e, t = np.asarray(m.eye[-1][:2]), np.asarray(m.tgt[-1][:2])
+        rooms = [sp.room_near(e + (t - e) * a, 0.5) for a in np.linspace(0.05, 0.95, 19)]
+        share = sum(1 for r in rooms if r is not None and r != room and r in mine
+                    and (types.get(r) or "") not in ("hallway", "corridor", "landing")) / len(rooms)
+        m.why["across_zone"] = round(share, 2)
+        return share
 
     def ends_on_door(self, m: Move) -> bool:
         """At the move's last frame the nearest labelled thing in the middle of the view (within

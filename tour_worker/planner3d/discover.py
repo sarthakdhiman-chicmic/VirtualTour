@@ -487,6 +487,7 @@ MERGE_SAME = {"living_room", "family_room", "dining_room", "home_office", "bedro
 
 
 DINING_TOP_MAX = 1.0         # m: a table higher than this is a counter or bar
+TV_APART = 3.0               # m: two living areas each with its own TV, this far apart, are two rooms
 SEATING_GROUP_M2 = 2.0       # m2 of sofa: a living area's own seating group (two such, apart, are two rooms)
 BATH_SOFT_MIN_M2 = 0.02      # m2: a lone sink / towel / mirror smaller than this is noise, not a bathroom
 ANNEX_M2 = 4.0               # m2 of free floor: a room under this, entered only through a bedroom, is part of it
@@ -550,9 +551,16 @@ def finalize_rooms(space, points: dict[str, np.ndarray], objects: list[dict],
                 # (or each with a seating group of its own, TV or not - OneFormer COCO misses TVs;
                 # the Home Scan's family room, user 2026-11-26: "it's a different room - the planner
                 # should know when it's a second room")
-                apart = float(np.linalg.norm(points[a] - points[b])) >= LIVING_APART
+                dist = float(np.linalg.norm(points[a] - points[b]))
+                apart = dist >= LIVING_APART
                 if apart and (min(ea["sofa"], eb["sofa"]) >= SEATING_GROUP_M2
                               or (min(ea["sofa"], eb["sofa"]) >= 0.8 and min(ea["tv"], eb["tv"]) >= 1)):
+                    continue
+                # each with a TV of its own, TV_APART apart: two rooms - a room rarely has two TVs
+                # (the Home Scan's den with its shelves and TV folded into the living room, user
+                # 2026-11-26: "two distinct rooms merged into a single scene")
+                tvs = [sum(1 for o in objects if o.get("room") == x and o["class"] == "television receiver") for x in (a, b)]
+                if min(tvs) >= 1 and dist >= TV_APART:
                     continue
             if same or "other_room" in (ta, tb):
                 pairs.append((d, i, j))

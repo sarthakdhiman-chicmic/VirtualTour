@@ -146,9 +146,17 @@ def _walk_order(space, selected: list, stage: dict[str, str], rtype: dict[str, s
         # - the first stage with a room that is not a hallway (an entry hall is a link, not a stop)
         if not any(canon(rtype.get(k)) not in CONNECTORS for k, _ in out):
             # (two living rooms - the 3D finder names no family room: the larger one)
+            # (several living rooms: the one with the most seating - its sofas - then the larger;
+            # floor area alone opened the Home Scan in its family room once its den was a room of its own)
             lv = [n for n, (k, _) in enumerate(group) if canon(rtype.get(k)) == "living_room"]
             keys_ = getattr(space, "room_keys", [])
-            lead = max(lv, key=lambda n: (float((space.room_fill == keys_.index(group[n][0])).sum())
+
+            def _seating(k):
+                from tour_worker.planner3d.discover import _area
+                return sum(_area(o) for o in getattr(space, "objects", [])
+                           if o.get("room") == k and o.get("class") == "sofa")
+            lead = max(lv, key=lambda n: (round(_seating(group[n][0]), 1),
+                                          float((space.room_fill == keys_.index(group[n][0])).sum())
                                           if group[n][0] in keys_ else 0.0, -n)) if lv else 0
         # a stage with no narrative first room (the other bedrooms, bathrooms, a study) starts with
         # the one nearest where the tour is (user 2026-11-26: from the primary bedroom, through its
@@ -350,6 +358,27 @@ def plan_tour_3d(model, scene: dict, rooms: list[dict], listing_id: str, cfg: Pl
 
     can_fly: dict = {}
 
+    def _hall_walk(hall: str, route, prev):
+        """A walk along the hallway's stretch of the walking route: from just inside it (past the
+        door the tour came through) to EXIT_STOP short of where it leaves for the next room."""
+        from tour_worker.planner3d.moves import AFTER_EXIT, EXIT_STOP
+        poly = route[0]
+        s_ = mover._along(poly)
+        at = [space.room_at(q) for q in poly]
+        ins = [k for k in range(len(poly)) if at[k] == hall]
+        if not ins:
+            return None, [f"hall_walk_no_route:{hall}"]
+        s_in, s_out = float(s_[ins[0]]), float(s_[ins[-1]])
+        if s_out - s_in < 1.2:
+            return None, [f"hall_walk_too_short:{hall}"]
+        last_mv = moves[-1][1] if moves else None
+        pace = (float(np.linalg.norm(np.diff(last_mv.eye, axis=0), axis=1).sum()) / max(moves[-1][0].final_duration, 1e-6)
+                if last_mv is not None else 0.3)
+        earlier_ = [p for k in sorted(space.spaces.get(hall, {hall})) for p in poses.get(k, [])]
+        return mover.flight("walk", hall, route, (s_in + AFTER_EXIT[0] * 0.5, s_in + AFTER_EXIT[1]),
+                            (max(s_in + 1.0, s_out - EXIT_STOP - 0.6), max(s_in + 1.2, s_out - EXIT_STOP + 0.4)),
+                            pace, handle, prev, earlier_, end_room=hall, look_max_s=s_out + 0.5)
+
     def _leaves_flying(i: int) -> bool:
         """selected[i] is its room's last planned shot and a flight forward follows it."""
         nxt = selected[i + 1] if i + 1 < len(selected) else None
@@ -509,6 +538,11 @@ def plan_tour_3d(model, scene: dict, rooms: list[dict], listing_id: str, cfg: Pl
         if id(sel) in links:                          # a hallway between two rooms
             src, dst, route = links[id(sel)]
             mv, w = mover.link(src, sel.room_key, dst, route, sel.final_duration, prev)
+            if mv is None:
+                # no pan onto the hallway passes: walk down it instead, toward the next room (user
+                # 2026-11-26: the Home Scan's hallway was dropped when its link was blocked)
+                mv, w2 = _hall_walk(sel.room_key, route, prev)
+                w = w + w2 if mv is None else [f"link_walked:{sel.room_key}"]
         else:
             # the closing look-back pan suits an outdoor space looking back at the home (the green
             # house's balcony); another last room is filmed as any room, its last coverage shot closing
