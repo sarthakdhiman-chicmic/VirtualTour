@@ -104,14 +104,15 @@ def total_frames(plan) -> int:
     return compute_timeline(plan)[-1]["nominal_end"] if plan.shots else 0
 
 
-def _init(plan, images: str, splat=None, supersample: float = 1.5, photo_device=None) -> None:
+def _init(plan, images: str, splat=None, supersample: float = 1.5, photo_device=None, x264_preset=None) -> None:
     cv2.setNumThreads(1)
     _STATE.clear()
     timeline = compute_timeline(plan)
     # splat: the scene's renderer for plan 1.6 3D shots (render/splat_shot.py), drawn in this process;
     # photo_device: photo shots drawn on that torch device (render/frames_gpu.py), in this process too
     _STATE.update(plan=plan, images=images, timeline=timeline, shots={}, splat=splat,
-                  supersample=supersample, splat_stats={}, photo_device=photo_device)
+                  supersample=supersample, splat_stats={}, photo_device=photo_device,
+                  x264_preset=x264_preset or PRESET)
     overlays = Overlays(plan, timeline, images)
     _STATE["overlays"] = overlays if overlays.active else None
 
@@ -215,7 +216,7 @@ def _encode_chunk(task) -> str:
     to_yuv = ("scale=out_color_matrix=bt709:out_range=tv:flags=bicubic+accurate_rnd+full_chroma_int,"
               "format=yuv420p")
     colour = [*COLOUR_TAGS, "-r", str(fps), "-an"]
-    x264 = ["-c:v", "libx264", "-preset", PRESET, "-crf", str(CRF), "-maxrate", vp.maxrate, "-bufsize", vp.bufsize,
+    x264 = ["-c:v", "libx264", "-preset", _STATE.get("x264_preset") or PRESET, "-crf", str(CRF), "-maxrate", vp.maxrate, "-bufsize", vp.bufsize,
             "-profile:v", "high", "-level:v", vp.level, "-g", str(GOP_S * fps), "-keyint_min", str(fps),
             "-x264-params", f"nal-hrd=vbr:threads=1:vbv-init={VBV_INIT_CHUNK}"]
     cmd = ["ffmpeg", "-y", "-loglevel", "error",
@@ -387,7 +388,8 @@ def _segment_inputs(m, music_path: str, first_input: int, tail: str) -> tuple[li
 
 def render_direct(plan, workdir: str, warnings: list | None = None, music_path: str | None = None,
                   workers: int | None = None, voice_path: str | None = None, timings=None,
-                  progress=None, splat=None, splat_supersample: float = 1.5, photo_device=None) -> str:
+                  progress=None, splat=None, splat_supersample: float = 1.5, photo_device=None,
+                  x264_preset: str | None = None) -> str:
     """Draw and encode the whole tour; returns <workdir>/out.mp4 (and writes <workdir>/out_hevc.mp4,
     the H.265 copy with the same audio, and <workdir>/out_mls.mp4, the MLS copy without the room
     labels, when the plan asks for them). timings: a tour_worker.timing.Stopwatch (stages
@@ -451,7 +453,7 @@ def render_direct(plan, workdir: str, warnings: list | None = None, music_path: 
                 # default 5 ms switch interval the encoder threads' Python holds it in between
                 sys.setswitchinterval(0.0005)
             if in_process or workers <= 1 or len(tasks) <= 1:
-                _init(plan, images, splat, splat_supersample, photo_device)
+                _init(plan, images, splat, splat_supersample, photo_device, x264_preset)
                 if in_process and workers > 1 and len(tasks) > 1:
                     with ThreadPoolExecutor(max_workers=min(workers, len(tasks))) as pool:
                         for part in pool.map(_encode_chunk, tasks):
@@ -474,7 +476,7 @@ def render_direct(plan, workdir: str, warnings: list | None = None, music_path: 
                                         splat_stages={k: round(v, 2) for k, v in getattr(splat, "stage_s", {}).items()})
             else:
                 with ProcessPoolExecutor(max_workers=min(workers, len(tasks)), mp_context=mp.get_context("spawn"),
-                                         initializer=_init, initargs=(plan, images)) as pool:
+                                         initializer=_init, initargs=(plan, images, None, 1.5, None, x264_preset)) as pool:
                     for part in pool.map(_encode_chunk, tasks):
                         parts.append(part)
                         if progress:

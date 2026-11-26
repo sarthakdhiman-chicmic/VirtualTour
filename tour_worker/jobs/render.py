@@ -181,7 +181,10 @@ def run_tour(request: dict, storage, workdir: str, settings: Settings | None = N
             if photo_names(plan):
                 with sw.stage("parallax_prep"):
                     sw.info["parallax"] = prepare(plan, os.path.join(workdir, "images"), settings, warnings)
+        from tour_worker.render.encode import PRESET
+        sw.info["x264_preset"] = request.get("x264_preset") or PRESET            # (item 22: timed per preset)
         out_path = render_direct(plan, workdir, warnings=warnings, music_path=music_path, voice_path=voice_path,
+                                 x264_preset=request.get("x264_preset"),
                                  workers=settings.render_workers, timings=sw, progress=chunks_done,
                                  photo_device=dev, **three_d)
 

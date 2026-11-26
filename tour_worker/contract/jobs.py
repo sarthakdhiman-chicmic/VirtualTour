@@ -27,6 +27,9 @@ class TourRenderRequest(_Request):
     # tuning only: a 3D render's supersample (1-3) instead of SPLAT_SUPERSAMPLE - to compare settings
     # on a scene without a restart
     splat_supersample: Optional[float] = Field(default=None, ge=1.0, le=3.0)
+    # tuning only: the x264 preset of the master / MLS chunks instead of render/encode.PRESET - to
+    # time presets without a restart (client review item 22)
+    x264_preset: Optional[Literal["slow", "medium", "fast", "faster", "veryfast"]] = None
 
 
 class SegmentImage(BaseModel):
