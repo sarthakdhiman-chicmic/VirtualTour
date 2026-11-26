@@ -63,6 +63,7 @@ def plan_motion_regions(
     cfg: PlannerConfig,
     room_type: str | None = None,
     indoors: bool | None = None,
+    open_air: bool = False,
 ) -> list[MotionRegion]:
     """indoors: the photo is taken inside (scoring/autoroom.is_indoors; None: unknown, then by its
     room type) - a sky there is seen through a window and gets no cloud shadows."""
@@ -86,10 +87,10 @@ def plan_motion_regions(
         bbox, mask = d.get("bbox"), d.get("mask_url")
         if not effect or not mask or not bbox or len(bbox) != 4:
             continue
-        # shrubs and hedges outdoors stay still - judged by the photo (taken outside), not only its
-        # room type (client review item 16: the Turkey Trot entry, outside the front door, swayed
-        # its topiary and planter)
-        outdoors = (room_type or "") in cfg.perceptual_outdoor_rooms or not indoors
+        # shrubs and hedges outdoors stay still - judged by the photo (taken outside, or open air
+        # under a porch ceiling: autoroom.is_open_air), not only its room type (client review item
+        # 16: the Turkey Trot entry, outside the front door, swayed its topiary and planter)
+        outdoors = (room_type or "") in cfg.perceptual_outdoor_rooms or not indoors or open_air
         if outdoors and effect in cfg.perceptual_still_outdoors:
             continue
         if float(d.get("confidence") or 0) < cfg.perceptual_min_confidence:

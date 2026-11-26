@@ -14,7 +14,7 @@ from .config import PlannerConfig
 from .music_sync import apply_sync, sync_to_music
 from .perceptual import plan_motion_regions
 from .presets import LATERAL_PRESETS, preset_to_camera, select_preset
-from tour_worker.scoring.autoroom import is_indoors
+from tour_worker.scoring.autoroom import is_indoors, is_open_air
 from .scene_context import blend_grid, from_scene
 from .schemas import (
     CameraEasing,
@@ -569,6 +569,7 @@ def _build_shot_plan(
                     shot.source.height, cfg.output_width, cfg.output_height, cfg,
                     room_type=shot.room_type,
                     indoors=is_indoors((scenes_by_photo or {}).get(shot.asset_id)),
+                    open_air=is_open_air((scenes_by_photo or {}).get(shot.asset_id)),
                 )
                 if regions:
                     shot.motion_regions = regions

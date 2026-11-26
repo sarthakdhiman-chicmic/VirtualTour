@@ -56,6 +56,30 @@ WALLS_MIN, WALLS_SKY_MAX = 0.25, 0.10   # walls filling the photo with little sk
 VIEW_DROP = 0.10                       # buildings this far (photo height) below the skyline: a view
 
 
+OPEN_GROUND = ("gravel", "grass", "dirt", "sand", "road", "pavement", "snow", "earth", "field")   # (a "playingfield" can be an indoor court)
+OPEN_GROUND_MIN, OPEN_GROUND_LOW = 0.05, 0.6     # share of the photo, and how low its centroid sits
+OPEN_GROUND_EDGE = 0.95                           # ... reaching this far down the photo
+OPEN_VIEW_BUILDING = 0.05                         # other buildings over this share: a view out, not open air
+
+
+def is_open_air(scene: dict | None) -> bool:
+    """Outdoor ground across the photo's lower part (gravel, grass, paving: OPEN_GROUND_MIN of it,
+    centred below OPEN_GROUND_LOW of the height, reaching the bottom edge) - a covered porch or patio is open air even under a
+    ceiling. For motion only (shrubs and plants there stay still): room types still use is_indoors."""
+    if not scene:
+        return False
+    c = {str(k).strip().lower(): v for k, v in (scene.get("classes") or {}).items()}
+    # ...and reaching the photo's bottom edge: ground one stands on, not a street seen far below
+    # through a window (the 8K listing's high-rise office and den)
+    low = [v for k, v in c.items() if k in OPEN_GROUND and float((v.get("centroid") or [0, 0])[1]) >= OPEN_GROUND_LOW
+           and float((v.get("bbox") or [0, 0, 0, 0])[3]) >= OPEN_GROUND_EDGE]
+    # a skyline in the photo: a view out through glass (the 8K listing's office over the park), not
+    # a porch
+    if float((c.get("building") or {}).get("area", 0.0)) >= OPEN_VIEW_BUILDING:
+        return False
+    return sum(float(v.get("area", 0.0)) for v in low) >= OPEN_GROUND_MIN
+
+
 def is_indoors(scene: dict | None) -> bool | None:
     """Whether the photo is taken indoors (None: no scene to tell). Used for room types and for
     which motion a sky in the photo gets (no cloud shadows inside)."""
