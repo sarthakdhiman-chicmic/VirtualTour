@@ -137,11 +137,17 @@ def _type_of(space, key: str, ev: dict[str, float]) -> str:
     """One room's type from its evidence (module docstring): a bed dominates; then bath fixtures;
     then kitchen vs living by the larger area of their own furniture; a dining table; an office."""
     from tour_worker.planner3d.space import CELL
-    if ev["bed"] >= BED_MIN_M2:
-        return "bedroom"
     mask_ = space.room_of == space.room_keys.index(key) if key in space.room_keys else None
     area_ = float(mask_.sum()) * CELL * CELL if mask_ is not None else 0.0
     closed = not _open_neighbours(space, key)
+    # a "bed" among the seating of a room open onto the rest of the home is a sofa or daybed the
+    # labels misnamed (user 2026-11-26, OneFormer COCO: the green house's living-room corner - five
+    # chairs round it - read as a bedroom from a 5 m2 "bed"): the room is typed by its other
+    # furniture. A bed on its own in an open room is still a bedroom
+    if not closed and ev["bed"] and (ev["sofa"] > 0 or ev["chairs"] >= 2):
+        ev = {**ev, "bed": 0.0}
+    if ev["bed"] >= BED_MIN_M2:
+        return "bedroom"
     if closed and ev["bed"] >= BED_CLOSED_M2:
         return "bedroom"
     if ev["utility"] and not ev["bed"] and ev["sofa"] < 0.8 and area_ < 10.0 and not ev["table"] \
@@ -432,7 +438,11 @@ def split_by_zones(space, points: dict[str, np.ndarray], objects: list[dict]):
             if not small:
                 out = trial
                 kinds.update({nm: z["kind"] for nm, z in zip(names, keep)})
-                owner.update({id(o): nm for nm, z in zip(names, keep) for o in z["objects"]})
+                # a zone's furniture is its room's - not a fitting behind a wall from the zone's
+                # centre (user 2026-11-26: the green house's kitchen zone took the sink, fridge and
+                # counter of the bathroom behind the hall built-ins, which then read as a hallway)
+                owner.update({id(o): nm for nm, z in zip(names, keep) for o in z["objects"]
+                              if not _through_wall(space, o["centre"], z["centre"])})
                 warnings.append("open_plan_split:" + "+".join(sorted(zone_rooms - {None})) + "->" + ",".join(names))
                 break
             keep.pop(min(small, key=lambda n: keep[n]["weight"]))       # the lightest small zone joins its neighbour
@@ -511,7 +521,10 @@ def finalize_rooms(space, points: dict[str, np.ndarray], objects: list[dict],
             a, b = keys[i], keys[j]
             ta, tb = types[a], types[b]
             living_pair = {ta, tb} <= {"living_room", "family_room"}
-            if b not in space.spaces.get(a, {a}) and not (living_pair and b in _open_neighbours(space, a)):
+            # (an unrecognisable corner opening onto its neighbour is part of it too - the green
+            # house's living-room corner, once COCO's "bed" there no longer makes it a bedroom)
+            other_open = "other_room" in (ta, tb) and b in _open_neighbours(space, a)
+            if b not in space.spaces.get(a, {a}) and not ((living_pair or other_open) and b in _open_neighbours(space, a)):
                 continue                                   # a doorway between them: two rooms
             zk = getattr(space, "zone_kinds", {})
             # (a non-zone room may fold INTO a zone room - the green house's living end became a
