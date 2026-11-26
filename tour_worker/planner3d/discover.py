@@ -487,6 +487,7 @@ MERGE_SAME = {"living_room", "family_room", "dining_room", "home_office", "bedro
 
 
 DINING_TOP_MAX = 1.0         # m: a table higher than this is a counter or bar
+SEATING_GROUP_M2 = 2.0       # m2 of sofa: a living area's own seating group (two such, apart, are two rooms)
 BATH_SOFT_MIN_M2 = 0.02      # m2: a lone sink / towel / mirror smaller than this is noise, not a bathroom
 ANNEX_M2 = 4.0               # m2 of free floor: a room under this, entered only through a bedroom, is part of it
 BEDROOMS = ("bedroom", "primary_bedroom", "guest_bedroom", "childrens_bedroom")
@@ -546,8 +547,12 @@ def finalize_rooms(space, points: dict[str, np.ndarray], objects: list[dict],
                 ea, eb = (_evidence(_held(objects, [x])[x]) for x in (a, b))
                 # ... far apart: two rooms. Near (one open area seen from two sides - the green house's
                 # living room was captioned "Family Room" from its other end, user 2026-11-17): one
-                if min(ea["sofa"], eb["sofa"]) >= 0.8 and min(ea["tv"], eb["tv"]) >= 1 \
-                        and float(np.linalg.norm(points[a] - points[b])) >= LIVING_APART:
+                # (or each with a seating group of its own, TV or not - OneFormer COCO misses TVs;
+                # the Home Scan's family room, user 2026-11-26: "it's a different room - the planner
+                # should know when it's a second room")
+                apart = float(np.linalg.norm(points[a] - points[b])) >= LIVING_APART
+                if apart and (min(ea["sofa"], eb["sofa"]) >= SEATING_GROUP_M2
+                              or (min(ea["sofa"], eb["sofa"]) >= 0.8 and min(ea["tv"], eb["tv"]) >= 1)):
                     continue
             if same or "other_room" in (ta, tb):
                 pairs.append((d, i, j))
