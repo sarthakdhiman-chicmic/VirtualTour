@@ -212,22 +212,37 @@ class GpuShot:
         with GPU_LOCK, torch.no_grad():
             t2 = time.perf_counter()
             clk = _Clock(self.dev, stats)
-            m = sw.homography(f)
             src = torch.as_tensor(sky, device=self.dev).to(torch.float32) if sky is not None else self.src
-            mx, my = self.maps(m)
-            img = _sample(src, mx, my, "border")                            # (oh, ow, 3)
-            clk("base")
-            win = sw.window(m) if sw.regions else None
-            clk("window")
-            if win is not None:
-                r0, r1, c0, c1 = win
-                wx, wy = mx[r0:r1, c0:c1].clone(), my[r0:r1, c0:c1].clone()
-                gain = self.apply_regions(wx, wy, f / sw.fps, (r0, c0), (sw.oh, sw.ow), clk)
-                patch = _sample(src, wx, wy, "border")
-                if gain is not None:
-                    patch = patch * gain[..., None]
-                img[r0:r1, c0:c1] = patch
-                clk("patch")
+
+            def draw(m):
+                mx, my = self.maps(m)
+                img = _sample(src, mx, my, "border")                        # (oh, ow, 3)
+                clk("base")
+                win = sw.window(m) if sw.regions else None
+                clk("window")
+                if win is not None:
+                    r0, r1, c0, c1 = win
+                    wx, wy = mx[r0:r1, c0:c1].clone(), my[r0:r1, c0:c1].clone()
+                    gain = self.apply_regions(wx, wy, f / sw.fps, (r0, c0), (sw.oh, sw.ow), clk)
+                    patch = _sample(src, wx, wy, "border")
+                    if gain is not None:
+                        patch = patch * gain[..., None]
+                    img[r0:r1, c0:c1] = patch
+                    clk("patch")
+                return img
+
+            # motion blur (client review item 7), as on the CPU path (ShotWarp._blurred): the mean
+            # of the camera warps at the shutter's instants; regions and sky keep frame f's time
+            n = sw.blur_n[f] if getattr(sw, "blur_n", None) is not None else 1
+            if n > 1:
+                from tour_worker.render.frames import blur_offsets
+                img = None
+                for o in blur_offsets(n, sw.blur.shutter):
+                    one = draw(sw._homography_of(sw.state_at(f + o)))
+                    img = one if img is None else img + one
+                img = img / n
+            else:
+                img = draw(sw.homography(f))
             out = torch.round(img).clamp_(0, 255).to(torch.uint8)
             clk("out")
         if stats is not None:

@@ -416,10 +416,7 @@ def render_direct(plan, workdir: str, warnings: list | None = None, music_path: 
            for shot, t in zip(plan.shots, tl) if shot.camera.type not in ("bezier_path", "video_clip")]
     n = total_frames(plan)
     if getattr(plan.output, "motion_blur", None) is not None:
-        if photo_device is not None:          # the GPU photo path draws no blur (yet): the tour as without it
-            warnings is not None and warnings.append("enhancement_dropped:tour:motion_blur:gpu_photo_path")
-            plan.output.motion_blur = None
-        elif sws:
+        if sws:                               # (the GPU photo path blurs too: frames_gpu.GpuShot.frame_t)
             mb = plan.output.motion_blur
             plan.output.motion_blur = blur_budget(sws, n, mb, warnings)
             if timings is not None:

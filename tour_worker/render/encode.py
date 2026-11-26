@@ -36,7 +36,8 @@ from tour_worker.cpus import usable_cpus
 CRF = 20
 MAXRATE = "10M"
 BUFSIZE = "20M"
-PRESET = "slow"
+PRESET = "medium"            # x264 (client review item 22: "slow" at 4K reviewed 2026-11-26 - medium is
+                             # ~23% faster at the same SSIM, +7% size; fast ~34% faster, +8% size)
 LEVEL = "4.1"
 GOP_S = 2                # keyframe at least every GOP_S seconds
 AUDIO_BITRATE = "128k"
