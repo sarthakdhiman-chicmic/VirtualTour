@@ -60,6 +60,7 @@ CORES = (0.75, 0.6, 0.5, 0.4)
 SIT_BACK = 2.4                # m from the piece at the start of a walkway move
 OCC_NEAR, MAX_OCC, OCC_W, OCC_CHECK_KIND = 2.0, 0.20, 3.0, 30   # (0.15 tried for item 17: the Home Scan lost 3 rooms)
 SHOT_CHECKS = 60              # rendered checks (lens / void) a further angle's choice may spend over all its tiers
+OCC_CACHE_M = 0.05            # m: poses this close share one rendered check
 FIRST_SHOT_CHECKS = 160       # ... and a room's first shot (60 skipped three Home Scan rooms, 2026-11-26)
                               # (160 until 2026-11-26: the Home Scan's plan took 19 min on the pod)
 FLIGHT_CHECKS = 40            # ... and a room change's flight, its own (it used to get what the room's
@@ -1178,8 +1179,10 @@ class RoomMoves:
                     st["fail_speed"] += 1
                     continue
                 checked[m.kind] = checked.get(m.kind, 0) + 1
-                bud["left"] -= 1
+                before = self.__dict__.get("_occ_renders", 0)
                 m.occ = self._cover(m)
+                if self.__dict__.get("_occ_renders", 0) > before:       # (served from the cache: free)
+                    bud["left"] -= 1
                 if least is None or m.occ < least.occ:
                     least = m
                 if m.occ > MAX_OCC:
@@ -1194,8 +1197,10 @@ class RoomMoves:
             # first, down the ranking until one passes
             for m in sorted(passed, key=lambda m: -(m.score - OCC_W * m.occ)):
                 if m.kind != "detail":
-                    bud["left"] -= 1
+                    before = self.__dict__.get("_occ_renders", 0)
                     v = self._void(m)
+                    if self.__dict__.get("_occ_renders", 0) > before:   # a check served from the cache is free
+                        bud["left"] -= 1
                     m.why["void"] = round(v, 3)
                     if v > VOID_MAX:
                         st["fail_void"] += 1
@@ -2781,6 +2786,20 @@ class RoomMoves:
                 worst = max(worst, math.degrees(elev - need))
         return worst
 
+    def _occ_call(self, what: str, eye, tgt, piece, near: float, region: str):
+        """occ.cover / occ.void through a cache keyed by the pose (eye and target to OCC_CACHE_M), the
+        near distance, the region and the framed piece: a pose rendered once is never rendered again
+        (reversed twins and near-duplicate candidates share poses - the Home Scan's primary bedroom
+        spent its whole budget on them, 2026-11-26). Counts the renders made (_occ_renders)."""
+        q = lambda a: tuple(int(round(float(x) / OCC_CACHE_M)) for x in np.ravel(a)[:3])   # noqa: E731
+        key = (what, q(eye), q(tgt), id(piece) if piece is not None else None, round(near, 3), region)
+        cache = self.__dict__.setdefault("_occ_cache", {})
+        if key not in cache:
+            self._occ_renders = self.__dict__.get("_occ_renders", 0) + 1
+            cache[key] = (self.occ.void(eye, tgt, HFOV, top=True) if what == "void"
+                          else self.occ.cover(eye, tgt, HFOV, piece, near, region=region))
+        return cache[key]
+
     def _void(self, m: Move) -> float:
         """The worst share of the view the scan never captured (start, middle, end). A black band
         across the top (a missing ceiling, TOP_VOID_MAX of its top fifth) tilts the move down
@@ -2807,7 +2826,7 @@ class RoomMoves:
             m.why["tilt_for_band"] = round(deficit + 0.5, 1)
 
         def worst(tgt):
-            r = [self.occ.void(e3[k], tgt[k], HFOV, top=True) for k in ks]
+            r = [self._occ_call("void", e3[k], tgt[k], None, 0.0, "") for k in ks]
             return max(a for a, _ in r), max(b for _, b in r)
         whole, top = worst(m.tgt)
         m.why["void_top"] = round(top, 3)
@@ -2837,13 +2856,13 @@ class RoomMoves:
         worst = 0.0
         for k in (len(e3) // 2, 0, len(e3) - 1):
             e, t = e3[k], m.tgt[k]
-            worst = max(worst, self.occ.cover(e, t, HFOV, m.piece, OCC_NEAR_KIND.get(m.kind, OCC_NEAR)))
+            worst = max(worst, self._occ_call("cover", e, t, m.piece, OCC_NEAR_KIND.get(m.kind, OCC_NEAR), "centre"))
             if worst > MAX_OCC:                       # already out: the other poses cannot bring it back
                 break
             if m.kind not in ("link", "detail", "exit", "walk", "backout", "through"):     # (they pass door frames)
                 # a door frame or a wall at the frame's edge, right at the lens (user 2026-11-16, Krk:
                 # the bedroom shot ended with the door frame over a quarter of the frame)
-                edge = self.occ.cover(e, t, HFOV, m.piece, EDGE_NEAR, region="full")
+                edge = self._occ_call("cover", e, t, m.piece, EDGE_NEAR, "full")
                 if edge > EDGE_MAX:
                     m.why["edge_cover"] = round(edge, 3)
                     return 1.0
@@ -2855,7 +2874,7 @@ class RoomMoves:
             # only what comes within THROUGH_NEAR, a frame it would scrape, blocks it)
             r_near = BACKOUT_NEAR if m.kind == "backout" else THROUGH_NEAR if m.kind == "through" else NEAR_ANY
             for k in np.linspace(0, len(e3) - 1, NEAR_ANY_POSES).astype(int):
-                near = self.occ.cover(e3[k], m.tgt[k], HFOV, None, r_near, region="full")
+                near = self._occ_call("cover", e3[k], m.tgt[k], None, r_near, "full")
                 if near > (NEAR_ANY_MAX_THROUGH if m.kind == "through" else NEAR_ANY_MAX):
                     m.why["near_lens"] = round(near, 3)
                     return 1.0
