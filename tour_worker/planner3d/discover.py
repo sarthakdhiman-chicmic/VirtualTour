@@ -127,6 +127,7 @@ def _evidence(held: dict[str, list[dict]]) -> dict[str, float]:
             "table": max((_area(o) for o in held.get("table", [])), default=0.0),
             "chairs": float(len(held.get("chair", []))), "office": float(sum(n in held for n in OFFICE)),
             "bath_soft": float(sum(len(held.get(n, [])) for n in BATH_SOFT)),
+            "bath_soft_max": max((_area(o) for n in BATH_SOFT for o in held.get(n, [])), default=0.0),
             "study": float(sum(len(held.get(n, [])) for n in STUDY)),
             "cooking": float(sum(n in held for n in COOKING)),
             "sofa": a(("sofa",)), "tv": float(sum(n in held for n in ("television receiver", "fireplace"))),
@@ -157,8 +158,12 @@ def _type_of(space, key: str, ev: dict[str, float]) -> str:
     # Scan's family room)
     if ev["bath"] >= 1 and ev["bed"] < 0.5 and ev["sofa"] < 0.8:
         return "bathroom"
-    # a small closed room with a sink, towel or mirror and no cooking fitting: a bathroom
-    if closed and area_ < SMALL_ROOM_M2 and ev["bath_soft"] >= 1 and not ev["cooking"] and ev["bed"] < 0.5:
+    # a small closed room with a sink, towel or mirror and no cooking fitting: a bathroom - when the
+    # sign is real: two of them, or one of BATH_SOFT_MIN_M2 (user 2026-11-26, OneFormer COCO: the
+    # Home Scan's hallway took a 0.01 m2 "sink" - a few splats seen through the bathroom door - and
+    # was toured as a bathroom; the green house's bathroom basin is 0.04 m2)
+    if closed and area_ < SMALL_ROOM_M2 and ev["bath_soft"] >= 1 and not ev["cooking"] and ev["bed"] < 0.5 \
+            and (ev["bath_soft"] >= 2 or ev.get("bath_soft_max", 1.0) >= BATH_SOFT_MIN_M2):
         return "bathroom"
     # a kitchen cooks: two kinds of fitting, one of them for cooking or washing up (a fridge and a
     # sink alone are a hall's built-ins and a bathroom's basin)
@@ -321,7 +326,10 @@ def zones(objects: list[dict], space=None) -> list[dict]:
     hall built-ins and bathroom basin chained into its kitchen through the walls."""
     out = []
     # a dining table: at table height (a coffee table is lower), 3+ chairs pulled up round it
-    tables = [o for o in objects if o["class"] == "table" and _area(o) >= 0.4 and float(o.get("top", 0.75)) >= 0.6]
+    # (a "table" topping out over DINING_TOP_MAX is a counter: a kitchen peninsula with its stools is
+    # no dining room - the Home Scan's, OneFormer COCO, user 2026-11-26)
+    tables = [o for o in objects if o["class"] == "table" and _area(o) >= 0.4
+              and 0.6 <= float(o.get("top", 0.75)) <= DINING_TOP_MAX]
     chairs = [o for o in objects if o["class"] == "chair"]
     books = [o for o in objects if o["class"] in ("book", "bookcase")]
     # a table with books beside it is a desk (the green house's study), not dining (shelves and
@@ -478,6 +486,8 @@ MERGE_SAME = {"living_room", "family_room", "dining_room", "home_office", "bedro
               "kitchen", "hallway", "other_room", "bathroom"}
 
 
+DINING_TOP_MAX = 1.0         # m: a table higher than this is a counter or bar
+BATH_SOFT_MIN_M2 = 0.02      # m2: a lone sink / towel / mirror smaller than this is noise, not a bathroom
 ANNEX_M2 = 4.0               # m2 of free floor: a room under this, entered only through a bedroom, is part of it
 BEDROOMS = ("bedroom", "primary_bedroom", "guest_bedroom", "childrens_bedroom")
 
