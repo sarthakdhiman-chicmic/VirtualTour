@@ -468,6 +468,23 @@ MERGE_SAME = {"living_room", "family_room", "dining_room", "home_office", "bedro
               "kitchen", "hallway", "other_room", "bathroom"}
 
 
+ANNEX_M2 = 4.0               # m2 of free floor: a room under this, entered only through a bedroom, is part of it
+BEDROOMS = ("bedroom", "primary_bedroom", "guest_bedroom", "childrens_bedroom")
+
+
+def _leaves_into(space, key: str, keys: list[str]) -> set[str]:
+    """The rooms one first walks into leaving `key` for every other room (Space.route): a single
+    one means `key` is reached only through it."""
+    out = set()
+    for other in keys:
+        if other == key:
+            continue
+        r = space.route(key, other)
+        if r and len(r[1]) > 1:
+            out.add(r[1][1])
+    return out
+
+
 def finalize_rooms(space, points: dict[str, np.ndarray], objects: list[dict],
                    capture: dict[str, float] | None = None):
     """The rooms as tour_plan takes them, from the found rooms and the scene's labels:
@@ -523,6 +540,29 @@ def finalize_rooms(space, points: dict[str, np.ndarray], objects: list[dict],
         merged = {**{k: (keep if v == drop else v) for k, v in merged.items()}, drop: keep}
         keys = [k for k in keys if k != drop]
     types = zone_types(space, objects, {k: points[k] for k in keys}, room_types(space, objects, {k: points[k] for k in keys}))
+    # a small room entered only through a bedroom, with no bed of its own, is part of that bedroom
+    # (its en-suite or dressing area - user 2026-11-26: the green house's wardrobe-and-shower nook
+    # off the primary bedroom was toured as a "Bedroom" of its own, typed by the edge of the
+    # primary's bed over the boundary): it folds into the bedroom, whose shots show it
+    while True:
+        annex = None
+        for k in keys:
+            if space.room_area(k) >= ANNEX_M2 or _evidence(_held(objects, [k])[k])["bed"] >= BED_MIN_M2:
+                continue
+            out_to = _leaves_into(space, k, keys)
+            if len(out_to) == 1 and types[next(iter(out_to))] in BEDROOMS:
+                annex = (k, next(iter(out_to)))
+                break
+        if annex is None:
+            break
+        drop, keep = annex
+        merged = {**{k: (keep if v == drop else v) for k, v in merged.items()}, drop: keep}
+        keys = [k for k in keys if k != drop]
+        space.set_rooms({k: points[k] for k in keys})
+        for o in objects:
+            if o.get("room") in merged:
+                o["room"] = merged[o["room"]]
+        types = zone_types(space, objects, {k: points[k] for k in keys}, room_types(space, objects, {k: points[k] for k in keys}))
     warnings = zone_w + [f"rooms_merged:{d}->{k}" for d, k in sorted(merged.items())]
     out = []
     for k in keys:
