@@ -266,6 +266,7 @@ class ShotWarp:
                      if self.regions else None)
         self.align = field_align(self.regions, grid_scale((self.oh, self.ow)))
         self.probe_ys = np.unique(np.r_[np.arange(0, self.oh, ROI_PROBE), self.oh - 1])
+        self.probe_xs = np.unique(np.r_[np.arange(0, self.ow, ROI_PROBE), self.ow - 1])   # (before the blur plan draws)
         # depth parallax (client review 2026-11-20, item 10; plan output.parallax): the photo's rigid
         # layers slide against each other the way the move goes (tour_worker/parallax); its inputs are
         # prepared by the render job (parallax/prepare.py). A shot that cannot have it is drawn flat.
@@ -292,7 +293,6 @@ class ShotWarp:
         self.blur_extent = None         # per frame: on-screen travel while the shutter is open, px
         if self.blur is not None and self._path is not None:
             self.blur_n = self.blur_plan(warnings)
-        self.probe_xs = np.unique(np.r_[np.arange(0, self.ow, ROI_PROBE), self.ow - 1])
 
     def homography(self, f: int) -> np.ndarray:
         (cx, cy, z), r = self.frames[f]

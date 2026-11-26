@@ -58,7 +58,7 @@ RMIN_LADDER = (0.28, 0.22)    # camera body clearance, a little less in small ro
 MOVE_LEN = (0.6, 2.6)
 CORES = (0.75, 0.6, 0.5, 0.4)
 SIT_BACK = 2.4                # m from the piece at the start of a walkway move
-OCC_NEAR, MAX_OCC, OCC_W, OCC_CHECK_KIND = 2.0, 0.15, 3.0, 30   # MAX_OCC 0.20 until item 17 ("a sliver")
+OCC_NEAR, MAX_OCC, OCC_W, OCC_CHECK_KIND = 2.0, 0.20, 3.0, 30   # (0.15 tried for item 17: the Home Scan lost 3 rooms)
 SHOT_CHECKS = 60              # rendered checks (lens / void) one shot's choice may spend over all its tiers
                               # (160 until 2026-11-26: the Home Scan's plan took 19 min on the pod)
 FLIGHT_CHECKS = 40            # ... and a room change's flight, its own (it used to get what the room's
@@ -124,8 +124,8 @@ WALL_CLEAR = 0.2             # m: nor pressed against a wall
 DOOR_CLEAR = 0.45            # m: a room shot never starts or ends in a doorway (clearance under this)
 EDGE_NEAR, EDGE_MAX = 0.8, 0.12   # anything within EDGE_NEAR m covering EDGE_MAX of the whole frame blocks it
 NEAR_ANY = 1.0                # m: anything this close to the lens ...
-NEAR_ANY_MAX = 0.15           # ... over this share of the frame, at any of NEAR_ANY_POSES, fails a move
-                              # (0.25 until client review item 17: "never more than a sliver")
+NEAR_ANY_MAX = 0.25           # ... over this share of the frame, at any of NEAR_ANY_POSES, fails a move
+                              # (0.15 tried 2026-11-26 for item 17: the Home Scan skipped three rooms)
 NEAR_ANY_MAX_THROUGH = 0.25   # a flight through a door passes its frame
 NEAR_ANY_POSES = 3            # (5 until 2026-11-26: renders per candidate, the planning time)
 VOID_MAX = 0.12              # at most this share of a view may be what the scan never captured
