@@ -59,7 +59,8 @@ MOVE_LEN = (0.6, 2.6)
 CORES = (0.75, 0.6, 0.5, 0.4)
 SIT_BACK = 2.4                # m from the piece at the start of a walkway move
 OCC_NEAR, MAX_OCC, OCC_W, OCC_CHECK_KIND = 2.0, 0.20, 3.0, 30   # (0.15 tried for item 17: the Home Scan lost 3 rooms)
-SHOT_CHECKS = 60              # rendered checks (lens / void) one shot's choice may spend over all its tiers
+SHOT_CHECKS = 60              # rendered checks (lens / void) a further angle's choice may spend over all its tiers
+FIRST_SHOT_CHECKS = 160       # ... and a room's first shot (60 skipped three Home Scan rooms, 2026-11-26)
                               # (160 until 2026-11-26: the Home Scan's plan took 19 min on the pod)
 FLIGHT_CHECKS = 40            # ... and a room change's flight, its own (it used to get what the room's
                               # last shot left - often nothing, and the flight failed unchecked)
@@ -887,7 +888,10 @@ class RoomMoves:
         # one budget of rendered checks for the shot, over all its tiers: a weak scan's room has
         # dozens of tiers (preference x clearance x fallbacks), each once allowed OCC_CHECK_KIND a
         # kind - Home Scan planning went from 6 to 30+ minutes
-        self._budget = {"kinds": {}, "left": SHOT_CHECKS}
+        # a room's first shot keeps the full budget (a room skipped is worse than a slow plan: the
+        # Home Scan's primary bedroom failed the void check 60 times running, a scan with no ceiling);
+        # further angles get SHOT_CHECKS
+        self._budget = {"kinds": {}, "left": FIRST_SHOT_CHECKS if (covered is None and piece_rank == 0) else SHOT_CHECKS}
         least, seen = None, set()
         for cands in tiers:
             for m in cands:
