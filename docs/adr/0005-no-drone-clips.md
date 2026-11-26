@@ -1,7 +1,7 @@
 # ADR 0005: No drone clips in this delivery
 
-- **Status:** Proposed by the product owner, 2026-11-26. A departure from client review item 17
-  (drone clips at exterior shots); needs the client's written approval (review item 23).
+- **Status:** Proposed, 2026-11-26. Recorded against client review items 17 and 18 (drone clips at
+  exterior shots, an exterior opening for 3D tours); it ends when drone footage is provided.
 - **Date:** 2026-11-26
 - **Scope:** 3D tours (`planner3d/plan.py` drone_clips, `render/clip.py`).
 
@@ -11,12 +11,14 @@ Item 17 places drone-style moves at the exterior approach, with drone clips at e
 smooth transition to the interior. Drone clips are supported (`drone_clips` in `tour_plan`: entry
 clips before the interior, rear clips after).
 
-[REASON - to be written by the product owner.]
+No drone footage has been provided for the listings in this delivery: the green-house and Home Scan
+scans come without drone clips.
 
 ## Decision
 
-No drone clip is rendered in this delivery's tours. The support stays: a request with `drone_clips`
-still plays them.
+No drone clip is rendered in this delivery's tours, because there is none for these properties. The
+support stays: a request with `drone_clips` plays them (entry clips before the interior, rear clips
+after); we will render a tour with them as soon as footage is provided.
 
 ## Consequences
 
