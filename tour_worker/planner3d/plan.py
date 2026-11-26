@@ -114,13 +114,20 @@ def _walk_order(space, selected: list, stage: dict[str, str], rtype: dict[str, s
     dist_cache: dict[tuple[str, str], float] = {}
 
     def dist(a: str, b: str) -> float:
+        """Walking distance from a's centre until one steps into b (user 2026-11-26: the study's door
+        is the first one out of the green house's primary bedroom, though its centre is farther)."""
         if (a, b) not in dist_cache:
             r = space.route(a, b)
-            d = float(np.linalg.norm(np.diff(r[0], axis=0), axis=1).sum()) if r else float("inf")
+            d = float("inf")
+            if r:
+                seg = np.linalg.norm(np.diff(r[0], axis=0), axis=1)
+                at = [getattr(space, "room_at", lambda q: None)(q) for q in r[0]]
+                k_in = next((k for k in range(1, len(at)) if at[k] == b), None)
+                d = float(seg[:k_in].sum()) if k_in is not None else float(seg.sum())
             if not np.isfinite(d):                   # rooms in parts of their own: as the crow flies
                 pa, pb = space.room_points.get(a), space.room_points.get(b)
                 d = float(np.linalg.norm(pa - pb)) + 100.0 if pa is not None and pb is not None else 1e9
-            dist_cache[(a, b)] = dist_cache[(b, a)] = d
+            dist_cache[(a, b)] = d
         return dist_cache[(a, b)]
 
     out: list[tuple[str, list]] = []
@@ -142,6 +149,11 @@ def _walk_order(space, selected: list, stage: dict[str, str], rtype: dict[str, s
             keys_ = getattr(space, "room_keys", [])
             lead = max(lv, key=lambda n: (float((space.room_fill == keys_.index(group[n][0])).sum())
                                           if group[n][0] in keys_ else 0.0, -n)) if lv else 0
+        # a stage with no narrative first room (the other bedrooms, bathrooms, a study) starts with
+        # the one nearest where the tour is (user 2026-11-26: from the primary bedroom, through its
+        # door, into the study - not back across the hall to the far bedroom)
+        if out and len(group) > 1 and canon(rtype.get(group[0][0])) not in ("living_room", "primary_bedroom"):
+            lead = min(range(len(group)), key=lambda n: dist(out[-1][0], group[n][0]))
         ordered, prev = [group[lead]], group[lead][0]
         group = group[:lead] + group[lead + 1:]
         while group:
@@ -288,7 +300,10 @@ def plan_tour_3d(model, scene: dict, rooms: list[dict], listing_id: str, cfg: Pl
         limit = MAX_WIDE - (1 if flies else 0)
         while wide.get(room, 0) < limit and len(walls) and len(covered.get(room, ())) / len(walls) < COVER_ENOUGH:
             kind = lead.kind if lead.kind in ("room", "hero") else "room"
-            dur = round(max(length_range("room", c3.pacing)[0] * reach + handle, 0.85 * lead.final_duration), 2)
+            # a further angle is a room shot's length (planner/lengths), never a hero's: the time
+            # goes to showing more rooms whole (user 2026-11-26)
+            lo_, hi_ = (x * reach + handle for x in length_range("room", c3.pacing))
+            dur = round(min(hi_, max(lo_, 0.85 * lead.final_duration)), 2)
             earlier_ = [p for k in sorted(space.spaces.get(room, {room})) for p in poses.get(k, [])]
             mover.cover_stats = {}
             mv, cw = mover.best(room, dur, earlier=earlier_, prev=prev, piece_rank=wide.get(room, 0),
@@ -394,7 +409,34 @@ def plan_tour_3d(model, scene: dict, rooms: list[dict], listing_id: str, cfg: Pl
         fp = (piece.frame or piece) if piece is not None else None
         aim = np.array([*fp.centre, fp.top]) if fp is not None else mover._goal(dst)
         chain, p_ = [], prev
-        for j in range(len(cuts) + 1):
+        if cuts:
+            # one continuous move first, narrow doors included (user 2026-11-26: "we were getting out
+            # of the bedroom correctly then we just cut to the bathroom - it needs to be one
+            # continuous moment"): from inside the room, through every door on the way, into the
+            # next room; the cuts at narrow doors below only when it cannot be flown
+            out_s = next((c["s"] for c in cr if c["from"] == room), cuts[0]["s"])
+            start0 = (max(0.0, out_s - THROUGH_BEFORE[1]), max(0.3, out_s - THROUGH_BEFORE[0]))
+            end0 = (entry["s"] + THROUGH_AFTER[0], entry["s"] + THROUGH_AFTER[1])
+            earlier0 = [p for k in sorted(space.spaces.get(dst, {dst})) for p in poses.get(k, [])]
+            mv, w = mover.flight("through", dst, r, start0, end0, pace, handle, None if dry else prev, earlier0,
+                                 aim=aim, piece=piece, end_room=dst, geometry_only=dry, start_room=room)
+            if mv is None:                       # a bend past the door: look at one point in the room
+                mv, w = mover.flight("through", dst, r, start0, end0, pace, handle, None if dry else prev, earlier0,
+                                     aim=aim, piece=piece, end_room=dst, geometry_only=dry, start_room=room,
+                                     look_fixed_s=entry["s"] + THROUGH_AFTER[1] + 1.0)
+            if mv is not None:
+                if dry:
+                    return True
+                dur = round(mv.why["dur_s"] + handle, 2)
+                sel = dataclasses.replace(first_s[room], room_key=dst, role="detail", kind="room", is_hero=False,
+                                          is_lead=False, final_duration=dur, raw_duration=dur)
+                chain = [(sel, mv)]
+                log["legs"].append({"kind": "through", "room": dst, "travel_m": mv.why["travel_m"],
+                                    "dur_s": mv.why["dur_s"], "doors_passed": len(cuts)})
+                p_ = mv.last
+            elif not dry:
+                warnings.extend(x for x in w if x not in warnings)
+        for j in (range(len(cuts) + 1) if not chain else ()):
             door = cuts[j] if j < len(cuts) else None
             if door is None and cuts and cuts[-1]["is_entry"]:
                 break                                  # the next room's own door is the last cut
@@ -515,6 +557,31 @@ def plan_tour_3d(model, scene: dict, rooms: list[dict], listing_id: str, cfg: Pl
     # the tour's cap: the coverage shots showing the least new wall go first. Checked with room for
     # the beat sync, which only lengthens room shots afterwards (the Home Scan: 131 s past a 120 s cap)
     cap = SYNC_HEADROOM * (getattr(c3, "max_total_s", None) or 90.0)
+    # over the cap, shots longer than their kind's length (planner/lengths: hero / room) give time
+    # back first, longest first, as far as the move's speed limits allow - a room shown whole by its
+    # coverage shots matters more than one long take (user 2026-11-26: "the home office shot never
+    # captured the whole room - showing most of each room has been a feature of the tours")
+    from tour_worker.planner.lengths import length_range
+    from tour_worker.planner3d.moves import FLIGHT, MIN_KIND_S, trial_speeds
+    for s_, mv in sorted(moves, key=lambda m: -m[0].final_duration):
+        over = sum(x.final_duration - handle for x, _ in moves) - cap
+        if over <= 0:
+            break
+        if mv.kind in FLIGHT or mv.why.get("coverage_shot") or s_.kind == "detail":
+            continue
+        hi = length_range("hero" if s_.kind == "hero" else "room", c3.pacing)[1] * reach + handle
+        lo = max(hi, MIN_KIND_S.get(mv.kind, 0.0) + handle, s_.final_duration - over)
+        if lo >= s_.final_duration:
+            continue
+        ok = s_.final_duration
+        for d in np.linspace(lo, s_.final_duration, 8):         # the shortest the speed limits allow
+            turn, move_ = trial_speeds(mv.eye, mv.tgt, float(d), mv.zs, "linear" if continuous else mv.easing)
+            if turn <= MAX_TURN_DPS * 0.95 and move_ <= MAX_MOVE_MPS * 0.95:
+                ok = float(d)
+                break
+        if ok < s_.final_duration:
+            mv.why["trimmed_from_s"] = round(s_.final_duration, 2)
+            s_.final_duration = round(ok, 2)
     for _, pair in sorted(extras, key=lambda e: e[0]):
         if sum(s_.final_duration - handle for s_, _ in moves) <= cap:
             break

@@ -248,7 +248,7 @@ def test_a_kitchen_with_no_piece_pushes_toward_its_counter():
     # reached through a doorway: it may open walking in; its own shots push / pull on the counter.
     # No close-ups in 3D tours (2026-11-16: a scan rarely holds detail at 1 m)
     from tour_worker.planner3d.moves import COMPOSED
-    assert moves and set(moves) <= {"enter", "exit", "glide", *COMPOSED} and not [s for s, _ in kit if s.role == "close"]
+    assert moves and set(moves) <= {"enter", "exit", "through", "glide", *COMPOSED} and not [s for s, _ in kit if s.role == "close"]
     # a push on the counter is offered with every rule kept (out of the doorways, seen to move, the
     # counter whole with floor in front of it) - a further shot is taken only when it shows walls the
     # walk-in did not (up to 3 a room, by coverage)

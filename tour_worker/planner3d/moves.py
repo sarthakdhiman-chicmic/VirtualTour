@@ -65,7 +65,7 @@ OPENING_GLIDE = 1.5          # the tour opens by moving into the home
 # front of it; a glide or pan looks down a room, where walls 1.2 m+ away are the room itself
 # (user 2026-11-16, Home Scan: shots closing in on walls the floor plan does not hold - a poorly
 # captured wall is no "tall" cell - so the rendered check looks 1.8 m out for every room move)
-OCC_NEAR_KIND = {"backout": 0.5, "wall_pan": 1.5, "corner_sweep": 1.8, "panorama": 1.5, "descend": 1.8, "truck": 2.0, "rise": 1.8, "exit": 0.9, "through": 0.9, "walk": 0.9, "walkway": 2.0, "arc": 2.0, "room_pan": 1.8, "hold_pan": 1.8, "push": 1.8, "pull": 1.8, "reveal": 1.8, "link": 1.2, "enter": 1.5, "glide": 1.8, "pan": 1.2, "detail": 0.7}
+OCC_NEAR_KIND = {"backout": 0.5, "wall_pan": 1.5, "corner_sweep": 1.8, "panorama": 1.5, "descend": 1.8, "truck": 2.0, "rise": 1.8, "exit": 0.9, "through": 0.6, "walk": 0.9, "walkway": 2.0, "arc": 2.0, "room_pan": 1.8, "hold_pan": 1.8, "push": 1.8, "pull": 1.8, "reveal": 1.8, "link": 1.2, "enter": 1.5, "glide": 1.8, "pan": 1.2, "detail": 0.7}
 PAN_SWEEP = 50.0
 AIM_Z_MAX = EYE - 0.10        # a room shot never looks up: not at a ceiling, not at upper cabinets
 LOW_TOP = 1.4                 # m: an object whose top is below this is a surface a room shot may aim at
@@ -138,6 +138,7 @@ SAMPLES = 50
 TRUCK_LEN = (1.2, 1.7, 2.2)   # m a truck slides sideways ...
 TRUCK_DIST = (2.3, 2.8, 3.3)  # ... this far out from its subject ...
 TRUCK_AIM = 0.4               # ... its aim sliding this share of the way with it (parallax)
+INTERIOR_CRANE = False        # rise / descend moves inside (off: client review 2026-11-20, item 17)
 RISE_Z = 2.1                  # m: the top of a rise
 RISE_PITCH = 20.0             # deg down at the top of a rise
 RISE_AREA = 16.0              # m2: a room this big (or open plan) may rise
@@ -160,6 +161,8 @@ THROUGH_TURN_FROM = 0.45      # of the flight: where its look starts turning fro
 FLIGHT_S = (3.0, 5.5)         # s a flight leg lasts (item 9: never under 3 s; short, so the 90 s cap keeps them)
 FLIGHT_PACE = (0.25, 0.45)    # m/s: a leg flies at the previous shot's pace, within these
 WALK_LEN = (0.8, 4.5)         # m a walk between two narrow doors travels (longer: no matched chain)
+THROUGH_NEAR = 0.45           # m: a flight through a door may pass its frame no closer than this
+DOOR_PASS_CLEAR = 0.14        # m clear a flight needs in a doorway it passes through
 MATCH_TURN = 30.0             # deg: a walk-in after a door keeps within this of the heading through it
 AFTER_DOOR_FRONT = 1.0        # m in front a matched walk-in needs at its start (it is mid-flight, just past a door)
 UNFRAMED_W = 1.0              # score a matched walk-in loses ending without its subject framed (kept: the cut matters more)
@@ -661,8 +664,10 @@ class RoomMoves:
                 composed += self._arc(room, piece, rmin, dur, prev, earlier)
             composed += self._room_pan(room, [pts[k] for k in sorted(own)], rmin, dur, prev, earlier)
             composed += self._truck(room, rmin, dur, prev, earlier)
-            composed += self._rise(room, [pts[k] for k in sorted(own)], rmin, dur, prev, earlier)
-            composed += self._descend(room, [pts[k] for k in sorted(own)], rmin, dur, prev, earlier)
+            if INTERIOR_CRANE:       # (client review item 17: interiors are an eye-level gimbal walk -
+                                     # no rise or crane moves; drone-style moves belong outside)
+                composed += self._rise(room, [pts[k] for k in sorted(own)], rmin, dur, prev, earlier)
+                composed += self._descend(room, [pts[k] for k in sorted(own)], rmin, dur, prev, earlier)
             composed += self._corner_sweep(room, [pts[k] for k in sorted(own)], rmin, dur, prev, earlier)
             composed += self._panorama(room, [pts[k] for k in sorted(own)], rmin, dur, prev, earlier)
             composed += self._backout(room, [pts[k] for k in sorted(own)], rmin, dur, prev, earlier)
@@ -818,9 +823,11 @@ class RoomMoves:
         cap_of = lambda m: self.at_cap(m.kind, further=covered is not None,          # noqa: E731
                                        own_piece=first and self.on_own_piece(room, m))
         capped = [m for t in tiers for m in t if cap_of(m)]
-        if capped:                                 # (a further shot is dropped rather than repeat one)
+        if capped:                                 # a kind at its cap only when nothing else will do -
+            # for a further angle too: a room shown whole beats variety (user 2026-11-26: the study
+            # kept a third of its walls unseen because pans were at their cap)
             c_ids = {id(m) for m in capped}
-            tiers = [[m for m in t if id(m) not in c_ids] for t in tiers] + ([capped] if covered is None else [])
+            tiers = [[m for m in t if id(m) not in c_ids] for t in tiers] + [capped]
         if self.continuous:
             # continuous cuts (client review 2026-11-20, items 5-6): a move that would turn the camera
             # more than 45 deg, or reverse it, across the cut from the previous shot only when no
@@ -1970,7 +1977,7 @@ class RoomMoves:
                pace: float, extra_s: float = 0.0, prev=None, earlier=(), aim=None, piece=None,
                end_room: str | None = None, matched: bool = False,
                look_max_s: float | None = None, geometry_only: bool = False,
-               start_room: str | None = None) -> tuple[Move | None, list[str]]:
+               start_room: str | None = None, look_fixed_s: float | None = None) -> tuple[Move | None, list[str]]:
         """One leg of a room change along the walking route: it starts between start[0] and start[1]
         m along the route and ends between end[0] and end[1] m, at `pace` m/s (FLIGHT_S long, never
         under 3 s), looking ahead along the route - and, given `aim` (a through flight into the next
@@ -2010,15 +2017,23 @@ class RoomMoves:
                         st["speed"] += 1
                         continue
                     seg = poly[ks:ke + 1]
-                    if min(sp.clearance(q) for q in seg) < rmin * 0.9:
+                    # (a flight through a door passes its frame closer than a room shot may come to a
+                    # wall: in the doorway DOOR_PASS_CLEAR is enough - the lens check decides the rest)
+                    need = [DOOR_PASS_CLEAR if kind == "through" and self.in_doorway(q) else rmin * 0.9 for q in seg]
+                    if any(sp.clearance(q) < n for q, n in zip(seg, need)):
                         st["clear"] += 1
                         continue
                     path = resample(smooth(sp, seg, rmin), SAMPLES)
                     d = self._along(path)
                     s_look = s_[-1] if look_max_s is None else min(s_[-1], look_max_s)
-                    look = np.array([_route_point(poly, s_, min(s_[ks] + x + EXIT_AHEAD, s_look)) for x in d])
+                    if look_fixed_s is not None:
+                        # one point to look at, beyond where it is going: the view turns as the eye
+                        # moves, slowly - never swinging round a bend in the route
+                        look = np.repeat(_route_point(poly, s_, look_fixed_s)[None], len(d), 0)
+                    else:
+                        look = np.array([_route_point(poly, s_, min(s_[ks] + x + EXIT_AHEAD, s_look)) for x in d])
                     close = np.linalg.norm(look - path, axis=1) < 1.0     # the route ends at the eye: straight on
-                    if close.any() and look_max_s is None:
+                    if close.any() and look_max_s is None and look_fixed_s is None:
                         look[close] = [_route_point(poly, s_, s_[ks] + x + EXIT_AHEAD) for x in d[close]]
                     tgt = np.c_[look, np.full(SAMPLES, EYE - LOOK_DROP)]
                     if float(np.min(np.linalg.norm(look - path, axis=1))) < 0.8:   # the route ends at the eye
@@ -2737,7 +2752,7 @@ class RoomMoves:
             worst = max(worst, self.occ.cover(e, t, HFOV, m.piece, OCC_NEAR_KIND.get(m.kind, OCC_NEAR)))
             if worst > MAX_OCC:                       # already out: the other poses cannot bring it back
                 break
-            if m.kind not in ("link", "detail", "exit", "walk", "backout"):     # (an exit / walk / back-out passes door frames)
+            if m.kind not in ("link", "detail", "exit", "walk", "backout", "through"):     # (they pass door frames)
                 # a door frame or a wall at the frame's edge, right at the lens (user 2026-11-16, Krk:
                 # the bedroom shot ended with the door frame over a quarter of the frame)
                 edge = self.occ.cover(e, t, HFOV, m.piece, EDGE_NEAR, region="full")
@@ -2748,7 +2763,9 @@ class RoomMoves:
         # exits included (green house v11: a fridge over a third of a rise, a TV over half an exit,
         # a sculpture in a pan)
         if m.kind != "detail":
-            r_near = BACKOUT_NEAR if m.kind == "backout" else NEAR_ANY
+            # (a flight through a door: its frame sweeps past the edges as the camera goes through -
+            # only what comes within THROUGH_NEAR, a frame it would scrape, blocks it)
+            r_near = BACKOUT_NEAR if m.kind == "backout" else THROUGH_NEAR if m.kind == "through" else NEAR_ANY
             for k in np.linspace(0, len(e3) - 1, NEAR_ANY_POSES).astype(int):
                 near = self.occ.cover(e3[k], m.tgt[k], HFOV, None, r_near, region="full")
                 if near > NEAR_ANY_MAX:
