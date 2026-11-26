@@ -137,7 +137,9 @@ class PlannerConfig(BaseModel):
     # Perceptual motion (plan 1.4, planner/perceptual.py): subtle movement inside detect masks.
     perceptual_motion: bool = True
     perceptual_effects: dict[str, str] = {
-        "curtain": "fabric_sway", "blinds": "fabric_sway", "potted_plant": "foliage_sway",
+        # hanging curtains only: blinds and Roman shades are fixed fittings (client review item 16:
+        # fixtures are never animated - Turkey Trot's folded shades swayed)
+        "curtain": "fabric_sway", "potted_plant": "foliage_sway",
         "tree": "canopy_flutter", "water": "calm_water",
         # ADE20K OneFormer (2026-10-16): "plant" covers potted plants AND outdoor shrubs (still:
         # perceptual_still_outdoors). A lit fire ("fire" -> "fire_flicker") is held still: it did not
