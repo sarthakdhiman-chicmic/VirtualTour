@@ -23,6 +23,7 @@ class RoomLabels(BaseModel):
 # drawn by tour_worker/render/overlays.py; the MLS copy is the unbranded version (no agent card,
 # logo or room labels; the address title and the staged disclosure stay)
 MAX_BRAND_CHARS = 120
+MAX_TITLE_CHARS = 500          # the intro text (backend VirtualTourCreateRequest.intro_text)
 
 class AgentCard(BaseModel):
     name: Optional[str] = None
@@ -597,9 +598,13 @@ def check_branding(plan: Plan):
     b = plan.output.branding
     if b is None:
         return
-    texts = [b.kicker, b.address, b.locality, b.title] + ([b.agent.name, b.agent.phone, b.agent.email] if b.agent else [])
+    texts = [b.kicker, b.address, b.locality] + ([b.agent.name, b.agent.phone, b.agent.email] if b.agent else [])
     if any(t is not None and len(t) > MAX_BRAND_CHARS for t in texts):
         raise ValueError(f"invalid_plan: branding text must be at most {MAX_BRAND_CHARS} characters")
+    # the intro text: the title card wraps and scales it to fit (render/overlays.py), up to what the
+    # backend's tour request takes
+    if b.title is not None and len(b.title) > MAX_TITLE_CHARS:
+        raise ValueError(f"invalid_plan: branding title must be at most {MAX_TITLE_CHARS} characters")
     for u in b.image_uris():
         if not u.startswith(("s3://", "http://", "https://", "local://")):
             raise ValueError(f"invalid_plan: branding image uri {u!r}")

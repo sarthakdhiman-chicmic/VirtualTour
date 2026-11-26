@@ -175,10 +175,10 @@ def test_the_end_card_and_corner_logo_are_in_the_branded_copy_only(tmp_path):
     assert (np.abs(end.astype(int) - [60, 60, 200]).sum(axis=2) < 30).any()   # the agent's photo (BGR red)
     assert (np.abs(end.astype(int) - [60, 200, 60]).sum(axis=2) < 30).any()   # the logo
     assert ov.apply(FRAME, last, captions=False) is FRAME           # unbranded: no card
-    mid = ov.apply(FRAME, 200)                                      # the corner logo, top right
-    x0, y0, x1, y1 = _changed(mid[:H // 4], FRAME[:H // 4])
-    assert x0 > W * 0.7
-    assert _changed(ov.apply(FRAME, 200, captions=False)[:H // 4], FRAME[:H // 4]) is None
+    mid = ov.apply(FRAME, 200)                                      # the corner logo, bottom right edge
+    x0, y0, x1, y1 = _changed(mid[3 * H // 4:, W // 2:], FRAME[3 * H // 4:, W // 2:])
+    assert x0 + W // 2 > W * 0.7 and x1 + W // 2 > W * 0.9
+    assert _changed(ov.apply(FRAME, 200, captions=False)[3 * H // 4:, W // 2:], FRAME[3 * H // 4:, W // 2:]) is None
 
 
 def test_a_missing_branding_image_leaves_its_place_empty(tmp_path):

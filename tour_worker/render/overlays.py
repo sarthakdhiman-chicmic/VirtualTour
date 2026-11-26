@@ -1,14 +1,12 @@
 """Overlays drawn over the composed tour frames (SOW 3.2.1a; reviewed with the user 2026-11-05):
 
   room labels   each captioned shot (a room's first shot, planner/captions.py) gets the room's
-                name in a script font, after a small gold index and a thin rule ("02 | Kitchen"),
+                name in a script font, just the name (user 2026-11-26: no index number or rule),
                 over a soft gradient that keeps white text readable. Animation, from the room's
-                first frame: +0.40 s the rule draws downward (0.35 s) and the index fades in;
-                +0.55 s the name writes on left to right (0.9 s); it holds until 3.6 s after it
-                began or 0.35 s before the room ends, then fades out over 0.5 s.
+                first frame: +0.55 s the name writes on left to right (0.9 s); it holds until
+                3.6 s after it began or 0.35 s before the room ends, then fades out over 0.5 s.
                 plan.output.room_labels sets the font, the scale (x the reviewed maximum size,
-                0.6-1.0, default 0.8) and the placement (bottom/top x left/center/right; right
-                placements mirror the label: "Kitchen | 02").
+                0.6-1.0, default 0.8) and the placement (bottom/top x left/center/right).
   staged        "VIRTUALLY STAGED" on every shot of a staged photo, the whole shot, bottom right
                 (bottom left when the room labels sit bottom right). It is a disclosure, so the
                 MLS copy keeps it.
@@ -17,8 +15,9 @@
                 gets no room label. Kept in the MLS copy.
   end card      (branding.agent / logo_uri) the last END_CARD_S of the tour on a dark scrim: the
                 agent's photo, name, phone and email, and the brokerage logo. Branded copy only.
-  corner logo   (branding.corner_logo) the brokerage logo, top right, between the title and the
-                end card. Branded copy only.
+  corner logo   (branding.corner_logo) the brokerage logo at the bottom right edge (user 2026-11-26),
+                between the title and the end card; the "virtually staged" tag moves above it.
+                Branded copy only.
 
 Each label is drawn once (Pillow, the bundled OFL fonts) into a small layer around it and composited
 per frame in float32, the same arithmetic every run: renders stay byte-identical. Sizes are set for a
@@ -42,19 +41,20 @@ SCRIPT_FONTS = {"sacramento": ("Sacramento-Regular.ttf", 76), "mr_dafoe": ("MrDa
                 # an upright serif (2026-11-23, the AI Studio's choice): the variable font at its default
                 # Regular weight, sized so a room name runs as wide as in Pacifico / Kaushan Script
                 "playfair_display": ("PlayfairDisplay-Regular.ttf", 48)}
-INDEX_FONT, INDEX_PX = "Lato-Regular.ttf", 26
+INDEX_FONT = "Lato-Regular.ttf"           # the end card's contact line
 STAGED_FONT, STAGED_PX = "Lato-Semibold.ttf", 20
 STAGED_TEXT = "VIRTUALLY STAGED"
 MARGIN_PX = 72                      # from the frame's edges (1080 px short side), not scaled by the label
-RULE_HALF_PX, GAP_PX = 26, 18       # the rule's half height and the gaps around it, scaled by the label
 GOLD, WHITE = (212, 175, 110), (255, 255, 255)
 
 # animation (s), reviewed 2026-11-05
-LABEL_IN, RULE_S, WRITE_AT, WRITE_S = 0.40, 0.35, 0.55, 0.9
+LABEL_IN, WRITE_AT, WRITE_S = 0.40, 0.55, 0.9
 HOLD_MAX, OUT_S, END_GAP = 3.6, 0.5, 0.35
-INDEX_FADE_S, SHADE_FADE_S, WRITE_SOFT_PX = 0.45, 0.3, 60
+SHADE_FADE_S, WRITE_SOFT_PX = 0.3, 60
 STAGED_FADE_S = 0.3
 TITLE_IN, TITLE_MAX_END, CARD_FADE_S, TITLE_SCRIM = 0.5, 4.6, 0.6, 0.30
+TITLE_W, TITLE_H = 0.84, 0.70       # the title card's text within this share of the frame's width / height
+TITLE_GROW, TITLE_MIN = 1.25, 0.35   # a short line grows to this; a card too tall shrinks, at most to this
 END_CARD_S, END_SCRIM = 3.5, 0.62
 LOGO_H_PX, LOGO_OPACITY, CORNER_LOGO_H_PX, CORNER_OPACITY = 80, 1.0, 52, 0.85
 AGENT_PHOTO_PX = 200
@@ -125,39 +125,25 @@ def _box(x0, y0, x1, y1, W, H, pad):
 class _Label:
     """One room label: its layers and the frames it is on screen."""
 
-    def __init__(self, idx: int, name: str, labels, W: int, H: int, t0: float, t_out: float):
+    def __init__(self, idx: int, name: str, labels, W: int, H: int, t0: float, t_out: float, lift: float = 0.0):
         k = min(W, H) / 1080.0
         s = k * labels.scale
         m = MARGIN_PX * k
         file, px = SCRIPT_FONTS[labels.font]
-        script, index_f = _font(file, px * s), _font(INDEX_FONT, max(12.0, INDEX_PX * s))
+        script = _font(file, px * s)
         probe = ImageDraw.Draw(Image.new("L", (1, 1)))
         l, t, r, b = probe.textbbox((0, 0), name, font=script)
-        il, it, ir, ib = probe.textbbox((0, 0), f"{idx:02d}", font=index_f)
-        tw, th, iw = r - l, b - t, ir - il
-        gap, rh = GAP_PX * s, RULE_HALF_PX * s
+        tw, th = r - l, b - t
         self.vert, horiz = labels.placement.split("_")
-        base = H - m - 2 * k if self.vert == "bottom" else m + th      # the name's ink bottom
+        base = H - m - 2 * k - (lift if horiz == "right" else 0.0) if self.vert == "bottom" else m + th   # ink bottom
         cy = base - th / 2
-        total = iw + gap + 2 + gap + tw
-        x = {"left": m, "right": W - m - total, "center": (W - total) / 2}[horiz]
-        if horiz == "right":                                            # mirrored, hugging the edge
-            x_name, x_rule, x_idx = x, x + tw + gap, x + tw + 2 * gap + 2
-        else:
-            x_idx, x_rule, x_name = x, x + iw + gap, x + iw + 2 * gap + 2
+        # the room's name only (user 2026-11-26: no index number and rule before it)
+        x_name = {"left": m, "right": W - m - tw, "center": (W - tw) / 2}[horiz]
         pad = 14 * k
-        iy = cy - (ib - it) / 2 - it
-        self.index = _Layer(_box(x_idx, cy - (ib - it), x_idx + iw, cy + (ib - it), W, H, pad),
-                            lambda d, c, ox, oy: d.text((x_idx - il + ox, iy + oy), f"{idx:02d}", font=index_f,
-                                                        fill=c or GOLD + (255,)), blur=5 * k)
-        self.rule = _Layer(_box(x_rule - 2, cy - rh, x_rule + 2, cy + rh, W, H, pad),
-                           lambda d, c, ox, oy: d.line([(x_rule + ox, cy - rh + oy), (x_rule + ox, cy + rh + oy)],
-                                                       fill=c or WHITE + (200,), width=max(1, round(2 * k))),
-                           blur=3 * k)
+        self.index = self.rule = None
         self.text = _Layer(_box(x_name, base - th, x_name + tw, base, W, H, pad + 4 * k),
                            lambda d, c, ox, oy: d.text((x_name - l + ox, base - b + oy), name, font=script,
                                                        fill=c or WHITE + (255,)), blur=5 * k)
-        self.rule_y = (cy - rh, cy + rh)
         self.name_x = (x_name - 10 * k, x_name + tw + 14 * k)
         self.soft = WRITE_SOFT_PX * k
         self.t0, self.t_out = t0, t_out
@@ -251,17 +237,64 @@ class Overlays:
         if "title" not in self._cards:
             k = min(self.W, self.H) / 1080.0
             b = self.branding
-            lines = []
+            specs = []                                  # (text, font file, size at 1080 px, colour)
             if b.kicker:
-                lines.append((b.kicker.upper(), _font("Lato-Semibold.ttf", 30 * k), GOLD))
+                specs.append((b.kicker.upper(), "Lato-Semibold.ttf", 30, GOLD))
             if b.address:
-                lines.append((b.address, _font(SCRIPT_FONTS["sacramento"][0], 96 * k), WHITE))
+                specs.append((b.address, SCRIPT_FONTS["sacramento"][0], 96, WHITE))
             if b.locality:
-                lines.append((b.locality.upper(), _font("Lato-Semibold.ttf", 26 * k), (235, 228, 215)))
+                specs.append((b.locality.upper(), "Lato-Semibold.ttf", 26, (235, 228, 215)))
             if b.title:
-                lines.append((b.title, _font("Lato-Light.ttf", 34 * k), WHITE))
-            self._cards["title"] = self._text_block(lines, self.H * 0.5)
+                specs.append((b.title, "Lato-Light.ttf", 34, WHITE))
+            self._cards["title"] = self._text_block(self._fit_title(specs, k), self.H * 0.5)
         return self._cards["title"]
+
+    def _fit_title(self, specs, k: float) -> list:
+        """The title card's lines sized to the frame (user 2026-11-26: "the intro text needs to scale
+        according to the space available and the text length"): lines within TITLE_W of the frame's
+        width (the intro text wrapped at word breaks - it runs to 500 characters), the card within
+        TITLE_H of its height. Returns [(text, font, colour)]."""
+        probe = ImageDraw.Draw(Image.new("L", (1, 1)))
+        max_w, max_h = TITLE_W * self.W, TITLE_H * self.H
+        b_title = self.branding.title
+
+        def wrap(text, font):
+            words, out, cur = text.split(), [], ""
+            for w in words:
+                cand = f"{cur} {w}".strip()
+                if cur and probe.textlength(cand, font=font) > max_w:
+                    out.append(cur)
+                    cur = w
+                else:
+                    cur = cand
+            return out + ([cur] if cur else [])
+
+        # each line its own size: a short address grows (up to TITLE_GROW), a long one shrinks to
+        # the width; the intro text (title) keeps its size and wraps. Then the whole card shrinks
+        # together while it is taller than TITLE_H
+        own = []
+        for text, file, px, col in specs:
+            w = probe.textlength(text, font=_font(file, px * k)) or 1.0
+            wraps = text is b_title
+            own.append(min(TITLE_GROW, max_w / w) if not wraps else min(TITLE_GROW, max(1.0, max_w / w)))
+
+        def build(shrink):
+            lines = []
+            for (text, file, px, col), sc in zip(specs, own):
+                f = _font(file, px * k * sc * shrink)
+                lines += [(ln, f, col) for ln in wrap(text, f)]
+            return lines
+
+        def height(lines):
+            return sum(probe.textbbox((0, 0), t, font=f)[3] - probe.textbbox((0, 0), t, font=f)[1]
+                       for t, f, _ in lines) + 14 * k * max(0, len(lines) - 1)
+
+        shrink = 1.0
+        lines = build(shrink)
+        while height(lines) > max_h and shrink > TITLE_MIN:
+            shrink = max(TITLE_MIN, shrink * 0.9)
+            lines = build(shrink)
+        return lines
 
     def _end_layers(self) -> list:
         if "end" not in self._cards:
@@ -304,10 +337,20 @@ class Overlays:
             lay = None
             if logo is not None:
                 lg = _fit_height(logo, round(CORNER_LOGO_H_PX * k))
+                if lg.width > self.W * 0.25:                       # a wide wordmark: at most a quarter
+                    lg = lg.resize((round(self.W * 0.25), max(1, round(lg.height * self.W * 0.25 / lg.width))),
+                                   Image.LANCZOS)
                 m = MARGIN_PX * k * 0.7
-                lay = _image_layer(self.W - m - lg.width, m, lg, self.W, self.H)
+                lay = _image_layer(self.W - m - lg.width, self.H - m - lg.height, lg, self.W, self.H)
             self._cards["corner"] = lay
         return self._cards["corner"]
+
+    def _logo_lift(self) -> float:
+        """How far what sits at the bottom right moves up to clear the corner logo (0: no logo)."""
+        if self.corner is None:
+            return 0.0
+        k = min(self.W, self.H) / 1080.0
+        return CORNER_LOGO_H_PX * k + 18 * k
 
     def _staged(self, side: str) -> _Layer:
         W, H = self.W, self.H
@@ -319,7 +362,7 @@ class Overlays:
         tw = sum(widths) + track * (len(STAGED_TEXT) - 1)
         m, ph, px = MARGIN_PX * k, 40 * k, 16 * k
         x0 = W - m - tw - px if side == "right" else m - px
-        y1 = H - m + 10 * k
+        y1 = H - m + 10 * k - (self._logo_lift() if side == "right" else 0.0)
 
         def draw(d, colour, ox, oy):
             if colour is not None:                                  # the tag has no drop shadow
@@ -337,7 +380,7 @@ class Overlays:
             got = self._built.get(i)
             if got is None:              # kept: a tour has a handful of labels, each a small text layer
                 idx, name, labels, t0, t_out = self.labels[i]
-                got = self._built[i] = _Label(idx, name, labels, self.W, self.H, t0, t_out)
+                got = self._built[i] = _Label(idx, name, labels, self.W, self.H, t0, t_out, self._logo_lift())
             return got
 
     @staticmethod
@@ -382,12 +425,6 @@ class Overlays:
             fade = 1.0 - _smooth((t - L.t_out) / OUT_S)
             shade = xp.on(self._shade[L.vert], f, owner=self, key=("shade", L.vert)) * (fade * _smooth((t - L.t0) / SHADE_FADE_S))
             f *= (1.0 - shade)[:, None, None]
-            p = _smooth((t - L.t0) / RULE_S)                          # the rule draws downward
-            y0, y1 = L.rule_y
-            ys = xp.on(np.arange(L.rule.y0, L.rule.y0 + L.rule.alpha.shape[0], dtype=np.float32)[:, None, None],
-                       f, owner=L, key="ys")
-            self._blend(f, L.rule, fade * xp.clip((y0 - 4 + p * (y1 - y0 + 8) - ys) / 4.0, 0, 1))
-            self._blend(f, L.index, fade * _smooth((t - L.t0) / INDEX_FADE_S))
             q = _smooth((t - L.t0 - (WRITE_AT - LABEL_IN)) / WRITE_S)   # the name writes on
             x0, x1 = L.name_x
             xs = xp.on(np.arange(L.text.x0, L.text.x0 + L.text.alpha.shape[1], dtype=np.float32)[None, :, None],
