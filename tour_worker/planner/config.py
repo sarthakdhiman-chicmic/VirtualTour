@@ -40,7 +40,7 @@ class PlannerConfig(BaseModel):
     # depth parallax (client review 2026-11-20, item 10; tour_worker/parallax): photo shots' near things
     # slide against far ones the way the move goes; parallax_cap_px is the near-far disparity at a
     # 1920-wide copy of the photo (16 px approved on the prototype 2026-11-25). 3D shots: their own depth
-    parallax: bool = True
+    parallax: bool = False             # parked 2026-11-26 until the tearing is fixed (user); plans carry no parallax
     parallax_cap_px: float = 16.0
     # set by the planner for the sync (planner.cut_windows): per shot, the earliest cut where its move
     # still moves (None: no limit); not a setting
