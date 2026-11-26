@@ -137,6 +137,12 @@ def punch_scale(punches, t: float) -> float:
 VISIBLE_MOTION_PX = 2.0         # = tools/quality/perceptual_quality LIMITS["motion_min_p95_px"], at 1080p
 
 
+BOOST_EFFECTS = ("canopy_flutter", "foliage_sway")
+BOOST_MAX = 2.5                 # a near-miss tree is strengthened at most this much ...
+NEAR_MISS = 0.25                # ... from this share of the floor (1080p: 0.5 px) up
+BOOST_HEADROOM = 1.1            # a little over the floor (the probe is a sample)
+
+
 def visible_motion_px(ow: int, oh: int) -> float:
     """The readability floor for this output (reviewed at 1080p; scales with the short side)."""
     return VISIBLE_MOTION_PX * min(ow, oh) / 1080
@@ -226,7 +232,7 @@ class ShotWarp:
         for spec in [r for r in shot.motion_regions or [] if r.effect == "sky_drift"][:1]:
             try:
                 from tour_worker.motion.sky import load_sky
-                self.sky = load_sky(shot, spec, images, self.src, n / self.fps)
+                self.sky = load_sky(shot, spec, images, self.src, n / self.fps, self.ow, self.oh)
             except Exception as e:  # noqa: BLE001
                 reason = str(e) if isinstance(e, FileNotFoundError) else f"error_{type(e).__name__}"
                 region_warnings.append(f"motion_region_dropped:{shot.shot_id}:{spec.id}:{reason}")
@@ -235,8 +241,21 @@ class ShotWarp:
         for r in self.regions:
             px = region_motion_px(self, r)
             self.motion_px[r.spec.id] = px
+            floor = visible_motion_px(self.ow, self.oh)
+            # a tree / plant just under the floor is strengthened to it (client review item 12:
+            # "trees don't move" - most of Turkey Trot's trees were dropped at 2.6-3.8 px of a 4 px
+            # floor), up to BOOST_MAX; under NEAR_MISS of the floor it stays still
+            if r.effect in BOOST_EFFECTS and NEAR_MISS * floor <= px < floor and px > 0:
+                k = min(BOOST_MAX, BOOST_HEADROOM * floor / px)
+                r.amp *= k
+                px2 = region_motion_px(self, r)
+                if px2 >= floor:
+                    region_warnings.append(f"motion_region_boosted:{shot.shot_id}:{r.spec.id}:{k:.2f}x")
+                    self.motion_px[r.spec.id] = px = px2
+                else:
+                    r.amp /= k
             # fire lives mostly in its light (2026-10-21): the displacement floor does not apply
-            if r.effect == "fire_flicker" or px >= visible_motion_px(self.ow, self.oh):
+            if r.effect == "fire_flicker" or px >= floor:
                 keep.append(r)
             else:
                 region_warnings.append(f"motion_region_dropped:{shot.shot_id}:{r.spec.id}:faint_{px:.1f}px")

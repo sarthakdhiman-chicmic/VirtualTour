@@ -41,13 +41,22 @@ def calm_irregular(r, u, v, t):
     return 1.0 + 0.35 * r.noise_a((u - r.u_mid) / d * 9.0, r.ref / d * 2.5, 0.25 * t)
 
 
+def _downwind(r) -> float:
+    """+1 / -1: the sign that turns the wave trains so the main one travels with the shot's wind
+    (client review item 12: "water ripples travel downwind"); CALM_TRAINS' main train runs right to
+    left as written."""
+    w = getattr(r, "water_wind", None)
+    return 1.0 if w is None or w.direction < 0 else -1.0
+
+
 def calm_slopes(r, u, v, t, irregular=None):
     xp = ns(u)
     d = xp.maximum(v - r.v_h, 1.0)
     x, z = (u - r.u_mid) / d, r.ref / d
     sx, sz = xp.zeros_like(u), xp.zeros_like(u)
+    turn = _downwind(r)
     for k, (ang, lam, spd, amp) in enumerate(CALM_TRAINS):
-        a = math.radians(ang)
+        a = math.radians(ang * turn)
         kx, kz = math.sin(a) * 2 * math.pi / lam, math.cos(a) * 2 * math.pi / lam
         c = amp * xp.cos(kx * x + kz * z - 2 * math.pi * spd / lam * t + 1.3 * k + r.phase)
         sx += c * kx
@@ -68,11 +77,17 @@ def calm_displacement(r, u, v, t):
     return A * near * sx / 1.35, 0.5 * A * near * sz / 1.35
 
 
+WATER_GUST = 0.3                # a gust strengthens the ripples by up to this share
+
+
 def _calm_amp(r, t: float) -> float:
-    """Water does not follow the shot's wind (2026-10-22: calming it to 0.85 between gusts left
-    thin distant lake bands under the readability floor; ripples at this scale barely respond
-    to a breeze anyway)."""
-    return r.amp
+    """The planned strength, stronger while a gust of the shot's wind passes (client review item 12:
+    ripples "strengthen with gusts"). Never weaker between gusts (2026-10-22: calming it to 0.85
+    left thin distant lake bands under the readability floor)."""
+    w = getattr(r, "water_wind", None)
+    if w is None:
+        return r.amp
+    return r.amp * (1.0 + WATER_GUST * w.gust(t - getattr(r, "wind_delay", 0.0)))
 
 
 def calm_fields(r, u, v, t, irregular=None):

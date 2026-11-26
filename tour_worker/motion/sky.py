@@ -45,7 +45,10 @@ THIN_PX, THIN_DL = 9, 10.0  # the sky's own colour leaves out detail darker than
 PLATE_INSET_PX = 3         # the plate keeps photo pixels only this far inside the sky (no mixed edge)
 FINE_PX = 8                # hidden sky this close to visible sky is inpainted at full resolution
 FRINGE_PX = 2              # non-sky pixels this close to the sky can be part sky (a soft edge)
-DRIFT_FRAC = 0.02          # drift: the top clouds move this share of the photo width per second
+DRIFT_FRAC = 0.02          # drift: the top clouds move this share of the photo width per second ...
+CLOUD_SCREEN_MAX = 0.007   # ... at most this share of the FRAME's width per second at the shot's
+                           # tightest frame (client review 2026-11-20, item 12: nearest clouds at
+                           # most 0.8% of the frame width a second - about twice real time)
 #                            (0.4%/s is real-time speed - invisible in a 4 s shot, review 2026-10-27:
 #                            "the cloud movements are not apparent"; ~5x is a gentle time-lapse)
 DRIFT_HORIZON = 0.35       # clouds at the horizon move this share of the top clouds' speed
@@ -329,7 +332,28 @@ class SkyMotion:
         return np.clip(out + 0.5, 0, 255).astype(np.uint8)
 
 
-def load_sky(shot, spec, images_dir: str, src: np.ndarray, duration_s: float) -> SkyMotion:
+def _zooms(cam) -> list[float]:
+    if cam.type == "keyframe_path":
+        return [k.zoom for k in cam.keyframes or []]
+    if cam.type == "compound":
+        return ([cam.start.zoom] if cam.start is not None else []) + [x.zoom for x in cam.segments or []]
+    return [z for z in (getattr(cam.start, "zoom", None), getattr(cam.end, "zoom", None)) if z]
+
+
+def drift_speed(shot, src_w: int, src_h: int, out_w: int | None, out_h: int | None) -> float:
+    """The top clouds' drift (share of the photo width per second): DRIFT_FRAC, slowed so that on
+    screen, at the shot's tightest frame, they move at most CLOUD_SCREEN_MAX of the frame's width a
+    second (a frame shows base_window / zoom of the photo's width)."""
+    if not out_w or not out_h:
+        return DRIFT_FRAC
+    from tour_worker.render.camera_path import base_window
+    bw, _ = base_window(src_w, src_h, out_w, out_h)
+    z = max(_zooms(shot.camera) or [1.0])
+    return min(DRIFT_FRAC, CLOUD_SCREEN_MAX * bw / max(z, 1e-6))
+
+
+def load_sky(shot, spec, images_dir: str, src: np.ndarray, duration_s: float,
+             out_w: int | None = None, out_h: int | None = None) -> SkyMotion:
     """The sky layer of a shot from its sky_drift region: the fetched mask (any size, scaled to
     the photo), the region's billow strength and rate, its effects (sky_effects: a sky seen
     through a window has no cloud shadows; None = TOUR_EFFECTS) and the shot's wind direction."""
@@ -345,13 +369,14 @@ def load_sky(shot, spec, images_dir: str, src: np.ndarray, duration_s: float) ->
     coarse = cv2.resize(m, (w, h), interpolation=cv2.INTER_NEAREST)
     effects = tuple(e for e in (getattr(spec, "sky_effects", None) or TOUR_EFFECTS) if e in TOUR_EFFECTS)
     return SkyMotion(src, coarse, seed=int(spec.seed), effects=effects, wind=float(shot_wind(shot, w).direction),
-                     duration=duration_s, billow_px=float(spec.amplitude_px), billow_hz=float(spec.freq_hz))
+                     speed=drift_speed(shot, w, h, out_w, out_h), duration=duration_s,
+                     billow_px=float(spec.amplitude_px), billow_hz=float(spec.freq_hz))
 
 
 def sky_report(plan) -> list[dict]:
     """Per photo shot with a sky (client review item 14: "send the strengths used"): the sky
     effects drawn, the wind direction, the nearest clouds' drift on screen (% of the frame's width
-    a second, at the shot's widest frame - the item 12 limit is 0.8), the billow (px at the photo's
+    a second, at the shot's widest and tightest frames - the item 12 limit is 0.8), the billow (px at the photo's
     size) and the cloud shadows' strength (how much darker a sunlit surface gets under one, and how
     much faster than the clouds they sweep). Computed from the plan as the renderer draws it."""
     from tour_worker.motion.wind import shot_wind
@@ -365,14 +390,13 @@ def sky_report(plan) -> list[dict]:
             if spec.effect != "sky_drift":
                 continue
             effects = [e for e in (getattr(spec, "sky_effects", None) or TOUR_EFFECTS) if e in TOUR_EFFECTS]
-            cam = shot.camera
-            zooms = ([k.zoom for k in cam.keyframes or []] if cam.type == "keyframe_path"
-                     else [z for z in (getattr(cam.start, "zoom", None), getattr(cam.end, "zoom", None)) if z])
+            zooms = _zooms(shot.camera) or [1.0]
             bw, _ = base_window(src.width, src.height, plan.output.width, plan.output.height)
-            screen = 100.0 * DRIFT_FRAC * min(zooms or [1.0]) / bw
+            speed = drift_speed(shot, src.width, src.height, plan.output.width, plan.output.height)
+            screen = [100.0 * speed * min(zooms) / bw, 100.0 * speed * max(zooms) / bw]   # widest, tightest frame
             row = {"shot_id": shot.shot_id, "room_type": shot.room_type, "region": spec.id, "effects": effects,
                    "wind": "left_to_right" if shot_wind(shot, src.width).direction > 0 else "right_to_left",
-                   "cloud_drift_pct_fw_s": round(screen, 2) if "drift" in effects else 0.0,
+                   "cloud_drift_pct_fw_s": [round(x, 2) for x in screen] if "drift" in effects else 0.0,
                    "billow_px": round(float(spec.amplitude_px), 2) if "billow" in effects else 0.0}
             if "shadows" in effects:
                 row.update(shadow_depth=SHADOW_DEPTH, shadow_speed_x_clouds=[SHADOW_SPEED, SHADOW_SPEED * SHADOW_NEAR])

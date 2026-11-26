@@ -73,6 +73,9 @@ def load_regions(shot, images_dir: str, src_w: int, src_h: int,
         if spec.effect not in ("fire_flicker", "calm_water", "water_ripple"):   # fire, water: their own
             region.wind = wind
             region.wind_delay = wind.delay(region.x0 + region.bw / 2)
+        elif spec.effect == "calm_water":          # water: its waves run downwind, gusts strengthen them
+            region.water_wind = wind
+            region.wind_delay = wind.delay(region.x0 + region.bw / 2)
         if raw is not None:                        # touching crowns: separate trees
             region.instances = build_instances(region, src, raw, wind)
         if cols is not None:
