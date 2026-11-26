@@ -56,6 +56,71 @@ def _sample(img, u, v, border: str):
     return out[0, 0].reshape(u.shape)
 
 
+def _reflect(u, n: int):
+    """Coordinates folded back into [-0.5, n - 0.5] as OpenCV's BORDER_REFLECT does (the edge pixel
+    repeated: ...cba|abc...); sampled with a replicated border after, they read what cv2.remap reads."""
+    torch = _t()
+    p = torch.remainder(u + 0.5, 2.0 * n)
+    return torch.where(p >= n, 2.0 * n - p, p) - 0.5
+
+
+class GpuSky:
+    """motion/sky.SkyMotion.frame on the GPU (client review item 22: the sky was ~280 s of CPU time a
+    4K tour from 8K photos, taken from the x264 encoders): the same coarse noise grids (the noise runs
+    on torch), upsampled bicubic as cv2.resize does (half-pixel centres), the sky plate resampled with
+    a reflected border, the cloud shadows - all on the device. Returns the photo with the sky in
+    motion as a float32 (H, W, 3) tensor."""
+
+    def __init__(self, sky, device):
+        torch = _t()
+        self.k, self.dev = sky, device
+        t = lambda a: torch.as_tensor(np.ascontiguousarray(a), device=device).to(torch.float32)   # noqa: E731
+        self.src, self.plate = t(sky.src), t(sky.plate)
+        self.share = t(sky._share)                                     # (H, W, 1)
+        self.shadow_w, self.drift_w = t(sky.shadow_w), t(sky.drift_w)  # (H, W), (H, 1)
+        self.gx = torch.as_tensor(sky.gx, dtype=torch.float64, device=device)
+        self.gy = torch.as_tensor(sky.gy, dtype=torch.float64, device=device)
+        rows = np.clip(sky.gy.astype(np.int64), 0, sky.h - 1)
+        self.shadow_rows = torch.as_tensor(sky.shadow_speed[rows, 0], dtype=torch.float64, device=device)
+        self.tint = torch.as_tensor([c for c in __import__("tour_worker.motion.sky", fromlist=["SHADOW_TINT"]).SHADOW_TINT],
+                                    dtype=torch.float32, device=device)
+
+    def _up(self, f):
+        import torch.nn.functional as F
+        k = self.k
+        return F.interpolate(f.to(_t().float32)[None, None], size=(k.h, k.w), mode="bicubic",
+                             align_corners=False)[0, 0]
+
+    def frame(self, t: float):
+        torch = _t()
+        from tour_worker.motion import sky as S
+        k = self.k
+        out = self.src.clone()
+        if "shadows" in k.effects:
+            s = S.SHADOW_SCALE * k.w
+            sweep = k.wind * S.SHADOW_SPEED * k.speed * k.w * t * self.shadow_rows / s
+            n = self._up(k.nc(self.gx / s - sweep, self.gy / (0.5 * s), 0.04 * t))
+            shade = ((n - S.SHADOW_COVER) / S.SHADOW_EDGE + 0.5).clamp(0.0, 1.0)
+            shade = shade * shade * (3 - 2 * shade)
+            d = (k.k * S.SHADOW_DEPTH) * shade * self.shadow_w
+            out *= 1.0 - d[..., None] * self.tint
+        if "drift" in k.effects or "billow" in k.effects:
+            dx = torch.zeros((k.h, k.w), dtype=torch.float32, device=self.dev)
+            dy = torch.zeros_like(dx)
+            if "drift" in k.effects:
+                dx += float(k.wind * k.speed * k.w * (t - k.duration / 2)) * self.drift_w
+            if "billow" in k.effects:
+                f = S.BILLOW_SCALE * k.w
+                amp = k.k * k.billow_px
+                dx += amp * self._up(k.na(self.gx / f, self.gy / f, t * k.billow_hz))
+                dy += 0.6 * amp * self._up(k.nb(self.gx / f, self.gy / f, t * k.billow_hz + 17.0))
+            xs = torch.arange(k.w, dtype=torch.float32, device=self.dev)[None, :]
+            ys = torch.arange(k.h, dtype=torch.float32, device=self.dev)[:, None]
+            sky = _sample(self.plate, _reflect(xs - dx, k.w), _reflect(ys - dy, k.h), "border")
+            out += self.share * (sky - self.plate)
+        return (out + 0.5).floor_().clamp_(0, 255)
+
+
 class GpuShot:
     """frame(f) -> BGR uint8 (numpy) of one photo shot, drawn on `device`."""
 
@@ -69,6 +134,7 @@ class GpuShot:
         self.feathers = {id(r): torch.as_tensor(np.ascontiguousarray(r.feather), device=device).to(torch.float32)
                          for r in sw.regions}
         self.k = R.grid_scale((sw.oh, sw.ow))
+        self.sky = GpuSky(sw.sky, device) if getattr(sw, "sky", None) is not None else None
 
     # ---- maps -------------------------------------------------------------------------------
     def maps(self, m: np.ndarray, r0=0, r1=None, c0=0, c1=None):
@@ -207,12 +273,14 @@ class GpuShot:
         torch = _t()
         sw = self.sw
         t0 = time.perf_counter()
-        sky = sw.sky.frame(f / sw.fps) if sw.sky is not None else None
         t1 = time.perf_counter()
         with GPU_LOCK, torch.no_grad():
             t2 = time.perf_counter()
             clk = _Clock(self.dev, stats)
-            src = torch.as_tensor(sky, device=self.dev).to(torch.float32) if sky is not None else self.src
+            # the sky on the device too (GpuSky): the CPU is left to the encoders
+            src = self.sky.frame(f / sw.fps) if self.sky is not None else self.src
+            if self.sky is not None:
+                clk("sky")
 
             def draw(m):
                 mx, my = self.maps(m)

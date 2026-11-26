@@ -82,3 +82,25 @@ def test_labels_and_the_mls_copy_through_the_device_path_match_the_cpu_render():
             psnr = 10 * np.log10(255 ** 2 / max(1e-9, ((x - y) ** 2).mean()))
             assert psnr > 40, (name, psnr)
         assert os.path.exists(gpu)
+
+
+@pytest.mark.parametrize("effects", [("drift", "billow"), ("drift", "billow", "shadows")])
+def test_the_sky_on_the_device_matches_the_opencv_sky(effects):
+    """GpuSky (the sky drawn on the device, client review item 22) against motion/sky.SkyMotion:
+    the same frames to a level, the sky drifting past the photo's edge included (OpenCV's reflected
+    border, the edge pixel repeated)."""
+    from tour_worker.motion.sky import SkyMotion
+    from tour_worker.render.frames_gpu import GpuSky
+    rng = np.random.default_rng(3)
+    h, w = 240, 320
+    img = np.zeros((h, w, 3), np.uint8)
+    img[:110] = (230, 170, 110)                                   # sky
+    img[:110] += rng.integers(0, 25, (110, w, 1)).astype(np.uint8)  # texture the drift moves
+    img[110:] = (60, 120, 90)                                     # ground (takes the cloud shadows)
+    coarse = np.zeros((h, w), np.uint8)
+    coarse[:110] = 255
+    sky = SkyMotion(img, coarse, seed=5, effects=effects, wind=1.0, speed=0.02, duration=6.0, billow_px=3.0)
+    g = GpuSky(sky, CPU)
+    for t in (0.0, 2.5, 5.9):
+        d = np.abs(sky.frame(t).astype(np.int16) - g.frame(t).numpy().astype(np.int16))
+        assert d.max() <= 2 and d.mean() < 0.05, (effects, t, d.max(), d.mean())
