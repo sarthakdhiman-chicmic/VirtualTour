@@ -170,6 +170,10 @@ def run_tour(request: dict, storage, workdir: str, settings: Settings | None = N
         dev = None if plan.scene is not None else photo_device(settings.photo_backend)
         if dev is None and settings.photo_backend == "gpu" and plan.scene is None:
             warnings.append("photo_gpu_unavailable")
+        if getattr(plan.output, "parallax", None) is not None and not settings.parallax_enabled:
+            # parked (user 2026-11-26): no depth / segmentation prep, the photos drawn flat
+            warnings.append("enhancement_dropped:tour:parallax:parked")
+            plan.output.parallax = None
         if getattr(plan.output, "parallax", None) is not None and dev is None:
             # depth parallax (client review item 10): depth + segmentation per photo (GPU when there),
             # the photo's planes saved beside it for the render processes; a photo that fails renders flat

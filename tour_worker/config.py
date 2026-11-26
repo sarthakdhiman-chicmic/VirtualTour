@@ -61,6 +61,9 @@ class Settings:
     models_dir: str = os.path.join(REPO_ROOT, "models")
     segment_model: str = "oneformer_coco"
     segment_dir: str | None = None
+    # depth parallax (client item 10) is parked until its tearing is fixed (user 2026-11-26): a plan
+    # asking for it renders flat, with no parallax_prep, unless PARALLAX_ENABLED=1
+    parallax_enabled: bool = False
     # the HTTP service (tour_worker.service)
     api_key: str | None = field(default=None, repr=False)     # never in a repr / log
     allow_no_auth: bool = False
@@ -98,6 +101,7 @@ class Settings:
             models_dir=env.get("MODELS_DIR") or os.path.join(REPO_ROOT, "models"),
             segment_model=env.get("SEGMENT_MODEL", "oneformer_coco"),
             segment_dir=env.get("SEGMENT_DIR") or None,
+            parallax_enabled=env.get("PARALLAX_ENABLED", "0").strip().lower() in ("1", "true", "yes"),
             api_key=env.get("WORKER_API_KEY") or None,
             allow_no_auth=env.get("WORKER_ALLOW_NO_AUTH", "") == "1",
             job_concurrency=max(1, int(env.get("JOB_CONCURRENCY") or 1)),
