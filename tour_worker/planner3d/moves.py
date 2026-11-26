@@ -198,7 +198,9 @@ KIND_CAP = {"backout": 3, "wall_pan": 3, "rise": 2, "descend": 1, "panorama": 2,
             "room_pan": 1, "push": 2, "pull": 2, "glide": 2, "hold_pan": 1}
 KIND_SHARE = 0.25
 CAP_W = 3.0                   # past its cap
-FLIGHT = ("exit", "through", "walk", "enter", "link", "reveal")      # the moves between rooms (not capped)
+FLIGHT = ("exit", "through", "walk", "enter", "link", "reveal")
+# moves that read the same played backwards (a backout reversed would end facing a wall)
+REVERSIBLE = ("walkway", "glide", "truck", "arc", "room_pan", "wall_pan", "pan", "corner_sweep", "panorama")      # the moves between rooms (not capped)
 # small rooms (user 2026-11-17: "the bathrooms never got included, even though some shot can be
 # managed, like from the deepest point in the bath escaping backwards towards the hall"): the camera
 # starts deep in the room looking into it and backs out toward its door, the room opening up
@@ -710,6 +712,12 @@ class RoomMoves:
                 if drop:
                     m.tgt[:, 2] -= drop * np.linalg.norm(m.tgt[:, :2] - m.eye, axis=1)
                 m.tgt[:, 2] = np.minimum(m.tgt[:, 2], AIM_Z_MAX)
+        # a move that would turn back across the cut (or end moving backward before a flight out of
+        # the room) is offered played in reverse too, when its kind reads the same both ways - judged
+        # by every rule like the rest (client review item 5; the green house's in-room cuts)
+        if self.continuous:
+            tiers = [t + self._reversed(t, then_forward) for t in tiers]
+            glides = glides + self._reversed(glides, then_forward)
         strict = piece_rank > 0 and kind != "detail"
         stats["generated"] += _n(tiers + [glides])
         roomy = lambda t: [m for m in t if self._roomy(m) and self._good(m, dur)]
@@ -1686,6 +1694,24 @@ class RoomMoves:
             cost = -CUT_SAME_W
         m.why["cut"] = {"turn_deg": None if turn is None else round(turn, 1), "forward_back": rev, "cost": cost}
         return cost
+
+    def _reversed(self, cands: list, then_forward: bool = False) -> list:
+        """The candidates of REVERSIBLE kinds that break the cut from the previous shot (cut_cost > 0)
+        or, before a flight out, end moving backward - played in reverse."""
+        import dataclasses
+        out = []
+        for m in cands:
+            if m.kind not in REVERSIBLE or m.why.get("reversed"):
+                continue
+            breaks = self.__dict__.get("_last_exit") is not None and self.cut_cost(m) > 0
+            if not (breaks or (then_forward and ends_backward(m))):
+                continue
+            out.append(dataclasses.replace(m, eye=m.eye[::-1].copy(), tgt=m.tgt[::-1].copy(),
+                                           z=None if m.z is None else m.z[::-1].copy(), occ=None,
+                                           why={k: v for k, v in m.why.items() if k not in ("cut", "front_m", "own_share",
+                                                                                          "turn_dps", "move_mps")}
+                                           | {"reversed": True}))
+        return out
 
     def sequence_cost(self, m: Move) -> float:
         """Score lost to the tour so far (2D: cinematic.py's beam search): the previous kind again,
