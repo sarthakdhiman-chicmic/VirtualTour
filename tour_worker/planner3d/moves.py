@@ -58,7 +58,7 @@ RMIN_LADDER = (0.28, 0.22)    # camera body clearance, a little less in small ro
 MOVE_LEN = (0.6, 2.6)
 CORES = (0.75, 0.6, 0.5, 0.4)
 SIT_BACK = 2.4                # m from the piece at the start of a walkway move
-OCC_NEAR, MAX_OCC, OCC_W, OCC_CHECK_KIND = 2.0, 0.20, 3.0, 30
+OCC_NEAR, MAX_OCC, OCC_W, OCC_CHECK_KIND = 2.0, 0.15, 3.0, 30   # MAX_OCC 0.20 until item 17 ("a sliver")
 SHOT_CHECKS = 60              # rendered checks (lens / void) one shot's choice may spend over all its tiers
                               # (160 until 2026-11-26: the Home Scan's plan took 19 min on the pod)
 FLIGHT_CHECKS = 40            # ... and a room change's flight, its own (it used to get what the room's
@@ -124,7 +124,9 @@ WALL_CLEAR = 0.2             # m: nor pressed against a wall
 DOOR_CLEAR = 0.45            # m: a room shot never starts or ends in a doorway (clearance under this)
 EDGE_NEAR, EDGE_MAX = 0.8, 0.12   # anything within EDGE_NEAR m covering EDGE_MAX of the whole frame blocks it
 NEAR_ANY = 1.0                # m: anything this close to the lens ...
-NEAR_ANY_MAX = 0.25           # ... over this share of the frame, at any of NEAR_ANY_POSES, fails a move
+NEAR_ANY_MAX = 0.15           # ... over this share of the frame, at any of NEAR_ANY_POSES, fails a move
+                              # (0.25 until client review item 17: "never more than a sliver")
+NEAR_ANY_MAX_THROUGH = 0.25   # a flight through a door passes its frame
 NEAR_ANY_POSES = 3            # (5 until 2026-11-26: renders per candidate, the planning time)
 VOID_MAX = 0.12              # at most this share of a view may be what the scan never captured
 CEIL_PITCH = 0.0             # deg the aim drops when the scan has no ceiling (its black band stays out)
@@ -133,6 +135,8 @@ ARC_R = (2.3, 2.7, 3.1, 3.5)
 ARC_SWEEP = (30.0, 40.0, 50.0, 65.0)     # an orbit: wider sweeps where the speed limit allows
 HOLD_SWEEP = 25.0
 NO_AIM = ("door", "curtain", "windowpane", "blind")   # never what a room shot ends on
+END_CONE_DEG = 12.0           # the middle of the view a shot ends on (ends_on_door)
+DOOR_END_W = 2.0              # score a room's first shot loses ending on a door (an extra angle: dropped)
 REVEAL_SWING = 40.0           # deg: the most a reveal turns (from down its path onto the next room)
 SAMPLES = 50
 # scene-picked moves and the flow between rooms (user 2026-11-16: "a multitude of camera moves
@@ -736,8 +740,8 @@ class RoomMoves:
                     if own_ < COVER_OWN_MIN:
                         continue
                     new = self.new_walls(room, m, covered)
-                    if not self.ends_on_something(room, m.eye[-1], m.tgt[-1]):
-                        continue                   # new wall, but nothing on it (bare wall, a door frame)
+                    if not self.ends_on_something(room, m.eye[-1], m.tgt[-1]) or self.ends_on_door(m):
+                        continue                   # new wall, but nothing on it (bare wall, a door frame, a door)
                     if new >= COVER_NEW_MIN:
                         m.why["walls_new"] = round(new, 2)
                         m.score += COVER_W * new
@@ -825,6 +829,9 @@ class RoomMoves:
                 pr += HERO_TRAVEL_W
             if then_forward and ends_backward(m):    # the room is left flying forward (item 5)
                 vr += CUT_AXIAL_W
+            if m.kind not in FLIGHT and m.kind != "detail" and self.ends_on_door(m):
+                vr += DOOR_END_W                     # (item 17: not a door to end on)
+                m.why["ends_on_door"] = True
             if pr or vr:
                 m.score += pr - vr
                 m.why["prior"] = round(pr - vr, 2)
@@ -1198,6 +1205,28 @@ class RoomMoves:
         """The frame shows something beyond a door, a window or a curtain (a further angle onto a bare
         wall and a door frame - the green house study, v13 - is no shot)."""
         return self.features_seen(room, eye2, tgt, skip=("door", "windowpane", "curtain", "blind"), own=True) >= COVER_FEATURE_MIN
+
+    def ends_on_door(self, m: Move) -> bool:
+        """At the move's last frame the nearest labelled thing in the middle of the view (within
+        END_CONE_DEG of its centre) is a door (client review item 17: a shot ends on something worth
+        showing - the green house kitchen's first shot ended on its door)."""
+        sp = self.space
+        e, t = np.asarray(m.eye[-1][:2]), np.asarray(m.tgt[-1][:2])
+        head = math.atan2(*(t - e)[::-1])
+        best = None
+        for o in sp.objects:
+            v = np.asarray(o["centre"][:2]) - e
+            dist = float(np.linalg.norm(v))
+            if not 0.4 < dist < 8.0:
+                continue
+            a = (math.atan2(v[1], v[0]) - head + math.pi) % (2 * math.pi) - math.pi
+            if abs(a) > math.radians(END_CONE_DEG):
+                continue
+            if sp.ray(e, math.atan2(v[1], v[0]), max_m=dist + 0.3) < dist - 0.6:
+                continue                                           # behind a wall
+            if best is None or dist < best[0]:
+                best = (dist, o["class"])
+        return best is not None and best[1] in ("door", "screen door")
 
     def features_seen(self, room: str, eye2, tgt, skip=(), own=False) -> float:
         """Sum of FEATURES weights of the room's (and its open plan's) labelled features in the
@@ -2823,7 +2852,7 @@ class RoomMoves:
             r_near = BACKOUT_NEAR if m.kind == "backout" else THROUGH_NEAR if m.kind == "through" else NEAR_ANY
             for k in np.linspace(0, len(e3) - 1, NEAR_ANY_POSES).astype(int):
                 near = self.occ.cover(e3[k], m.tgt[k], HFOV, None, r_near, region="full")
-                if near > NEAR_ANY_MAX:
+                if near > (NEAR_ANY_MAX_THROUGH if m.kind == "through" else NEAR_ANY_MAX):
                     m.why["near_lens"] = round(near, 3)
                     return 1.0
         return worst
