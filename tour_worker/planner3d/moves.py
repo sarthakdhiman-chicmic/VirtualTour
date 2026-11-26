@@ -163,6 +163,7 @@ FLIGHT_PACE = (0.25, 0.45)    # m/s: a leg flies at the previous shot's pace, wi
 WALK_LEN = (0.8, 4.5)         # m a walk between two narrow doors travels (longer: no matched chain)
 THROUGH_NEAR = 0.45           # m: a flight through a door may pass its frame no closer than this
 DOOR_PASS_CLEAR = 0.14        # m clear a flight needs in a doorway it passes through
+FLIGHT_TRIES = 8              # starts and ends a flight leg tries, each, spread along the route
 MATCH_TURN = 30.0             # deg: a walk-in after a door keeps within this of the heading through it
 AFTER_DOOR_FRONT = 1.0        # m in front a matched walk-in needs at its start (it is mid-flight, just past a door)
 UNFRAMED_W = 1.0              # score a matched walk-in loses ending without its subject framed (kept: the cut matters more)
@@ -2006,8 +2007,14 @@ class RoomMoves:
             ke_ = [k for k in range(len(poly)) if end[0] <= s_[k] <= end[1] and ok[k]
                    and (end_room is None or at[k] == end_room)]
             st["starts"], st["ends"] = max(st["starts"], len(ks_)), max(st["ends"], len(ke_))
-            for ks in ks_[::2]:
-                for ke in ke_[::2]:
+            # at most FLIGHT_TRIES starts x ends, spread along the route (the Home Scan's long open
+            # routes gave hundreds of pairs a leg: planning went from 6 to 19 minutes)
+            pick = lambda ks: [ks[int(i)] for i in np.unique(np.linspace(0, len(ks) - 1, min(len(ks), FLIGHT_TRIES)).round())] if ks else []   # noqa: E731
+            found = False
+            for ks in pick(ks_):
+                if found:
+                    break
+                for ke in pick(ke_):
                     L = s_[ke] - s_[ks]
                     if L < 0.6:
                         st["short"] += 1
@@ -2084,6 +2091,9 @@ class RoomMoves:
                     m.why.update(turn_dps=round(turn, 1), move_mps=round(move, 2))
                     if self.moves_enough(m, dur):
                         cands.append(m)
+                        if geometry_only:            # a dry run only asks whether one exists
+                            found = True
+                            break
                     else:
                         st["still"] += 1
             if cands:
