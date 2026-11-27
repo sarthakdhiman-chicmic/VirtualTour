@@ -1,8 +1,36 @@
 import os
+from concurrent.futures import ThreadPoolExecutor
+
 from PIL import Image, ImageOps
 
 from tour_worker.errors import WorkerError
 from tour_worker.motion.masks import mask_relpath
+
+FETCH_WORKERS = 8          # files fetched at once (one at a time took the 8K listing 34 s a job, item 22)
+
+
+def prefetch(storage, pairs, workers: int = FETCH_WORKERS) -> dict:
+    """Fetch (uri, dest) pairs in parallel, skipping dests already there. Returns {dest: error} for
+    the ones that failed - the caller decides what a failure means (it fetches again one by one)."""
+    todo = [(u, d) for u, d in dict((d, (u, d)) for u, d in pairs).values() if not os.path.exists(d)]
+    errors = {}
+
+    def one(pair):
+        u, d = pair
+        os.makedirs(os.path.dirname(d) or ".", exist_ok=True)
+        try:
+            storage.get(u, d)
+        except Exception as e:  # noqa: BLE001 - reported, the caller's own fetch decides
+            errors[d] = e
+            try:                    # never a partial file the caller would take as fetched
+                os.remove(d)
+            except OSError:
+                pass
+    if todo:
+        with ThreadPoolExecutor(max_workers=min(workers, len(todo))) as ex:
+            list(ex.map(one, todo))
+    return errors
+
 
 def fetch_and_prepare(plan, storage, workdir, image_urls=None):
     if image_urls is None:
@@ -12,6 +40,15 @@ def fetch_and_prepare(plan, storage, workdir, image_urls=None):
     os.makedirs(images_dir, exist_ok=True)
     
     keep = prepared_scales(plan)
+    # every photo and motion mask fetched at once first; the loop below finds them there (and still
+    # fetches, and fails or warns, one by one for any that did not come)
+    pairs = []
+    for shot in plan.shots:
+        if shot.image_uri is not None:
+            pairs.append((image_urls.get(shot.image_uri, shot.image_uri), os.path.join(images_dir, shot.image_uri.split("/")[-1])))
+        for region in shot.motion_regions or []:
+            pairs.append((image_urls.get(region.mask_uri, region.mask_uri), os.path.join(images_dir, mask_relpath(shot.shot_id, region.id))))
+    prefetch(storage, pairs)
     prepared = set()
     for shot in plan.shots:
         if shot.image_uri is None:              # a 3D shot (plan 1.6): rendered from the scene

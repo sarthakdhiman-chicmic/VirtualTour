@@ -43,10 +43,14 @@ def _fetch_photos(req: TourPlanRequest, storage, workdir: str):
     """(scoring inputs, assets, warnings, twilight photo ids). assets: photo_id -> {uri, width, height}, the planner's
     asset map (width / height as OpenCV decodes the photo, EXIF orientation applied)."""
     inputs, assets, warnings, dusk = [], {}, [], set()
+    from tour_worker.io.images import prefetch     # all at once (one at a time: 34 s for the 8K listing)
+    prefetch(storage, [(req.image_urls.get(p.uri, p.uri), os.path.join(workdir, f"photo_{i:03d}"))
+                       for i, p in enumerate(req.photos)])
     for i, photo in enumerate(req.photos):
         local = os.path.join(workdir, f"photo_{i:03d}")
         try:
-            storage.get(req.image_urls.get(photo.uri, photo.uri), local)
+            if not os.path.exists(local):
+                storage.get(req.image_urls.get(photo.uri, photo.uri), local)
             with open(local, "rb") as f:
                 data = f.read()
         except Exception as e:  # noqa: BLE001 - one photo never fails the job

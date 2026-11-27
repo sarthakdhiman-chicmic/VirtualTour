@@ -1,4 +1,5 @@
 import mimetypes
+import threading
 import os
 import shutil
 import urllib.request
@@ -42,9 +43,16 @@ class HttpStorage(Storage):
         raise NotImplementedError("HttpStorage cannot put")
 
 class S3Storage(Storage):
+    _lock = threading.Lock()
+
     def _get_client(self):
-        import boto3
-        return boto3.client('s3')
+        """One client, made once under a lock: boto3 clients are thread-safe, making them from
+        several threads at once is not (io/images.prefetch fetches photos in parallel)."""
+        with S3Storage._lock:
+            if getattr(self, "_client", None) is None:
+                import boto3
+                self._client = boto3.client('s3')
+            return self._client
 
     def get(self, uri: str, dest: str) -> None:
         if not uri.startswith("s3://"):
