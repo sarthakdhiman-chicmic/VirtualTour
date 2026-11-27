@@ -261,7 +261,6 @@ def trim_window(cam, a: float, b: float):
 
 
 DOOR_LEAD = 0.6            # m of a through flight kept before its door (the way through is the shot)
-DOOR_PAST = 0.8            # m past the door it always keeps (it is seen through, into the room)
 
 
 def apply_speed_band_3d(shots, pacing: str | None, fps: float = 30.0, up=None, keep_from=None) -> list[str]:
@@ -269,7 +268,8 @@ def apply_speed_band_3d(shots, pacing: str | None, fps: float = 30.0, up=None, k
     slower - module note above). shots: in tour order, duration_s where each is cut, path_s set.
     A move is slowed by playing a share of its path (its start dropped first) in the same time - at
     least MIN_KEEP of it a pass. keep_from: {shot index: (path share, least share)} a through flight
-    keeps from (DOOR_LEAD before its door) and at least (to DOOR_PAST past it): its end goes instead (user 2026-11-27, green house: the walk
+    keeps from (DOOR_LEAD before its room's door) to its end, at least - the walk in and the turn
+    onto the room always play (user 2026-11-27, green house: the walk
     through the study door was trimmed away and the shot stood at the door frame)."""
     keep_from = keep_from or {}
     up = tuple(up) if up else (0.0, 0.0, 1.0)

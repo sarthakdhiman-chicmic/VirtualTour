@@ -203,6 +203,7 @@ class Shot(BaseModel):
     transition_in: Transition
     motion_regions: Optional[List[MotionRegion]] = None   # plan 1.4
     caption: Optional[str] = None     # the room label, on a room's first shot (output.room_labels)
+    caption_at_s: Optional[float] = None  # s into the shot it comes in (a walk through a door: as it enters the room)
     staged: bool = False              # the photo is virtually staged: the disclosure label is drawn
     enlargement: Optional[float] = None   # output px per source px at the tightest frame (information only)
     cut_reason: Optional[str] = None      # a direction reversal into this shot is allowed, and why (render/continuity.py)
@@ -584,6 +585,8 @@ def check_overlays(plan: Plan):
             raise ValueError(f"invalid_plan: shot {shot.shot_id} has a caption but the plan has no room_labels")
         if not shot.caption.strip() or len(shot.caption) > MAX_CAPTION_CHARS:
             raise ValueError(f"invalid_plan: shot {shot.shot_id} caption must be 1-{MAX_CAPTION_CHARS} characters")
+        if shot.caption_at_s is not None and not 0.0 <= shot.caption_at_s < shot.duration_s:
+            raise ValueError(f"invalid_plan: shot {shot.shot_id} caption_at_s must be within the shot")
 
 def check_voiceover(plan: Plan):
     v = plan.voiceover

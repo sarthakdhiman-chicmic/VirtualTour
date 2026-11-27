@@ -206,6 +206,7 @@ class Shot(BaseModel):
     transition_in: TransitionParams = Field(default_factory=TransitionParams)
     motion_regions: list[MotionRegion] | None = None
     caption: str | None = None       # the room label, on a room's first shot (planner/captions.py)
+    caption_at_s: float | None = None  # s into the shot the label comes in: where a walk through a door enters the room
     staged: bool | None = None       # True: a virtually staged photo (the disclosure label)
     enlargement: float | None = None # photo shots: output px per source px at the tightest frame
     # why the cut INTO this shot may reverse the camera's direction (client review 2026-11-20, item 5):
@@ -214,7 +215,7 @@ class Shot(BaseModel):
 
     @model_serializer(mode="wrap")
     def _omit_unset_additions(self, handler):
-        return _omit_none(handler(self), ("image_uri", "source", "caption", "staged", "enlargement", "cut_reason"))
+        return _omit_none(handler(self), ("image_uri", "source", "caption", "caption_at_s", "staged", "enlargement", "cut_reason"))
 
 
 class MusicTrack(BaseModel):

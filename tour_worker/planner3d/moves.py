@@ -178,6 +178,10 @@ FLIGHT_PACE = (0.25, 0.45)    # m/s: a leg flies at the previous shot's pace, wi
 THROUGH_PACE = 0.2            # m/s
 THROUGH_S_MAX = 8.0           # s a through flight may last (other legs: FLIGHT_S)
 THROUGH_TURN_DPS = 3.0        # deg/s its turn onto the room may reach
+# the flight through a door is the room's opening shot - one move: under the doorway, on into the
+# room and onto what it holds, never cut to another angle of the room just past the door (user
+# 2026-11-27); it walks this far past the door (m) and takes the room's opening time
+THROUGH_AFTER_LEAD = (1.2, 3.5)
 WALK_LEN = (0.8, 4.5)         # m a walk between two narrow doors travels (longer: no matched chain)
 THROUGH_NEAR = 0.45           # m: a flight through a door may pass its frame no closer than this
 DOOR_PASS_CLEAR = 0.14        # m clear a flight needs in a doorway it passes through
@@ -2090,7 +2094,7 @@ class RoomMoves:
                pace: float, extra_s: float = 0.0, prev=None, earlier=(), aim=None, piece=None,
                end_room: str | None = None, matched: bool = False,
                look_max_s: float | None = None, geometry_only: bool = False,
-               start_room: str | None = None, look_fixed_s: float | None = None) -> tuple[Move | None, list[str]]:
+               start_room: str | None = None, look_fixed_s: float | None = None, min_s: float = 0.0) -> tuple[Move | None, list[str]]:
         """One leg of a room change along the walking route: it starts between start[0] and start[1]
         m along the route and ends between end[0] and end[1] m, at `pace` m/s (FLIGHT_S long, never
         under 3 s), looking ahead along the route - and, given `aim` (a through flight into the next
@@ -2135,6 +2139,8 @@ class RoomMoves:
                         st["short"] += 1
                         continue
                     dur = float(np.clip(L / pace, FLIGHT_S[0], THROUGH_S_MAX if through else FLIGHT_S[1]))
+                    if through:                    # it is the room's opening shot: its time (min_s)
+                        dur = max(dur, min_s)
                     if L / (dur + extra_s) * self.peak(2.1) > self.move_budget:
                         st["speed"] += 1
                         continue
@@ -2194,6 +2200,9 @@ class RoomMoves:
                     # the previous shot's pace kept (item 4), then a deep view ahead, then the room framed
                     score = 1.0 - abs(L / dur - pace) / pace + 0.1 * min(
                         sp.view_depth(path[-1], math.atan2(*(tgt[-1][:2] - path[-1])[::-1]), HFOV), 6.0) + 1.0 * core
+                    if through:                    # the room's opening shot: never looking up (AIM_Z_MAX)
+                        tgt = tgt.copy()
+                        tgt[:, 2] = np.minimum(tgt[:, 2], AIM_Z_MAX)
                     m = Move(kind, path, tgt, score, piece=piece if aim is not None else None,
                              subject=piece_box(fp) if (aim is not None and fp is not None) else None,
                              easing="linear", why={"travel_m": round(L, 2), "dur_s": round(dur, 2),

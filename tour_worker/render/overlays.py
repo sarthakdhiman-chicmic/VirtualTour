@@ -184,7 +184,8 @@ class Overlays:
             j = i                                                     # the room: until the next room
             while j + 1 < len(shots) and shots[j + 1].room_key == shot.room_key and not shots[j + 1].caption:
                 j += 1
-            start = t["render_from"] / fps
+            # (a walk through a door into the room: the label comes in as it enters - caption_at_s)
+            start = t["render_from"] / fps + float(getattr(shot, "caption_at_s", None) or 0.0)
             end = (timeline[j]["render_from"] + timeline[j]["render_frames"]) / fps
             t0 = start + LABEL_IN
             t_out = min(end - END_GAP - OUT_S, t0 + HOLD_MAX)
