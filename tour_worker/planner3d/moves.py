@@ -71,7 +71,7 @@ OPENING_GLIDE = 1.5          # the tour opens by moving into the home
 # front of it; a glide or pan looks down a room, where walls 1.2 m+ away are the room itself
 # (user 2026-11-16, Home Scan: shots closing in on walls the floor plan does not hold - a poorly
 # captured wall is no "tall" cell - so the rendered check looks 1.8 m out for every room move)
-OCC_NEAR_KIND = {"backout": 0.5, "wall_pan": 1.5, "corner_sweep": 1.8, "panorama": 1.5, "descend": 1.8, "truck": 2.0, "rise": 1.8, "exit": 0.9, "through": 0.6, "walk": 0.9, "walkway": 2.0, "arc": 2.0, "room_pan": 1.8, "hold_pan": 1.8, "push": 1.8, "pull": 1.8, "reveal": 1.8, "link": 1.2, "enter": 1.5, "glide": 1.8, "pan": 1.2, "detail": 0.7}
+OCC_NEAR_KIND = {"backout": 0.5, "door_pan": 0.5, "wall_pan": 1.5, "corner_sweep": 1.8, "panorama": 1.5, "descend": 1.8, "truck": 2.0, "rise": 1.8, "exit": 0.9, "through": 0.6, "walk": 0.9, "walkway": 2.0, "arc": 2.0, "room_pan": 1.8, "hold_pan": 1.8, "push": 1.8, "pull": 1.8, "reveal": 1.8, "link": 1.2, "enter": 1.5, "glide": 1.8, "pan": 1.2, "detail": 0.7}
 PAN_SWEEP = 50.0
 AIM_Z_MAX = EYE - 0.10        # a room shot never looks up: not at a ceiling, not at upper cabinets
 LOW_TOP = 1.4                 # m: an object whose top is below this is a surface a room shot may aim at
@@ -171,6 +171,13 @@ THROUGH_AFTER = (0.9, 2.2)    # m past it it ends, turning onto what the room is
 THROUGH_TURN_FROM = 0.45      # of the flight: where its look starts turning from ahead onto the room
 FLIGHT_S = (3.0, 5.5)         # s a flight leg lasts (item 9: never under 3 s; short, so the 90 s cap keeps them)
 FLIGHT_PACE = (0.25, 0.45)    # m/s: a leg flies at the previous shot's pace, within these
+# a flight through a door into the next room flies at the tour's band pace (speed_band: forward
+# 0.2 m/s is ~3.3 % frame width/s at the 3 m reference depth) and turns onto the room gently - planned
+# faster, the speed band kept only a quarter of it and the walk through the door was lost (user
+# 2026-11-27, green house study); the room's next shot shows the room
+THROUGH_PACE = 0.2            # m/s
+THROUGH_S_MAX = 8.0           # s a through flight may last (other legs: FLIGHT_S)
+THROUGH_TURN_DPS = 3.0        # deg/s its turn onto the room may reach
 WALK_LEN = (0.8, 4.5)         # m a walk between two narrow doors travels (longer: no matched chain)
 THROUGH_NEAR = 0.45           # m: a flight through a door may pass its frame no closer than this
 DOOR_PASS_CLEAR = 0.14        # m clear a flight needs in a doorway it passes through
@@ -196,18 +203,18 @@ DOLLY_CAP_W = 2.0             # past a third of the tour's shots          (2D: -
 DOLLY_RUN_W = 0.8             # two in a row                              (2D: -2.0)
 HERO_TRAVEL_W = 0.2           # a hero shot that travels                  (2D: +0.5)
 TRAVELS = ("backout", "walkway", "truck", "arc", "rise", "descend", "corner_sweep", "exit", "through", "walk", "enter", "push", "pull", "glide")
-MIN_KIND_S = {"backout": 3.0, "wall_pan": 3.0, "room_pan": 3.8, "pan": 3.8, "panorama": 4.5, "truck": 3.5, "arc": 3.5, "rise": 2.8, "descend": 2.8,
+MIN_KIND_S = {"backout": 3.0, "door_pan": 3.0, "wall_pan": 3.0, "room_pan": 3.8, "pan": 3.8, "panorama": 4.5, "truck": 3.5, "arc": 3.5, "rise": 2.8, "descend": 2.8,
               "corner_sweep": 3.5}
 # the move library mixes (user 2026-11-17: "we need like 10 15 camera moves we mix and match. not all
 # camera moves need to be in every tour"): no kind more than KIND_CAP times a tour (rise / descend
 # once or twice), nor more than KIND_SHARE of its shots - the flight between rooms is exempt
-KIND_CAP = {"backout": 3, "wall_pan": 3, "rise": 2, "descend": 1, "panorama": 2, "corner_sweep": 2, "truck": 2, "arc": 2, "walkway": 3,
+KIND_CAP = {"backout": 3, "door_pan": 2, "wall_pan": 3, "rise": 2, "descend": 1, "panorama": 2, "corner_sweep": 2, "truck": 2, "arc": 2, "walkway": 3,
             "room_pan": 1, "push": 2, "pull": 2, "glide": 2, "hold_pan": 1}
 KIND_SHARE = 0.25
 CAP_W = 3.0                   # past its cap
 FLIGHT = ("exit", "through", "walk", "enter", "link", "reveal")
 # moves that read the same played backwards (a backout reversed would end facing a wall)
-REVERSIBLE = ("walkway", "glide", "truck", "arc", "room_pan", "wall_pan", "pan", "corner_sweep", "panorama")      # the moves between rooms (not capped)
+REVERSIBLE = ("walkway", "glide", "truck", "arc", "room_pan", "wall_pan", "pan", "corner_sweep", "panorama", "door_pan")      # the moves between rooms (not capped)
 # small rooms (user 2026-11-17: "the bathrooms never got included, even though some shot can be
 # managed, like from the deepest point in the bath escaping backwards towards the hall"): the camera
 # starts deep in the room looking into it and backs out toward its door, the room opening up
@@ -216,6 +223,12 @@ BACKOUT_CLEAR = 0.2           # m clear it needs (a bathroom's strip of floor)
 BACKOUT_IN = 0.6              # m it starts in from the deepest point (the far wall not in its face)
 BACKOUT_FRONT = (0.6, 0.8)    # m in front it needs at the start / end
 BACKOUT_NEAR = 0.35            # m: its near-lens radius (a bathroom's side walls are always close)
+# a small room looked into from its door: the camera stands DOOR_PAN_IN inside it and pans across it
+# (user 2026-11-27, green house: the bathroom's back-out, then the bedroom walked into, reversed at the
+# cut - a pan leaves the room sideways, so the walk on follows)
+DOOR_PAN_IN = (0.3, 0.6)      # m in from the door it stands
+DOOR_PAN_SWEEP = (15.0, 40.0)  # deg it pans, within the turn budget
+DOOR_PAN_FRONT = 0.6          # m in front at both ends (it stands still: a back-out's 0.8 m end lost the pan one way)
 COVER_FEATURE_MIN = 0.5       # a further angle ends on something (FEATURES weight in view), not bare wall
 WALL_PAN = 30.0               # deg a coverage pan turns across the unseen wall
 SWEEP_LEN = (1.0, 1.4, 1.8)   # m a corner sweep travels toward the room's middle ...
@@ -249,7 +262,7 @@ FEATURES = {"fireplace": 1.0, "windowpane": 0.8, "kitchen island": 0.8, "bathtub
             "curtain": 0.3, "door": 0.2, "sink": 0.5, "hood": 0.5, "oven": 0.4, "refrigerator": 0.3,
             "cabinet": 0.15}
 # of a view's middle on the shot's own room: under this the shot loses score (OWN_W)
-OWN_SHARE = {"backout": 0.5, "wall_pan": 0.5, "corner_sweep": 0.5, "panorama": 0.5, "descend": 0.35, "truck": 0.5, "rise": 0.35, "walkway": 0.35, "arc": 0.35, "room_pan": 0.5, "push": 0.5, "pull": 0.5, "glide": 0.5}
+OWN_SHARE = {"backout": 0.5, "door_pan": 0.5, "wall_pan": 0.5, "corner_sweep": 0.5, "panorama": 0.5, "descend": 0.35, "truck": 0.5, "rise": 0.35, "walkway": 0.35, "arc": 0.35, "room_pan": 0.5, "push": 0.5, "pull": 0.5, "glide": 0.5}
 CONFIDENT_M2 = 0.5            # m2 of a room's own furniture for its rules to be eased
 RELAX = 0.8                   # the second try: room to breathe x this ...
 OWN_MIN_RELAXED = 0.35        # ... and this much of its own room in view
@@ -258,7 +271,7 @@ OWN_MIN = 0.5                 # a room shot's view is at least half its own room
 OWN_FREE = ("enter", "reveal", "link", "pan", "detail", "exit", "through", "walk")   # they look in from outside it, or back over the home
 COVER_OWN_MIN = 0.6           # a room's further shot shows mostly that room (not the hallway beyond)
 COMPOSED = ("walkway", "arc", "room_pan", "push", "pull", "truck", "rise", "corner_sweep", "panorama", "descend",
-            "wall_pan", "backout")    # the kinds a room's further shots may be
+            "wall_pan", "backout", "door_pan")    # the kinds a room's further shots may be
 OWN_W = 4.0                                                # score lost per missing share
 FEATURE_W = 0.4
 # close-ups (detail shots, 1.5-2.5 s): fixtures, finishes, decor
@@ -689,6 +702,7 @@ class RoomMoves:
             composed += self._corner_sweep(room, [pts[k] for k in sorted(own)], rmin, dur, prev, earlier)
             composed += self._panorama(room, [pts[k] for k in sorted(own)], rmin, dur, prev, earlier)
             composed += self._backout(room, [pts[k] for k in sorted(own)], rmin, dur, prev, earlier)
+            composed += self._door_pan(room, dur, prev, earlier)
             if covered is not None:              # a further angle: onto the walls not seen yet
                 composed += self._wall_views(room, [pts[k] for k in sorted(own)], rmin, dur, prev, earlier, covered)
             if composed:
@@ -872,6 +886,14 @@ class RoomMoves:
             if breaks:
                 b_ids = {id(m) for m in breaks}
                 tiers = [[m for m in t if id(m) not in b_ids] for t in tiers] + [breaks]
+            if then_forward:
+                # the room is left moving forward: a shot ending backward reverses at that cut, so it
+                # comes only when no other move will do - whatever its tier (user 2026-11-27: the green
+                # house bathroom backed out, then the bedroom was walked into; a door pan instead)
+                back = [m for t in tiers for m in t if ends_backward(m)]
+                if back:
+                    k_ids = {id(m) for m in back}
+                    tiers = [[m for m in t if id(m) not in k_ids] for t in tiers] + [back]
         tiers = [t for t in tiers if t]
         stats["to_render_checks"] += _n(tiers)
         if not tiers:
@@ -1028,6 +1050,8 @@ class RoomMoves:
         k = RELAX if getattr(self, "relaxed", False) else 1.0
         if m.kind == "backout":
             return f0 >= BACKOUT_FRONT[0] and f1 >= BACKOUT_FRONT[1]
+        if m.kind == "door_pan":
+            return min(f0, f1) >= DOOR_PAN_FRONT
         front, aim_min = self.breathe(getattr(self, "_room_now", None))
         f0_min = (AFTER_DOOR_FRONT if m.why.get("after_exit") else min(FRONT_MIN_ENTER, front) if m.kind == "enter"
                   else front)
@@ -1055,7 +1079,8 @@ class RoomMoves:
         if m.kind in ("detail", "link"):
             return True
         sp = self.space
-        ends = (m.eye[-1],) if m.kind == "enter" else (m.eye[0],) if m.kind == "backout" else (m.eye[0], m.eye[-1])
+        ends = ((m.eye[-1],) if m.kind == "enter" else (m.eye[0],) if m.kind == "backout"
+                else () if m.kind == "door_pan" else (m.eye[0], m.eye[-1]))     # (a door pan stands by its door)
         if any(sp.clearance(q) < WALL_CLEAR or self.in_doorway(q) for q in ends):
             return False
         if m.kind == "wall_pan" and not self.ends_on_something(getattr(self, "_room_now", None) or "", m.eye[-1], m.tgt[-1]):
@@ -1850,6 +1875,7 @@ class RoomMoves:
         from tour_worker.scoring.rooms import canon
         if "bath" in (canon(sp.room_types.get(room)) or "") or area < 8.0:
             prior["backout"] = 1.0                          # a small room: back out of it
+            prior["door_pan"] = 0.8                         # ... or look in from its door
         if area < 14.0 or spread >= 0.6:
             prior["panorama"] = 0.5                         # a small room, or things all round it
         if (open_plan or area >= RISE_AREA) and any(c in ("table", "bed", "kitchen island", "sofa") for c in pieces):
@@ -2082,6 +2108,9 @@ class RoomMoves:
         s_ = self._along(poly)
         at = [sp.room_at(q) for q in poly]
         pace = float(np.clip(pace, *FLIGHT_PACE))
+        through = aim is not None
+        if through:
+            pace = THROUGH_PACE
         u = np.linspace(0, 1, SAMPLES)
         fp = (piece.frame or piece) if piece is not None else None
         cands = []
@@ -2105,7 +2134,7 @@ class RoomMoves:
                     if L < 0.6:
                         st["short"] += 1
                         continue
-                    dur = float(np.clip(L / pace, *FLIGHT_S))
+                    dur = float(np.clip(L / pace, FLIGHT_S[0], THROUGH_S_MAX if through else FLIGHT_S[1]))
                     if L / (dur + extra_s) * self.peak(2.1) > self.move_budget:
                         st["speed"] += 1
                         continue
@@ -2144,7 +2173,7 @@ class RoomMoves:
                                 turn = None
                                 break
                             turn, move = trial_speeds(path, tgt, dur + extra_s, EYE, "linear" if self.continuous else "ease_in_out")
-                            if turn <= self.turn_budget:
+                            if turn <= min(self.turn_budget, THROUGH_TURN_DPS):
                                 break
                         if turn is None:
                             st["short"] += 1
@@ -2387,6 +2416,49 @@ class RoomMoves:
                 out.append(Move("backout", e_, tgt, 1.2 + 0.3 * travel + 1.5 * mid + (1.5 if whole else 0.0), piece=piece,
                                 why={"travel_m": round(travel, 2), "swing_deg": swing, "turn_onto_deg": round(math.degrees(dh)),
                                      "clear_m": round(mid, 2), "subject_whole": whole}))
+        return out
+
+    def _door_pan(self, room, dur, prev, earlier) -> list[Move]:
+        """Look into a small room from its door (the rooms _backout films): standing DOOR_PAN_IN
+        inside the door, the view pans across the room's far end, either way. It leaves the room
+        moving sideways - the move for a room left by walking on forward (then_forward)."""
+        sp = self.space
+        from tour_worker.scoring.rooms import canon
+        foot = float((sp.room_fill == sp.room_keys.index(room)).sum()) * 0.05 * 0.05 if room in sp.room_keys else 0.0
+        kind_ = canon(sp.room_types.get(room)) or ""
+        if foot > BACKOUT_SMALL_M2 and "bath" not in kind_ and "bedroom" not in kind_:
+            return []
+        door = self._room_door(room)
+        if door is None:
+            return []
+        ys, xs = np.nonzero((sp.room_of == sp.room_keys.index(room)) & (sp.dt >= BACKOUT_CLEAR))
+        if not len(ys):
+            return []
+        cells = np.c_[sp.lo[0] + (xs + .5) * 0.05, sp.lo[1] + (ys + .5) * 0.05]
+        mid = cells.mean(0)
+        into = mid - door
+        if float(np.linalg.norm(into)) < 0.6:
+            return []
+        into = into / float(np.linalg.norm(into))
+        u = np.linspace(0, 1, SAMPLES)
+        w = u * u * (3 - 2 * u)
+        sweep = math.radians(float(np.clip(0.6 * self.turn_budget * dur, *DOOR_PAN_SWEEP)))
+        out = []
+        for d_in in DOOR_PAN_IN:
+            at = sp.snap(door + d_in * into, BACKOUT_CLEAR, 0.3)
+            if at is None or sp.room_at(at) != room:
+                continue
+            h_mid = math.atan2(*(mid - at)[::-1])
+            for sgn in (1.0, -1.0):                  # across the room, either way
+                heads = h_mid + sgn * sweep * (w - 0.5)
+                eye = np.repeat(np.asarray(at, float)[None], SAMPLES, 0)
+                tgt = np.c_[eye + 3.0 * np.c_[np.cos(heads), np.sin(heads)], np.full(SAMPLES, EYE - 0.25)]
+                first, last = (eye[0], tgt[0]), (eye[-1], tgt[-1])
+                if jump_cut(prev, first) or repeats(first, last, earlier):
+                    continue
+                piece = next(iter(sp.main_pieces(room)), None)
+                out.append(Move("door_pan", eye, tgt, 1.2 + 1.5 * float(sp.clearance(at)), piece=piece,
+                                why={"travel_m": 0.0, "sweep_deg": round(math.degrees(sweep)), "in_m": d_in}))
         return out
 
     def _wall_views(self, room, pts, rmin, dur, prev, earlier, covered) -> list[Move]:
@@ -2864,7 +2936,7 @@ class RoomMoves:
             worst = max(worst, self._occ_call("cover", e, t, m.piece, OCC_NEAR_KIND.get(m.kind, OCC_NEAR), "centre"))
             if worst > MAX_OCC:                       # already out: the other poses cannot bring it back
                 break
-            if m.kind not in ("link", "detail", "exit", "walk", "backout", "through"):     # (they pass door frames)
+            if m.kind not in ("link", "detail", "exit", "walk", "backout", "through", "door_pan"):     # (they pass door frames)
                 # a door frame or a wall at the frame's edge, right at the lens (user 2026-11-16, Krk:
                 # the bedroom shot ended with the door frame over a quarter of the frame)
                 edge = self._occ_call("cover", e, t, m.piece, EDGE_NEAR, "full")
@@ -2877,7 +2949,7 @@ class RoomMoves:
         if m.kind != "detail":
             # (a flight through a door: its frame sweeps past the edges as the camera goes through -
             # only what comes within THROUGH_NEAR, a frame it would scrape, blocks it)
-            r_near = BACKOUT_NEAR if m.kind == "backout" else THROUGH_NEAR if m.kind == "through" else NEAR_ANY
+            r_near = BACKOUT_NEAR if m.kind in ("backout", "door_pan") else THROUGH_NEAR if m.kind == "through" else NEAR_ANY
             for k in np.linspace(0, len(e3) - 1, NEAR_ANY_POSES).astype(int):
                 near = self._occ_call("cover", e3[k], m.tgt[k], None, r_near, "full")
                 if near > (NEAR_ANY_MAX_THROUGH if m.kind == "through" else NEAR_ANY_MAX):

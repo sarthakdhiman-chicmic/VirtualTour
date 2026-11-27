@@ -238,25 +238,48 @@ def _split(p, u: float):
 
 def trim_start(cam, keep: float):
     """The camera with only the last `keep` share (0-1) of its flight (by the path's arc length)."""
+    return trim_window(cam, 1.0 - keep, 1.0)
+
+
+def trim_window(cam, a: float, b: float):
+    """The camera with only the share a..b (0-1, by the path's arc length) of its flight."""
+    import numpy as np
     from tour_worker.scene.camera import BezierCameraPath
-    path = BezierCameraPath([s.model_dump() for s in cam.segments], cam.hfov_deg)
-    k, u = path._locate(1.0 - keep)
-    segs = [s.model_dump() for s in cam.segments]
-    first = {"eye": _split(segs[k]["eye"], u).round(5).tolist(), "target": _split(segs[k]["target"], u).round(5).tolist()}
-    out = [first] + segs[k + 1:]
     seg_cls = type(cam.segments[0])
-    return cam.model_copy(update={"segments": [seg_cls(**s) for s in out]})
+    segs = [s.model_dump() for s in cam.segments]
+    if b < 1.0 - 1e-6:                              # the end first: a's place is the same share of it
+        k, u = BezierCameraPath(segs, cam.hfov_deg)._locate(b)
+        left = lambda p: _split(np.asarray(p, float)[::-1], 1.0 - u)[::-1]   # noqa: E731 - the part before u
+        segs = segs[:k] + [{"eye": left(segs[k]["eye"]).round(5).tolist(),
+                            "target": left(segs[k]["target"]).round(5).tolist()}]
+        a = a / b
+    if a > 1e-6:
+        k, u = BezierCameraPath(segs, cam.hfov_deg)._locate(a)
+        segs = [{"eye": _split(segs[k]["eye"], u).round(5).tolist(),
+                 "target": _split(segs[k]["target"], u).round(5).tolist()}] + segs[k + 1:]
+    return cam.model_copy(update={"segments": [seg_cls(**s) for s in segs]})
 
 
-def apply_speed_band_3d(shots, pacing: str | None, fps: float = 30.0, up=None) -> list[str]:
+DOOR_LEAD = 0.6            # m of a through flight kept before its door (the way through is the shot)
+DOOR_PAST = 0.8            # m past the door it always keeps (it is seen through, into the room)
+
+
+def apply_speed_band_3d(shots, pacing: str | None, fps: float = 30.0, up=None, keep_from=None) -> list[str]:
     """Slow the 3D shots into the band and match them within PLAN_RATIO across every cut (only ever
-    slower - module note above). shots: in tour order, duration_s where each is cut, path_s set."""
+    slower - module note above). shots: in tour order, duration_s where each is cut, path_s set.
+    A move is slowed by playing a share of its path (its start dropped first) in the same time - at
+    least MIN_KEEP of it a pass. keep_from: {shot index: (path share, least share)} a through flight
+    keeps from (DOOR_LEAD before its door) and at least (to DOOR_PAST past it): its end goes instead (user 2026-11-27, green house: the walk
+    through the study door was trimmed away and the shot stood at the door frame)."""
+    keep_from = keep_from or {}
     up = tuple(up) if up else (0.0, 0.0, 1.0)
     target = target_speed(pacing)
     idx = [i for i, s in enumerate(shots) if s.camera.type == "bezier_path" and getattr(s.camera, "path_s", None)
            and s.camera.segments]
     if not idx:
         return []
+    cam0 = {i: shots[i].camera for i in idx}
+    kept = dict.fromkeys(idx, 1.0)
     for _ in range(PASSES):
         ends = {i: _scene_ends(shots[i].camera, shots[i].duration_s, fps, up) for i in idx}
         k = {}
@@ -281,12 +304,16 @@ def apply_speed_band_3d(shots, pacing: str | None, fps: float = 30.0, up=None) -
                 break
         moved = False
         for i in idx:
-            if k[i] < 1.0 - 1e-3:
-                shots[i].camera = trim_start(shots[i].camera, max(k[i], MIN_KEEP))
+            a0, least = keep_from.get(i, (1.0, 0.0))
+            share = max(kept[i] * max(MIN_KEEP, k[i]), least)
+            if share < kept[i] - 1e-3:
+                kept[i] = share
+                a = min(1.0 - share, a0)
+                shots[i].camera = trim_window(cam0[i], a, a + share)
                 moved = True
         if not moved:
             break
     return []
 
 
-MIN_KEEP = 0.5             # a 3D move keeps at least half its flight (a walk-in trimmed to a fifth only turns)
+MIN_KEEP = 0.5             # a 3D move keeps at least half its flight a pass (a walk-in trimmed to a fifth only turns)

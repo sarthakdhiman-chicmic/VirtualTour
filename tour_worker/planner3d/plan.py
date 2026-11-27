@@ -50,6 +50,26 @@ MAX_DETAILS = 0                # 3D close-ups off (user 2026-11-16, Home Scan: a
 PLANNER3D_VERSION = "3d-2"
 
 
+def _door_shares(moves, space) -> dict[int, tuple[float, float]]:
+    """{shot index: (path share, least share)} for each flight through a door (a "through" move):
+    where its path is DOOR_LEAD m short of leaving the room it starts in, and the share on to
+    DOOR_PAST m past that - the speed band trims a slower shot's path outside it, never the way
+    through (speed_band.apply_speed_band_3d)."""
+    from tour_worker.planner.speed_band import DOOR_LEAD, DOOR_PAST
+    out = {}
+    for n, (_, mv) in enumerate(moves):
+        if mv.kind != "through" or len(mv.eye) < 2:
+            continue
+        at = [space.room_at(q) for q in mv.eye]
+        k = next((j for j in range(1, len(at)) if at[j] is not None and at[j] != at[0]), None)
+        s_ = np.r_[0.0, np.cumsum(np.linalg.norm(np.diff(mv.eye, axis=0), axis=1))]
+        if k is None or s_[-1] < 1e-6:
+            continue
+        a = float(max(0.0, s_[k] - DOOR_LEAD) / s_[-1])
+        out[n] = (a, float(min(1.0 - a, (min(s_[-1], s_[k] + DOOR_PAST) - a * s_[-1]) / s_[-1])))
+    return out
+
+
 def room_keys(rooms: list[dict]) -> list[str]:
     """Each room's key: its own room_key, else <type>_<n> in request order."""
     seen: dict[str, int] = {}
@@ -380,7 +400,9 @@ def plan_tour_3d(model, scene: dict, rooms: list[dict], listing_id: str, cfg: Pl
                             pace, handle, prev, earlier_, end_room=hall, look_max_s=s_out + 0.5)
 
     def _leaves_flying(i: int) -> bool:
-        """selected[i] is its room's last planned shot and a flight forward follows it."""
+        """selected[i] is its room's last planned shot and a move forward follows it: a flight on,
+        or the next room's walk in from its door (user 2026-11-27, green house: the bathroom backed
+        out, then the bedroom was walked into - a reversal at the cut)."""
         nxt = selected[i + 1] if i + 1 < len(selected) else None
         if not (nxt is not None and nxt.room_key != selected[i].room_key and id(nxt) not in links
                 and nxt.kind != "detail" and id(selected[i]) not in links):
@@ -388,7 +410,7 @@ def plan_tour_3d(model, scene: dict, rooms: list[dict], listing_id: str, cfg: Pl
         key = (selected[i].room_key, nxt.room_key)
         if key not in can_fly:                     # a dry run of the flight (geometry only, no renders)
             can_fly[key] = bool(_fly_on(selected[i].room_key, i, None, dry=True))
-        return can_fly[key]
+        return can_fly[key] or id(nxt) in enters
 
     def _fly_on(room: str, i: int, prev, dry: bool = False):
         """The room change after `room` (client review item 6; user 2026-11-26, option c): along the
@@ -618,6 +640,27 @@ def plan_tour_3d(model, scene: dict, rooms: list[dict], listing_id: str, cfg: Pl
         if ok < s_.final_duration:
             mv.why["trimmed_from_s"] = round(s_.final_duration, 2)
             s_.final_duration = round(ok, 2)
+    # then flights through doors give back the time their band pace took (THROUGH_PACE), down to the
+    # shortest their speed limits allow - before a room loses a coverage angle. The walk through the
+    # door is always played whole (speed_band keep_from), the cut's speed match giving way (user
+    # 2026-11-27: "allow speed jumps" over dropping angles or stopping at the door)
+    from tour_worker.planner3d.moves import FLIGHT_S
+    for s_, mv in sorted(moves, key=lambda m: -m[0].final_duration):
+        over = sum(x.final_duration - handle for x, _ in moves) - cap
+        if over <= 0:
+            break
+        floor = FLIGHT_S[0] + handle
+        if mv.kind != "through" or s_.final_duration <= floor:
+            continue
+        ok = s_.final_duration
+        for d in np.linspace(max(floor, s_.final_duration - over), s_.final_duration, 8):
+            turn, move_ = trial_speeds(mv.eye, mv.tgt, float(d), mv.zs, "linear" if continuous else mv.easing)
+            if turn <= MAX_TURN_DPS * 0.95 and move_ <= MAX_MOVE_MPS * 0.95:
+                ok = float(d)
+                break
+        if ok < s_.final_duration:
+            mv.why["trimmed_from_s"] = round(s_.final_duration, 2)
+            s_.final_duration = round(ok, 2)
     for _, pair in sorted(extras, key=lambda e: e[0]):
         if sum(s_.final_duration - handle for s_, _ in moves) <= cap:
             break
@@ -679,7 +722,8 @@ def plan_tour_3d(model, scene: dict, rooms: list[dict], listing_id: str, cfg: Pl
         if getattr(c3, "speed_band", False):
             # one speed band, matched within 25% at every cut (item 4): 3D moves are only slowed
             from tour_worker.planner.speed_band import apply_speed_band_3d
-            warnings += apply_speed_band_3d(shots, c3.pacing, cfg.fps, scene.get("up_axis"))
+            warnings += apply_speed_band_3d(shots, c3.pacing, cfg.fps, scene.get("up_axis"),
+                                            keep_from=_door_shares(moves, space))
 
     # transitions: every interior shot change is a cut - the camera carries the move between parts
     # of the home (client review 2026-11-20, item 8); shots are built with cuts
