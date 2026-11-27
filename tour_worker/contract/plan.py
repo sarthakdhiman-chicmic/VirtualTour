@@ -149,6 +149,9 @@ class Camera(BaseModel):
     # continuous cuts: the move spans path_s s at its planned pace and the shot is cut inside it
     # (render/camera_path.ramp_profile); keyframe_path and bezier_path only, never with time_warp
     path_s: Optional[float] = None
+    # with path_s, bezier_path only: [[path fraction, speed x], ...] - the move's pace along its path
+    # (scene/camera.BezierCameraPath.along); path_s is the time the whole path takes with it
+    speed_profile: Optional[List[List[float]]] = None
     model_config = ConfigDict(extra='ignore')
 
 class Punch(BaseModel):
@@ -520,6 +523,13 @@ def check_easing(plan: Plan):
                 raise ValueError(f"invalid_plan: path_s {ps} shorter than shot {shot.shot_id} ({shot.duration_s} s)")
             if shot.camera.easing not in valid_easings:
                 raise ValueError(f"unsupported_easing: {shot.camera.easing}")
+            sp = getattr(shot.camera, "speed_profile", None)
+            if sp is not None:
+                fr = [p[0] for p in sp] if all(len(p) == 2 for p in sp) else []
+                if (shot.camera.type != "bezier_path" or len(sp) < 2 or len(fr) != len(sp) or fr[0] != 0.0
+                        or fr[-1] != 1.0 or any(b <= a for a, b in zip(fr, fr[1:]))
+                        or any(not 0.5 <= p[1] <= 3.0 for p in sp)):
+                    raise ValueError(f"invalid_plan: speed_profile in shot {shot.shot_id} (fractions 0..1 rising, speeds 0.5-3)")
             continue
         if shot.camera.type in ("keyframe_path", "compound"):
             continue  # fixed global time profile (tour_worker/render/camera_path.py)

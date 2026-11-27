@@ -490,14 +490,14 @@ def eye3(eye2: np.ndarray) -> np.ndarray:
 
 
 def speeds_of(segments: list[dict], duration_s: float, easing: str = "ease_in_out", samples: int | None = None,
-              fps: int = 30, path_s: float | None = None) -> tuple[float, float]:
+              fps: int = 30, path_s: float | None = None, speed_profile=None) -> tuple[float, float]:
     """(peak turn deg/s, peak travel m/s) of bezier segments as the worker draws them. path_s
     (continuous cuts): the move runs over path_s at its planned pace; duration_s is where it is cut."""
-    path = BezierCameraPath(segments, [HFOV, HFOV], easing=easing)
+    path = BezierCameraPath(segments, [HFOV, HFOV], easing=easing, speed_profile=speed_profile)
     n = samples or max(2, int(round(duration_s * fps)))
     if path_s:
         from tour_worker.render.camera_path import ramp_profile
-        poses = [path.pose_at_fraction(ramp_profile(easing, min(1.0, f / (n - 1) * duration_s / path_s)))
+        poses = [path.pose_at_fraction(path.along(ramp_profile(easing, min(1.0, f / (n - 1) * duration_s / path_s))))
                  for f in range(n)]
     else:
         poses = [path.pose(f / (n - 1)) for f in range(n)]

@@ -64,7 +64,17 @@ class BezierCameraPath:
     """A plan 1.6 bezier_path camera: segments [{"eye": 4 points, "target": 4 points}],
     hfov_deg [start, end], easing, time_warp."""
 
-    def __init__(self, segments: list[dict], hfov_deg, easing: str = "ease_in_out", time_warp=None):
+    def __init__(self, segments: list[dict], hfov_deg, easing: str = "ease_in_out", time_warp=None,
+                 speed_profile=None):
+        self._profile = None
+        if speed_profile:
+            # continuous cuts: [[path fraction, speed x], ...] - the move's pace along its path (a walk
+            # through a door hurries under it, user 2026-11-27); time -> path fraction through it
+            ks = np.asarray(speed_profile, np.float64)
+            s_ = np.linspace(0.0, 1.0, 401)
+            m_ = np.interp(s_, ks[:, 0], ks[:, 1])
+            tau = np.r_[0.0, np.cumsum(0.5 * (1.0 / m_[1:] + 1.0 / m_[:-1]) * np.diff(s_))]
+            self._profile = (tau / tau[-1], s_)
         self.eye = [np.asarray(s["eye"], np.float64) for s in segments]
         self.target = [np.asarray(s["target"], np.float64) for s in segments]
         if not self.eye or any(e.shape != (4, 3) for e in self.eye + self.target):
@@ -116,8 +126,15 @@ class BezierCameraPath:
         the move at its planned pace, eased only at the tour's ends; else output progress f / (n - 1)."""
         if path_s:
             from tour_worker.render.camera_path import path_time, ramp_profile
-            return self.pose_at_fraction(ramp_profile(self.easing_name, path_time(path_s, f, fps)))
+            return self.pose_at_fraction(self.along(ramp_profile(self.easing_name, path_time(path_s, f, fps))))
         return self.pose(f / max(1, n - 1))
+
+    def along(self, p: float) -> float:
+        """Path fraction at time progress p (0-1 of path_s): p itself, or through the speed profile."""
+        if self._profile is None:
+            return p
+        tau, s_ = self._profile
+        return float(np.interp(p, tau, s_))
 
     def pose_at_fraction(self, s: float) -> tuple[np.ndarray, np.ndarray, float]:
         """(eye, target, hfov_deg) at path fraction s (0-1 of the arc length)."""

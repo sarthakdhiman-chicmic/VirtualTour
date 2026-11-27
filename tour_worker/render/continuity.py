@@ -134,7 +134,8 @@ def shot_ends(plan, k: int, timeline: list[dict]) -> tuple[Motion | None, Motion
     if cam.type == "bezier_path":
         from tour_worker.scene.camera import BezierCameraPath
         path = BezierCameraPath([s.model_dump() for s in cam.segments], cam.hfov_deg,
-                                easing=getattr(cam.easing, "value", cam.easing), time_warp=cam.time_warp)
+                                easing=getattr(cam.easing, "value", cam.easing), time_warp=cam.time_warp,
+                                speed_profile=getattr(cam, "speed_profile", None))
         up = getattr(getattr(plan, "scene", None), "up_axis", None) or (0.0, 0.0, 1.0)
         ps = getattr(cam, "path_s", None)
         return (_scene_motion(path, n, first, first + m, fps, up, ps), _scene_motion(path, n, last - m, last, fps, up, ps))

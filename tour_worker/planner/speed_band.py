@@ -229,7 +229,8 @@ def _scene_ends(cam, cut_s: float, fps: float, up) -> tuple[float, float]:
     from tour_worker.render.continuity import _scene_motion
     from tour_worker.scene.camera import BezierCameraPath
     path = BezierCameraPath([s.model_dump() for s in cam.segments], cam.hfov_deg,
-                            easing=getattr(cam.easing, "value", cam.easing))
+                            easing=getattr(cam.easing, "value", cam.easing),
+                            speed_profile=getattr(cam, "speed_profile", None))
     n = max(2, int(round(cut_s * fps)))
     m = max(1, min(int(round(MEASURE_S * fps)), (n - 1) // 2))
     a = _scene_motion(path, n, 0, m, fps, up, cam.path_s).speed

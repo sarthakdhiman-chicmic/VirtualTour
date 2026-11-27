@@ -145,10 +145,13 @@ class CameraParams(BaseModel):
     # is cut inside it; easing then means linear (between the tour's first and last shots),
     # ease_in (the first), ease_out (the last). None: the plan version's timing (time_warp etc.)
     path_s: float | None = None
+    # bezier_path with path_s: [[path fraction, speed x], ...] - the move's pace along its path (a walk
+    # through a door hurries under it and settles in the room, user 2026-11-27); path_s is its time
+    speed_profile: list[list[float]] | None = None
 
     @model_serializer(mode="wrap")
     def _omit_unset_additions(self, handler):
-        return _omit_none(handler(self), ("clip_uri", "in_s", "zoom_end", "path_s"))
+        return _omit_none(handler(self), ("clip_uri", "in_s", "zoom_end", "path_s", "speed_profile"))
 
 
 class Punch(BaseModel):

@@ -208,7 +208,8 @@ class SplatShot:
         up = getattr(plan.scene, "up_axis", None) if getattr(plan, "scene", None) is not None else None
         self.up = tuple(up) if up else DEFAULT_UP
         self.path = BezierCameraPath([s.model_dump() for s in cam.segments], cam.hfov_deg,
-                                     easing=getattr(cam.easing, "value", cam.easing), time_warp=cam.time_warp)
+                                     easing=getattr(cam.easing, "value", cam.easing), time_warp=cam.time_warp,
+                                     speed_profile=getattr(cam, "speed_profile", None))
 
     def view(self, f: int) -> tuple[np.ndarray, np.ndarray]:
         """(view matrix, K at the rasterised size) for frame f."""

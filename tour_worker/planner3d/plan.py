@@ -52,6 +52,9 @@ MIN_SHOT_S = 3.0              # s a shot plays at least (client item 9)
 JOIN_MAX_S = 10.0             # s the bridge from a walk-in to the room's first scene may take ...
 JOIN_MAX_TURN_DEG = 100.0     # ... and deg it may turn - else the walk-in stays the room's opening
 JOIN_STRETCH_MAX = 1.5        # a joined walk-in may take this much longer to enter at the cut's pace
+DOOR_HURRY = 1.7              # x the walk's pace under a door (user 2026-11-27: variable speeds look real)
+DOOR_HURRY_M = 0.9            # m either side of the door it hurries over
+DOOR_HURRY_EDGE = 0.08        # of its path at each end it keeps its pace (the cuts are measured there)
 REPAIR_ROUNDS = 3             # extra angles the QA repair may drop, one a round
 SYNC_DRIFT_S = 0.3            # s a continuous-cut sync adds a shot on average (within its handle)
 COVER_ENOUGH = 0.85           # a room whose walls are this covered gets no further shot
@@ -66,13 +69,53 @@ def _enters_at(shot, space, fps: float) -> float | None:
     from tour_worker.scene.camera import BezierCameraPath
     cam = shot.camera
     path = BezierCameraPath([s.model_dump() for s in cam.segments], cam.hfov_deg,
-                            easing=getattr(cam.easing, "value", cam.easing))
+                            easing=getattr(cam.easing, "value", cam.easing),
+                            speed_profile=getattr(cam, "speed_profile", None))
     n = max(2, int(round(shot.duration_s * fps)))
     for f in range(0, n, 2):
         eye = path.pose_at_frame(f, n, fps, path_s=cam.path_s)[0]
         if space.room_at(space.to_local(np.asarray(eye, float))[:2]) == shot.room_key:
             return None if f == 0 else round(f / fps, 2)
     return None
+
+
+def _door_hurry(shot, space) -> None:
+    """A walk through a door hurries under it (user 2026-11-27: "speed up the frames where we are
+    under the doorways, then as soon as we enter the room go back to normal speed - variable speeds
+    look more real"): camera.speed_profile rises to DOOR_HURRY x over DOOR_HURRY_M either side of
+    where it enters its room and is 1 at both ends (the cuts keep their pace); path_s and the shot's
+    length lose the time it saves."""
+    from tour_worker.scene.camera import BezierCameraPath
+    cam = shot.camera
+    if cam.type != "bezier_path" or not cam.path_s or not cam.segments:
+        return
+    path = BezierCameraPath([x.model_dump() for x in cam.segments], cam.hfov_deg)
+    fr = np.linspace(0.0, 1.0, 241)
+    eyes = np.array([path.pose_at_fraction(float(f))[0] for f in fr])
+    loc = space.to_local(eyes)[:, :2]
+    at = [space.room_at(q) for q in loc]
+    k = next((j for j in range(1, len(at)) if at[j] == shot.room_key and at[j - 1] != shot.room_key), None)
+    if k is None:
+        return
+    walked = np.r_[0.0, np.cumsum(np.linalg.norm(np.diff(loc, axis=0), axis=1))]
+    lo_ = float(np.interp(walked[k] - DOOR_HURRY_M, walked, fr))
+    hi_ = float(np.interp(walked[k] + DOOR_HURRY_M, walked, fr))
+    lo_, hi_ = max(lo_, DOOR_HURRY_EDGE), min(hi_, 1.0 - DOOR_HURRY_EDGE)
+    mid = float(fr[k])
+    if not lo_ < mid < hi_:
+        return
+    xs = np.r_[np.linspace(lo_, mid, 5), np.linspace(mid, hi_, 5)[1:]]
+    w = np.where(xs <= mid, (xs - lo_) / max(mid - lo_, 1e-9), (hi_ - xs) / max(hi_ - mid, 1e-9))
+    ms = 1.0 + (DOOR_HURRY - 1.0) * 0.5 * (1 - np.cos(np.pi * np.clip(w, 0, 1)))
+    prof = [[0.0, 1.0]] + [[round(float(x), 4), round(float(m), 3)] for x, m in zip(xs, ms)] + [[1.0, 1.0]]
+    grid = np.linspace(0.0, 1.0, 401)
+    m_ = np.interp(grid, [p[0] for p in prof], [p[1] for p in prof])
+    share = float(np.trapezoid(1.0 / m_, grid)) if hasattr(np, "trapezoid") else float(np.trapz(1.0 / m_, grid))
+    saved = float(cam.path_s) * (1.0 - share)
+    cam.speed_profile = prof
+    cam.path_s = round(float(cam.path_s) - saved, 3)
+    shot.duration_s = round(max(MIN_SHOT_S, float(shot.duration_s) - saved), 3)
+    shot.duration_s = min(shot.duration_s, cam.path_s)
 
 
 def _door_shares(moves, space) -> dict[int, tuple[float, float]]:
@@ -979,6 +1022,8 @@ def plan_tour_3d(model, scene: dict, rooms: list[dict], listing_id: str, cfg: Pl
                                                   hfov_deg=[HFOV, HFOV],
                                                   path_s=round(sel.final_duration, 3) if continuous else None),
                               transition_in=TransitionParams(type="cut", duration_s=0.0)))
+            if mv.kind == "through" and continuous:
+                _door_hurry(shots[-1], space)
             plan_rows_.append({"shot_id": f"s{n:02d}", "room_key": sel.room_key, "move": mv.kind,
                               "planned_s": round(sel.final_duration, 2), "score": round(mv.score, 3),
                               "piece": mv.piece.to_dict() if mv.piece is not None else None,
@@ -1048,7 +1093,8 @@ def plan_tour_3d(model, scene: dict, rooms: list[dict], listing_id: str, cfg: Pl
         # run before drone clip injection so zip(shots, plan_rows_) stays aligned
         for s, row in zip(shots, plan_rows_):
             turn, move = speeds_of([x.model_dump() for x in s.camera.segments], s.duration_s,
-                                   getattr(s.camera.easing, "value", s.camera.easing), fps=cfg.fps, path_s=s.camera.path_s)
+                                   getattr(s.camera.easing, "value", s.camera.easing), fps=cfg.fps, path_s=s.camera.path_s,
+                                   speed_profile=getattr(s.camera, "speed_profile", None))
             row.update(played_s=s.duration_s, played_turn_dps=round(turn, 1), played_move_mps=round(move, 2))
             if turn > MAX_TURN_DPS + 0.05 or move > MAX_MOVE_MPS + 0.005:
                 warnings_.append(f"camera_speed:{s.shot_id}")
