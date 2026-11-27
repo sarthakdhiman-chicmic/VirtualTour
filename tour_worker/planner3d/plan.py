@@ -17,6 +17,7 @@ cut - the move generator avoids those); a fade only between a drone clip and the
 """
 from __future__ import annotations
 
+import math
 import time
 
 import numpy as np
@@ -45,6 +46,11 @@ PLAN_BUDGET_S = 240.0         # s of planning before each shot settles for its b
 SYNC_REACH = 0.85            # with music: shots planned at this share of their lengths (the sync lengthens)
 DOOR_LEAD = 0.6               # m before a room's door a walk in through it always starts
 SYNC_HEADROOM = 0.88          # the cap is met before the sync with this share of it
+TAKE_PACE_FLEX = 0.15        # a walk in a take may run this much faster / slower to put its door on the beat
+MIN_SHOT_S = 3.0              # s a shot plays at least (client item 9)
+JOIN_MAX_S = 10.0             # s the bridge from a walk-in to the room's first scene may take ...
+JOIN_MAX_TURN_DEG = 100.0     # ... and deg it may turn - else the walk-in stays the room's opening
+JOIN_STRETCH_MAX = 1.5        # a joined walk-in may take this much longer to enter at the cut's pace
 REPAIR_ROUNDS = 3             # extra angles the QA repair may drop, one a round
 SYNC_DRIFT_S = 0.3            # s a continuous-cut sync adds a shot on average (within its handle)
 COVER_ENOUGH = 0.85           # a room whose walls are this covered gets no further shot
@@ -326,6 +332,7 @@ def plan_tour_3d(model, scene: dict, rooms: list[dict], listing_id: str, cfg: Pl
     mover = RoomMoves(space, Occlusion(model, space) if check_occlusion else None)
     mover.deadline = time.perf_counter() + PLAN_BUDGET_S      # past it: each shot's best within a few checks
     mover.continuous = continuous
+    one_take = bool(continuous and getattr(c3, "one_take_3d", False))
     if continuous and getattr(c3, "speed_band", False):    # every candidate planned at the 3D pace
         from tour_worker.planner.speed_band import target_speed_3d
         mover.pace_target = target_speed_3d(c3.pacing)
@@ -526,7 +533,7 @@ def plan_tour_3d(model, scene: dict, rooms: list[dict], listing_id: str, cfg: Pl
         if nxt is None or id(nxt) in links or nxt.kind == "detail":
             return prev
         dst = nxt.room_key
-        lead_s = max(0.0, nxt.final_duration - handle)   # a through flight is the room's opening shot: its time
+        lead_s = 0.0          # (the room's first scene follows the walk-in with its own time; was the opening's)
         r = space.route(room, dst)
         if not r:
             return prev
@@ -651,7 +658,51 @@ def plan_tour_3d(model, scene: dict, rooms: list[dict], listing_id: str, cfg: Pl
             log["crossed"] = "matched_cut"
         return p_
 
-    for i, sel in enumerate(selected):
+    take_built = False
+    if one_take:
+        # one take through the home (user 2026-11-27): each room a loop round it, the rooms a walking
+        # route joins walked into each other through their doors (planner3d/take.py) - in place of
+        # the shots below; the shots below when no room gets a loop
+        import dataclasses
+        from tour_worker.planner3d.take import ROOM_WEIGHT_HERO, plan_takes
+        order: list[str] = []
+        lead_of: dict = {}
+        for s_ in selected:
+            if id(s_) in links or s_.kind == "detail":
+                continue
+            lead_of.setdefault(s_.room_key, s_)
+            if not order or order[-1] != s_.room_key:
+                order.append(s_.room_key)
+        weights = {k: math.sqrt(max(space.room_area(k), 1.0)) * (ROOM_WEIGHT_HERO if tier_for(rtype.get(k)) in hero_tiers else 1.0)
+                   for k in order}
+        subjects = {}
+        for k in order:
+            pc = next(iter(space.main_pieces(k)), None)
+            if pc is not None:                     # (what the loop circles: its centre, and the piece itself)
+                subjects[k] = (np.asarray((pc.frame or pc).centre, float), pc)
+        tk, tw = plan_takes(mover, order, weights, getattr(c3, "max_total_s", None) or 90.0, subjects)
+        if any(w_.startswith("take_room_no_loop") for w_ in tw):
+            # a room with no loop the checks pass: the tour of shots (cut within the limits) instead -
+            # never a room left out of the take
+            warnings += tw + ["take_fallback:shots"]
+            tk, one_take = [], False
+        else:
+            warnings += tw
+        if tk:
+            for n_, (rk, mv_, seam_) in enumerate(tk):
+                dur_ = round(float(mv_.why["dur_s"]), 2)
+                base = lead_of.get(rk) or selected[0]
+                sel_ = dataclasses.replace(base, room_key=rk, final_duration=dur_, raw_duration=dur_,
+                                           role="hero" if n_ == 0 else ("detail" if mv_.kind == "bridge" else base.role),
+                                           kind="hero" if n_ == 0 else ("room" if mv_.kind == "bridge" else base.kind))
+                mv_.why["seamless_out"] = bool(seam_)
+                if n_ > 0 and tk[n_ - 1][2]:
+                    mv_.why["seamless_in"] = True
+                moves.append((sel_, mv_))
+                poses.setdefault(rk, []).append((mv_.first, mv_.last))
+                first_s.setdefault(rk, sel_)
+            take_built = True
+    for i, sel in enumerate(selected if not take_built else []):
         # no repeats across the room's open-plan space: a hall and the living room it opens into
         # are one space, and a camera in one films the other
         earlier = [p for k in sorted(space.spaces.get(sel.room_key, {sel.room_key})) for p in poses.get(k, [])]
@@ -676,6 +727,37 @@ def plan_tour_3d(model, scene: dict, rooms: list[dict], listing_id: str, cfg: Pl
             first_s.setdefault(sel.room_key, sel_)
             flown_in_lead.add(id(first_s[sel.room_key]))
             prev = mv.last
+            # ... and the room's first scene carried straight on from it (user 2026-11-27: "only walk
+            # outs and walk-ins and first scene of the room is continuous; rest of the scenes follow
+            # the normal methodology"): the first scene as the room's first shot is chosen, joined to
+            # the walk-in by a seamless bridge - else the walk-in stays the room's opening
+            if continuous:
+                import dataclasses
+                lead, lw = mover.best(sel.room_key, sel.final_duration, earlier=earlier, prev=None, piece_rank=0,
+                                      kind=sel.kind, next_room=nxt, final=sel.room_key == last_room,
+                                      then_forward=_leaves_flying(i), last_shot=False,
+                                      join_from=(mv.eye[-1], mv.tgt[-1]))     # (prev None: no jump-cut test against it)
+                br = mover.bridge(mv, lead) if lead is not None else None
+                if br is not None and br.why["dur_s"] <= JOIN_MAX_S and br.why["turn_deg"] <= JOIN_MAX_TURN_DEG:
+                    mv.why["seamless_out"] = True
+                    br.why.update(seamless_in=True, seamless_out=True)
+                    lead.why["seamless_in"] = True
+                    bdur = round(float(br.why["dur_s"]), 2)
+                    moves.append((dataclasses.replace(sel_, role="detail", kind="room", is_hero=False, is_lead=False,
+                                                      final_duration=bdur, raw_duration=bdur), br))
+                    moves.append((sel, lead))
+                    poses.setdefault(sel.room_key, []).append((lead.first, lead.last))
+                    covered[sel.room_key] = np.union1d(covered[sel.room_key], mover.walls_seen(sel.room_key, lead))
+                    wide[sel.room_key] += 1
+                    prev = lead.last
+                else:
+                    if lead is not None:
+                        hist_ = mover.__dict__.get("_history", [])
+                        if hist_:
+                            hist_.pop()                     # (not taken: the cut is measured from the walk-in)
+                        mover._last_exit = move_motion(mv, end=True)
+                        mover._last_exit_pct = mover.pace_ends(mv, float(sel_.final_duration))[1] if getattr(mover, "pace_target", None) else None
+                    warnings.append(f"walk_in_not_joined:{sel.room_key}")
             if i == len(selected) - 1 or selected[i + 1].room_key != sel.room_key:
                 if canon(rtype.get(sel.room_key)) not in LOOK_BACK:
                     prev = _cover_room(sel.room_key, i, prev)
@@ -755,7 +837,8 @@ def plan_tour_3d(model, scene: dict, rooms: list[dict], listing_id: str, cfg: Pl
         over = sum(x.final_duration - handle for x, _ in moves) - cap
         if over <= 0:
             break
-        if mv.kind in FLIGHT or mv.why.get("coverage_shot") or s_.kind == "detail":
+        if (mv.kind in FLIGHT or mv.why.get("coverage_shot") or s_.kind == "detail"
+                or mv.why.get("seamless_in") or mv.why.get("seamless_out")):     # (one take: joined as planned)
             continue
         hi = length_range("hero" if s_.kind == "hero" else "room", c3.pacing)[1] * reach + handle
         lo = max(hi, MIN_KIND_S.get(mv.kind, 0.0) + handle, s_.final_duration - over)
@@ -848,7 +931,7 @@ def plan_tour_3d(model, scene: dict, rooms: list[dict], listing_id: str, cfg: Pl
             role = sel.role                               # hero | detail (a room shot) | close
             shots.append(Shot(shot_id=f"s{n:02d}", order=n, asset_id="scene", room_key=sel.room_key,
                               room_type=rtype[sel.room_key], narrative_stage=stage[sel.room_key], role=role,
-                              duration_s=round(sel.final_duration - handle, 3),
+                              duration_s=round(sel.final_duration - (0.0 if mv.why.get("seamless_out") else handle), 3),
                               camera=CameraParams(type="bezier_path", easing=mv.easing, move=mv.kind, segments=bz,
                                                   hfov_deg=[HFOV, HFOV],
                                                   path_s=round(sel.final_duration, 3) if continuous else None),
@@ -859,7 +942,9 @@ def plan_tour_3d(model, scene: dict, rooms: list[dict], listing_id: str, cfg: Pl
                               "fit_error_m": round(err, 3), **mv.why})
 
         music = None
-        if music_track:                                   # the same beat sync, as an even retime
+        seam = [bool(mv.why.get("seamless_out")) for _, mv in moves_]
+        has_seams = any(seam[:-1])
+        if music_track and not has_seams:                 # the same beat sync, as an even retime
             from tour_worker.planner.music_sync import sync_to_music
             # the opening and closing shots sync as heroes (they hold); room shots may shorten to a hit (3 s floor); close-ups flex
             roles = ["hero" if s.role == "hero" or k in (0, len(shots) - 1) else s.role for k, s in enumerate(shots)]
@@ -877,8 +962,28 @@ def plan_tour_3d(model, scene: dict, rooms: list[dict], listing_id: str, cfg: Pl
             if getattr(c3, "speed_band", False):
                 # one speed band, matched within 25% at every cut (item 4): 3D moves_ are only slowed
                 from tour_worker.planner.speed_band import apply_speed_band_3d
+                # a seamless join stays as planned: a piece joined at both ends is not slowed; joined at
+                # its start, it is slowed from its end (its cut); joined at its end, from its start
+                pinned = {}
+                for k, (_, mv) in enumerate(moves_):
+                    j_in, j_out = bool(mv.why.get("seamless_in")), bool(mv.why.get("seamless_out"))
+                    if j_in and j_out:
+                        pinned[k] = (0.0, 1.0)
+                    elif j_in:
+                        pinned[k] = (0.0, 0.0)
+                    elif j_out:
+                        # a walk-in joined on is not slowed at all (paced as planned, to the cut before
+                        # it): its start is the walk-out and the door; else its end is kept
+                        pinned[k] = (0.0, 1.0) if mv.kind == "through" else (1.0, 0.0)
                 warnings_ += apply_speed_band_3d(shots, c3.pacing, cfg.fps, scene.get("up_axis"),
-                                                keep_from=_door_shares(moves_, space))
+                                                keep_from={**_door_shares(moves_, space), **pinned})
+                if has_seams:
+                    _slow_joined(shots, moves_)
+        if music_track and has_seams:
+            # joined moves: the music last, on the lengths as they play (its moments: the real cuts
+            # and the door crossings inside the joins)
+            music, mw = _music_takes(shots, seam)
+            warnings_ += mw
 
         # transitions: every interior shot change is a cut - the camera carries the move between parts
         # of the home (client review 2026-11-20, item 8); shots are built with cuts
@@ -887,7 +992,7 @@ def plan_tour_3d(model, scene: dict, rooms: list[dict], listing_id: str, cfg: Pl
         # comes where the camera enters the room, not where the shot starts (user 2026-11-27)
         t_tour = 0.0
         for s, row in zip(shots, plan_rows_):
-            if s.camera.move == "through":
+            if s.camera.move in ("through", "bridge"):
                 at = _enters_at(s, space, cfg.fps)
                 if at is not None:
                     row["enters_room_at_s"] = at
@@ -981,27 +1086,128 @@ def plan_tour_3d(model, scene: dict, rooms: list[dict], listing_id: str, cfg: Pl
                 plan.warnings = sorted(set(plan.warnings) | {f"cut_check_failed:{type(e).__name__}"})
         return plan, plan_rows_, cut_rows, cut_summary
 
+    def _stitch(ms):
+        """One take wherever a walking route joins two moves (user 2026-11-27: enter a room, move
+        round it, see its exit, walk through it into the next room and on, all in one shot; a cut
+        - a transition - only where no route joins them): a bridge (RoomMoves.bridge) between
+        each two, the pieces joined exactly - same place, look and pace (seamless_in / _out: they
+        play their whole paths, the speed band leaves them, the cut check does not judge the join).
+        Copies: ms is left as it is (repairs drop from it and stitch again)."""
+        import dataclasses
+        out: list = []
+        for sel, mv in ms:
+            mv = dataclasses.replace(mv, why={**mv.why, "base_id": id(mv)})
+            if one_take and not take_built and out:
+                psel, pmv = out[-1]
+                br = mover.bridge(pmv, mv)
+                if br is not None:
+                    pmv.why["seamless_out"] = True
+                    mv.why["seamless_in"] = True
+                    # the next move's room - the room being left when that is a walk-in starting there
+                    rk = psel.room_key if mv.kind == "through" else sel.room_key
+                    dur = round(float(br.why["dur_s"]), 2)
+                    bsel = dataclasses.replace(first_s.get(rk, sel), room_key=rk, role="detail", kind="room",
+                                               is_hero=False, is_lead=False, final_duration=dur, raw_duration=dur)
+                    br.why.update(seamless_in=True, seamless_out=True, base_id=None)
+                    out.append((bsel, br))
+            out.append((sel, mv))
+        return out
+
+    def _slow_joined(shots_, ms) -> None:
+        """A joined walk-in (its walk-out and door kept whole: the band leaves it) entering faster than
+        the cut before it allows is slowed by more time, not a shorter path - within a join the time
+        is the planner's (the sync only places the real cuts) - at most JOIN_STRETCH_MAX."""
+        from tour_worker.planner.speed_band import PLAN_RATIO, _scene_ends
+        up = scene.get("up_axis")
+        up = tuple(up) if up else (0.0, 0.0, 1.0)
+        for k in range(1, len(shots_)):
+            mv = ms[k][1]
+            if not (mv.kind == "through" and mv.why.get("seamless_out") and not mv.why.get("seamless_in")):
+                continue
+            a, b = shots_[k - 1], shots_[k]
+            out_v = _scene_ends(a.camera, a.duration_s, cfg.fps, up)[1]
+            in_v = _scene_ends(b.camera, b.duration_s, cfg.fps, up)[0]
+            if out_v > 1e-6 and in_v > PLAN_RATIO * out_v:
+                f = min(JOIN_STRETCH_MAX, in_v / (PLAN_RATIO * out_v))
+                b.duration_s = round(b.duration_s * f, 3)
+                b.camera.path_s = round(b.duration_s, 3)
+                mv.why["slowed_x"] = round(f, 2)
+
+    def _played(ms) -> float:
+        return sum(sel.final_duration - (0.0 if mv.why.get("seamless_out") else handle) for sel, mv in ms)
+
+    def _music_takes(shots_, seam):
+        """The music for a tour of takes (user 2026-11-27: room changes on the beat): the sync's
+        moments go to the tour's real cuts and to each door crossing inside a take (where a room's
+        label comes in); a crossing is moved onto its moment by the pace of the walk it is in (within
+        TAKE_PACE_FLEX), a cut by its shot's length (within its handle). (music, warnings)."""
+        from tour_worker.planner.music_sync import sync_to_music
+        starts = np.r_[0.0, np.cumsum([s_.duration_s for s_ in shots_])]
+        marks = []                                   # (tour time, kind, shot index, s into the shot)
+        for k in range(1, len(shots_)):
+            if not seam[k - 1]:
+                marks.append((float(starts[k]), "cut", k, 0.0))
+            elif shots_[k].room_key != shots_[k - 1].room_key and shots_[k].camera.move in ("bridge", "through"):
+                at_ = _enters_at(shots_[k], space, cfg.fps)
+                if at_ is not None and at_ > 0.5:
+                    marks.append((float(starts[k]) + at_, "cross", k, at_))
+        marks.sort()
+        bounds = [m[0] for m in marks]
+        segs = list(np.diff(np.r_[0.0, bounds, starts[-1]]))
+        roles = ["hero"] + ["detail"] * (len(segs) - 2) + ["hero"] if len(segs) > 1 else ["hero"]
+        r = sync_to_music([float(x) for x in segs], music_track, c3, roles)
+        target = np.cumsum(r.durations)[:-1]
+        for (t0, kind, k, off), want in zip(marks, target):
+            now = float(np.r_[0.0, np.cumsum([s_.duration_s for s_ in shots_])][k]) + off
+            shift = float(want) - now
+            if kind == "cross":
+                f = float(np.clip((off + shift) / off, 1 - TAKE_PACE_FLEX, 1 + TAKE_PACE_FLEX))
+                shots_[k].duration_s = round(shots_[k].duration_s * f, 3)
+                shots_[k].camera.path_s = round(shots_[k].duration_s, 3)
+            else:
+                prev_ = shots_[k - 1]
+                lo_ = max(MIN_SHOT_S, (prev_.camera.path_s or prev_.duration_s) - 2 * handle)
+                prev_.duration_s = round(float(np.clip(prev_.duration_s + shift, lo_, prev_.camera.path_s or 1e9)), 3)
+        total = float(sum(s_.duration_s for s_ in shots_))
+        music_ = r.music
+        music_.end_s = round(total, 3)
+        starts = np.r_[0.0, np.cumsum([s_.duration_s for s_ in shots_])]
+        # each shot boundary's musical moment: a real cut its beat, a seamless join itself (not judged)
+        beat_at = {k: float(w) for (_, kind, k, _), w in zip(marks, target) if kind == "cut"}
+        music_.cut_beats_s = [round(beat_at.get(k, float(starts[k])), 3) for k in range(1, len(shots_))]
+        return music_, [x for x in [r.warning, *(r.extra_warnings or [])] if x]
+
     # QA repair (user 2026-11-27: every cut within the limits): a cut that breaks with an extra angle
     # (a coverage shot) on either side loses that angle and the plan is finished again - the room
     # keeps the shots it has; a break with no extra angle in it stays named (cut_out_of_limits)
     repairs: list[str] = []
     for round_ in range(REPAIR_ROUNDS + 1):
-        plan, plan_rows, cut_rows, cut_summary = _finish(moves)
+        stitched = _stitch(moves)
+        while one_take and extras and _played(stitched) > total_max + float(getattr(c3, "max_over_s", 0.0) or 0.0):
+            # the walks between the moves count too: the coverage angles showing the least new wall go
+            gone = min((e for e in extras if any(m[1] is e[1][1] for m in moves)), key=lambda e: e[0], default=None)
+            if gone is None:
+                break
+            moves = [m for m in moves if m[1] is not gone[1][1]]
+            repairs.append(f"coverage_shot_dropped_for_length:{gone[1][0].room_key}")
+            stitched = _stitch(moves)
+        plan, plan_rows, cut_rows, cut_summary = _finish(stitched)
         bad = [c for c in cut_rows if c.get("judged") and c.get("breaks")]
         if not bad or round_ == REPAIR_ROUNDS:
             break
-        at = {f"s{n:02d}": n - 1 for n in range(1, len(moves) + 1)}
+        at = {f"s{n:02d}": n - 1 for n in range(1, len(stitched) + 1)}
         votes: dict[int, int] = {}
         for c in bad:
             for sid in (c["from"], c["to"]):
                 n = at.get(sid)
-                if n is not None and moves[n][1].why.get("coverage_shot"):
+                if n is not None and stitched[n][1].why.get("coverage_shot"):
                     votes[n] = votes.get(n, 0) + 1
         if not votes:
             break
-        n = max(votes, key=lambda k: (votes[k], -float(moves[k][1].why.get("walls_new", 0.0) or 0.0)))
-        repairs.append(f"coverage_dropped_breaks_cut:{moves[n][0].room_key}:{'+'.join(sorted({b for c in bad if n in (at.get(c['from']), at.get(c['to'])) for b in c['breaks']}))}")
-        moves = moves[:n] + moves[n + 1:]
+        n = max(votes, key=lambda k: (votes[k], -float(stitched[k][1].why.get("walls_new", 0.0) or 0.0)))
+        repairs.append(f"coverage_dropped_breaks_cut:{stitched[n][0].room_key}:{'+'.join(sorted({b for c in bad if n in (at.get(c['from']), at.get(c['to'])) for b in c['breaks']}))}")
+        drop = stitched[n][1].why.get("base_id")
+        moves = [m for m in moves if id(m[1]) != drop]
     if repairs:
         plan.warnings = sorted(set(plan.warnings) | set(repairs))
     from tour_worker.planner.planner import _compute_plan_hash

@@ -71,7 +71,7 @@ OPENING_GLIDE = 1.5          # the tour opens by moving into the home
 # front of it; a glide or pan looks down a room, where walls 1.2 m+ away are the room itself
 # (user 2026-11-16, Home Scan: shots closing in on walls the floor plan does not hold - a poorly
 # captured wall is no "tall" cell - so the rendered check looks 1.8 m out for every room move)
-OCC_NEAR_KIND = {"backout": 0.5, "door_pan": 0.5, "wall_pan": 1.5, "corner_sweep": 1.8, "panorama": 1.5, "descend": 1.8, "truck": 2.0, "rise": 1.8, "exit": 0.9, "through": 0.6, "walk": 0.9, "walkway": 2.0, "arc": 2.0, "room_pan": 1.8, "hold_pan": 1.8, "push": 1.8, "pull": 1.8, "reveal": 1.8, "link": 1.2, "enter": 1.5, "glide": 1.8, "pan": 1.2, "detail": 0.7}
+OCC_NEAR_KIND = {"backout": 0.5, "door_pan": 0.5, "loop": 0.9, "bridge": 0.9, "wall_pan": 1.5, "corner_sweep": 1.8, "panorama": 1.5, "descend": 1.8, "truck": 2.0, "rise": 1.8, "exit": 0.9, "through": 0.6, "walk": 0.9, "walkway": 2.0, "arc": 2.0, "room_pan": 1.8, "hold_pan": 1.8, "push": 1.8, "pull": 1.8, "reveal": 1.8, "link": 1.2, "enter": 1.5, "glide": 1.8, "pan": 1.2, "detail": 0.7}
 PAN_SWEEP = 50.0
 AIM_Z_MAX = EYE - 0.10        # a room shot never looks up: not at a ceiling, not at upper cabinets
 LOW_TOP = 1.4                 # m: an object whose top is below this is a surface a room shot may aim at
@@ -185,12 +185,22 @@ FLIGHT_PACE = (0.25, 0.45)    # m/s: a leg flies at the previous shot's pace, wi
 # 0.2 m/s is ~3.3 % frame width/s at the 3 m reference depth) and turns onto the room gently - planned
 # faster, the speed band kept only a quarter of it and the walk through the door was lost (user
 # 2026-11-27, green house study); the room's next shot shows the room
-THROUGH_PACE = 0.18           # m/s: under the 3D band's 0.22 m/s walk, its turn onto the room on top
+THROUGH_PACE = 0.22           # m/s: the 3D band's walk (0.18 left joined room changes 2-3 s long each, 2026-11-27)
 THROUGH_S_MAX = 14.0          # s a through flight may last at THROUGH_PACE (a longer way there: the band trims its start)
 THROUGH_TURN_DPS = 3.0        # deg/s its turn onto the room may reach
 # the flight through a door is the room's opening shot - one move: under the doorway, on into the
 # room and onto what it holds, never cut to another angle of the room just past the door (user
 # 2026-11-27); it walks this far past the door (m) and takes the room's opening time
+# one take (RoomMoves.bridge): the moves of the rooms a walking route joins, carried on into each other
+BRIDGE_MPS = 0.22             # m/s it walks (the 3D pace: 3.6 %fw/s at the 3 m reference depth)
+BRIDGE_DPS = 6.0              # deg/s it turns at most (a walk turning onto the next move)
+BRIDGE_CLEAR = 0.15           # m: its walking route keeps this off the walls (moves end near them)
+JOIN_EST_MAX_S = 6.0          # s: a first scene this short a bridge from the walk-in is tried first
+BRIDGE_MIN_S = 3.0            # s at least (no piece of the tour under 3 s, client item 9)
+BRIDGE_MAX_M = 6.0            # m: a longer walk between two moves is a cut (a transition) instead
+BRIDGE_STILL_M = 0.05         # m: closer than this it only turns
+BRIDGE_AHEAD_FROM_M = 1.0     # m: a longer bridge looks ahead along its way in between
+BRIDGE_TURN_SHARE = 0.3       # of a walking bridge's length its look turns from a's / onto b's
 NEAR_WALL_M = 1.0             # m: a wall this near the lens fills its part of the frame (wall_share)
 NEAR_WALL_W = 2.0             # score a through flight loses with its first and last views all wall
 THROUGH_AFTER_LEAD = (0.9, 2.2)     # (1.2-3.5 m at the 3D pace: 9-14 s walk-ins took three rooms' coverage, 2026-11-27)
@@ -684,7 +694,7 @@ class RoomMoves:
              opening: bool = False, closing: bool = False, kind: str = "room",
              next_room: str | None = None, enter_route=None, after_exit: bool = False,
              final: bool = False, follows_link: bool = False, covered: np.ndarray | None = None,
-             then_forward=False, last_shot: bool = True) -> tuple[Move | None, list[str]]:
+             then_forward=False, last_shot: bool = True, join_from=None) -> tuple[Move | None, list[str]]:
         """The best move for a shot of `room` lasting dur s. earlier: (first, last) poses of the
         room's earlier shots; prev: the previous shot's last pose; next_room: the tour's next room
         (an opening reveal turns onto it). Returns (move, warnings).
@@ -939,6 +949,14 @@ class RoomMoves:
             if breaks:
                 b_ids = {id(m) for m in breaks}
                 tiers = [[m for m in t if id(m) not in b_ids] for t in tiers] + [breaks]
+            if join_from is not None:
+                # the room's first scene carried on from the walk-in (join_from: its last pose):
+                # the moves a short bridge reaches first (user 2026-11-27: walk-out, walk-in and the
+                # first scene one move; chosen on their own they started 140 deg round from it)
+                near_ = [m for t in tiers for m in t if self.join_s(join_from, m) <= JOIN_EST_MAX_S]
+                if near_:
+                    n_ids = {id(m) for m in near_}
+                    tiers = [near_] + [[m for m in t if id(m) not in n_ids] for t in tiers]
             if then_forward and last_shot:
                 # the room is left moving forward: a shot ending backward reverses at that cut, so it
                 # comes only when no other move will do - whatever its tier (user 2026-11-27: the green
@@ -2993,6 +3011,72 @@ class RoomMoves:
         return (float(np.max(np.convolve(ang, k, "valid") / np.maximum(dt, 1e-6))),
                 float(np.max(np.convolve(de, k, "valid") / np.maximum(dt, 1e-6))))
 
+    def join_s(self, pose, m: Move) -> float:
+        """The time (s) a bridge (RoomMoves.bridge) from pose (eye, aim) to m's first pose would
+        take, estimated: its walk at BRIDGE_MPS, its turn at BRIDGE_DPS."""
+        e0, t0 = np.asarray(pose[0], float)[:2], np.asarray(pose[1], float)
+        e1, t1 = np.asarray(m.eye[0], float), np.asarray(m.tgt[0], float)
+        h0 = math.atan2(t0[1] - e0[1], t0[0] - e0[0])
+        h1 = math.atan2(t1[1] - e1[1], t1[0] - e1[0])
+        turn = abs(math.degrees((h1 - h0 + math.pi) % (2 * math.pi) - math.pi))
+        v = m.why.setdefault("join_s", round(max(float(np.linalg.norm(e1 - e0)) / BRIDGE_MPS, turn / BRIDGE_DPS), 2))
+        return float(v)
+
+    def bridge(self, a: Move, b: Move) -> Move | None:
+        """One take through the home (user 2026-11-27: "enter the room, circle it, then see its exit
+        and enter the other room and do the panning and other camera moves all in one shot"): the
+        camera from where move a ends to where move b starts - across the room, or along the walking
+        route through the doors between them - from a's last aim to b's first, looking ahead along
+        the way when it walks; at the 3D pace (BRIDGE_MPS walking, at most BRIDGE_DPS turning).
+        None when no walking route joins them, or only a long one (the tour cuts there)."""
+        sp = self.space
+        p0, p1 = np.asarray(a.eye[-1], float), np.asarray(b.eye[0], float)
+        l0, l1 = np.asarray(a.tgt[-1], float), np.asarray(b.tgt[0], float)
+        h0 = math.atan2(l0[1] - p0[1], l0[0] - p0[0])
+        h1 = math.atan2(l1[1] - p1[1], l1[0] - p1[0])
+        r0, r1 = float(np.linalg.norm(l0[:2] - p0)), float(np.linalg.norm(l1[:2] - p1))
+        wrap = lambda x: (x + math.pi) % (2 * math.pi) - math.pi   # noqa: E731
+        dist = float(np.linalg.norm(p1 - p0))
+        if dist < BRIDGE_STILL_M:
+            path = p0 + np.linspace(0.0, 1.0, SAMPLES)[:, None] * (p1 - p0)[None]
+        else:
+            route = sp.paths_between(np.array([p0, p1]), sp.dt >= BRIDGE_CLEAR)(0, 1)
+            if route is None or len(route) < 2:
+                return None
+            if float(np.linalg.norm(np.diff(np.asarray(route, float), axis=0), axis=1).sum()) > BRIDGE_MAX_M:
+                return None
+            poly = np.r_[[p0], np.asarray(route, float)[1:-1], [p1]] if len(route) > 2 else np.array([p0, p1])
+            path = resample(smooth(sp, poly, BRIDGE_CLEAR), SAMPLES)
+            path[0], path[-1] = p0, p1
+        arc = np.r_[0.0, np.cumsum(np.linalg.norm(np.diff(path, axis=0), axis=1))]
+        L = float(arc[-1])
+        u = arc / L if L > 1e-6 else np.linspace(0.0, 1.0, SAMPLES)
+        ease = lambda x: x * x * (3 - 2 * x)   # noqa: E731
+        if L >= BRIDGE_AHEAD_FROM_M:          # a walk: it looks where it is going in between
+            ahead = []
+            for k, s_ in enumerate(arc):
+                q = path[min(len(path) - 1, int(np.searchsorted(arc, s_ + EXIT_AHEAD)))] - path[k]
+                ahead.append(math.atan2(q[1], q[0]) if float(np.linalg.norm(q)) > 0.2 else None)
+            last = h1
+            for k in range(len(ahead) - 1, -1, -1):  # (near the end there is no "ahead": b's look)
+                ahead[k] = last if ahead[k] is None else ahead[k]
+                last = ahead[k]
+            w_in = ease(np.clip(u / BRIDGE_TURN_SHARE, 0, 1))
+            w_out = ease(np.clip((u - (1 - BRIDGE_TURN_SHARE)) / BRIDGE_TURN_SHARE, 0, 1))
+            hd = np.array([h0 + wi * wrap(ah - h0) for wi, ah in zip(w_in, ahead)])
+            hd = np.array([h + wo * wrap(h1 - h) for h, wo in zip(hd, w_out)])
+        else:                                  # a step and a turn: from a's look to b's
+            hd = h0 + ease(u) * wrap(h1 - h0)
+        hd = np.unwrap(hd)
+        reach = r0 + (r1 - r0) * ease(u)
+        z = l0[2] + (l1[2] - l0[2]) * ease(u)
+        tgt = np.c_[path + reach[:, None] * np.c_[np.cos(hd), np.sin(hd)], z]
+        tgt[0], tgt[-1] = l0, l1              # (exactly a's last aim and b's first: no seam)
+        turn = float(np.degrees(np.abs(np.diff(hd)).sum()))
+        dur = max(L / BRIDGE_MPS, turn / BRIDGE_DPS, BRIDGE_MIN_S)
+        return Move("bridge", path, tgt, 0.0, easing="linear",
+                    why={"travel_m": round(L, 2), "turn_deg": round(turn, 1), "dur_s": round(dur, 2)})
+
     def wall_share(self, path, tgt) -> float:
         """The share of a move's first and last views (across the frame) a wall or tall thing
         fills within NEAR_WALL_M of the lens (user 2026-11-27: the green house bedroom walk-in started
@@ -3136,7 +3220,7 @@ class RoomMoves:
             worst = max(worst, self._occ_call("cover", e, t, m.piece, OCC_NEAR_KIND.get(m.kind, OCC_NEAR), "centre"))
             if worst > MAX_OCC:                       # already out: the other poses cannot bring it back
                 break
-            if m.kind not in ("link", "detail", "exit", "walk", "backout", "through", "door_pan"):     # (they pass door frames)
+            if m.kind not in ("link", "detail", "exit", "walk", "backout", "through", "door_pan", "loop", "bridge"):     # (they pass door frames)
                 # a door frame or a wall at the frame's edge, right at the lens (user 2026-11-16, Krk:
                 # the bedroom shot ended with the door frame over a quarter of the frame)
                 edge = self._occ_call("cover", e, t, m.piece, EDGE_NEAR, "full")
@@ -3149,10 +3233,11 @@ class RoomMoves:
         if m.kind != "detail":
             # (a flight through a door: its frame sweeps past the edges as the camera goes through -
             # only what comes within THROUGH_NEAR, a frame it would scrape, blocks it)
-            r_near = BACKOUT_NEAR if m.kind in ("backout", "door_pan") else THROUGH_NEAR if m.kind == "through" else NEAR_ANY
+            r_near = (BACKOUT_NEAR if m.kind in ("backout", "door_pan")
+                      else THROUGH_NEAR if m.kind in ("through", "loop", "bridge") else NEAR_ANY)
             for k in np.linspace(0, len(e3) - 1, NEAR_ANY_POSES).astype(int):
                 near = self._occ_call("cover", e3[k], m.tgt[k], None, r_near, "full")
-                if near > (NEAR_ANY_MAX_THROUGH if m.kind == "through" else NEAR_ANY_MAX):
+                if near > (NEAR_ANY_MAX_THROUGH if m.kind in ("through", "loop", "bridge") else NEAR_ANY_MAX):
                     m.why["near_lens"] = round(near, 3)
                     return 1.0
         return worst

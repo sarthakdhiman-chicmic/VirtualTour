@@ -158,6 +158,26 @@ def _axial_reversal(a: Motion, b: Motion) -> bool:
     return big(a) and big(b) and (a.f > 0) != (b.f > 0)
 
 
+SEAM_EYE_M, SEAM_AIM_M = 0.03, 0.06     # a join this close in place and aim is no cut (one take)
+
+
+def _seamless(a, b, fps: float) -> bool:
+    """Shot a plays its whole camera path and b's starts where it ends - same place, same aim: one
+    take through the home (planner3d/plan.py _stitch), not a cut."""
+    ca, cb = a.camera, b.camera
+    if getattr(ca, "type", None) != "bezier_path" or getattr(cb, "type", None) != "bezier_path":
+        return False
+    if not ca.segments or not cb.segments:
+        return False
+    path_s = getattr(ca, "path_s", None)
+    if path_s is not None and abs(float(path_s) - float(a.duration_s)) > 1.5 / fps:
+        return False                          # (a is cut inside its path: b starts elsewhere)
+    import numpy as np
+    e0, t0 = np.asarray(ca.segments[-1].eye[-1], float), np.asarray(ca.segments[-1].target[-1], float)
+    e1, t1 = np.asarray(cb.segments[0].eye[0], float), np.asarray(cb.segments[0].target[0], float)
+    return float(np.linalg.norm(e1 - e0)) <= SEAM_EYE_M and float(np.linalg.norm(t1 - t0)) <= SEAM_AIM_M
+
+
 def report(plan) -> list[dict]:
     """One row per cut: outgoing exit and incoming entry motion, their speed ratio, the direction
     change, the beat offset, and what (if anything) breaks the limits."""
@@ -179,6 +199,8 @@ def report(plan) -> list[dict]:
                "speed_ratio": None, "turn_deg": None, "axial_reversal": False, "beat_offset_frames": None,
                "judged": b.transition_in.type == "cut" and out_m is not None and in_m is not None,
                "breaks": []}
+        if _seamless(a, b, fps):             # one take: the camera carries straight on - no cut to judge
+            row.update(judged=False, seamless=True)
         if out_m is not None and in_m is not None:
             lo, hi = sorted((out_m.speed, in_m.speed))
             row["speed_ratio"] = round(hi / lo, 2) if lo >= STILL else None
@@ -215,6 +237,7 @@ def summary(rows: list[dict]) -> dict:
     judged = [r for r in rows if r["judged"]]
     count = lambda rule: sum(rule in r["breaks"] for r in judged)   # noqa: E731
     return {"cuts": len(rows), "judged": len(judged), "within_limits": sum(not r["breaks"] for r in judged),
+            "seamless": sum(bool(r.get("seamless")) for r in rows),
             "stopped": count("stopped"), "speed_jump": count("speed_jump"), "direction_turn": count("direction_turn"),
             "forward_back": count("forward_back"), "off_beat": count("off_beat"),
             "limits": {"speed_ratio": SPEED_RATIO, "max_turn_deg": MAX_TURN_DEG, "still_pct_fw_s": STILL,

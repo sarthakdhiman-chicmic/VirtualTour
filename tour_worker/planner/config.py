@@ -46,6 +46,7 @@ class PlannerConfig(BaseModel):
     # still moves (None: no limit); not a setting
     cut_windows: list | None = None
     max_total_s: float = 90.0           # 1 min 30 s at most, music sync included (user 2026-11-20)
+    one_take_3d: bool = False           # 3D: whole takes of room loops (planner3d/take.py) - off: tight rooms cannot be circled (user 2026-11-27 chose walk-out + walk-in + first scene)
     max_over_s: float = 2.0             # ... a soft limit: a tour may run this much past it rather than lose a shot (user 2026-11-27)
     shot_min_s: float = 3.0
     shot_max_s: float = 8.0

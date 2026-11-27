@@ -143,7 +143,10 @@ def test_every_shot_keeps_the_rules(planned):
             assert pitch <= PITCH_LADDER[-1] + 0.5                                 # the horizon stays up
             assert abs(eye[2] - 1.5) < 0.03                                        # eye height (floor found to ~1 cm)
         assert s.transition_in.type in ("cut", "fade")
+    from tour_worker.render.continuity import _seamless
     for a, b in zip(plan.shots, plan.shots[1:]):                                   # no jump cuts
+        if _seamless(a, b, plan.output.fps):     # (a walk-in joined to the room's first scene: no cut)
+            continue
         (_, (e0, t0, _)), ((e1, t1, _), _) = _poses(a), _poses(b)
         u, v = np.asarray(t0) - e0, np.asarray(t1) - e1
         ang = math.degrees(math.acos(np.clip(u @ v / np.linalg.norm(u) / np.linalg.norm(v), -1, 1)))
