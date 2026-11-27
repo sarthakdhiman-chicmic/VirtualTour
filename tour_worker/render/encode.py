@@ -36,9 +36,11 @@ from tour_worker.cpus import usable_cpus
 CRF = 20
 MAXRATE = "10M"
 BUFSIZE = "20M"
-PRESET = "fast"              # x264 (client review item 22, 2026-11-26): on the A100 pod, 4K photo tours'
-                             # draw + encode 8-11% faster than medium at the same file size (the
-                             # bitrate cap sets it) and the same SSIM; medium was ~23% faster than slow
+PRESET = "veryfast"          # x264 (client review item 22): 4K tours are encode-bound (the 8K listing:
+                             # 1,598 s of the chunk encoders' time waiting on x264, 2026-11-27). On its
+                             # 4K frames, one encoder thread: fast 5.4-5.5 fps, veryfast 11.6-13.4 fps,
+                             # SSIM 0.9708 -> 0.9690 / 0.9578 -> 0.9563 (-0.07 dB PSNR), files ~20%
+                             # smaller; superfast no faster on the busy clip and 1.6x the size
 LEVEL = "4.1"
 GOP_S = 2                # keyframe at least every GOP_S seconds
 AUDIO_BITRATE = "128k"

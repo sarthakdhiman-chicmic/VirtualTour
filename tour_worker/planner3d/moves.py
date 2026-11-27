@@ -123,6 +123,8 @@ PACE_MIN_KEEP = 0.25          # a move keeps at least this share of its path whe
 PACE_SLOW_RATIO = 1.2         # slower than pace / this: it holds the next cut down ...
 PACE_SLOW_W = 4.0             # ... and loses this score at no speed at all (1.5 let slow pans win, 2026-11-27)
 ON_PIECE_W = 0.3              # a room's first shot walking / arcing on its bed or sofa
+PACE_SEEN_MARGIN = 1.05       # a paced move keeps this much over the 'seen to move' floor ...
+PACE_SEEN_KINDS = ("door_pan",)   # ... these moves (a pan held in a doorway: trimmed under it, nothing passed)
 PACE_PEAK_SHARE = 0.85        # a paced move's peak turn / travel under this share of the caps
 PACE_CUT_RATIO = 1.2          # a move enters within this of the previous shot's exit speed (the band's PLAN_RATIO)
 DOOR_LEAD = 0.6               # m before a room's door a walk in through it always starts (paced or shortened)
@@ -189,6 +191,8 @@ THROUGH_TURN_DPS = 3.0        # deg/s its turn onto the room may reach
 # the flight through a door is the room's opening shot - one move: under the doorway, on into the
 # room and onto what it holds, never cut to another angle of the room just past the door (user
 # 2026-11-27); it walks this far past the door (m) and takes the room's opening time
+NEAR_WALL_M = 1.0             # m: a wall this near the lens fills its part of the frame (wall_share)
+NEAR_WALL_W = 2.0             # score a through flight loses with its first and last views all wall
 THROUGH_AFTER_LEAD = (0.9, 2.2)     # (1.2-3.5 m at the 3D pace: 9-14 s walk-ins took three rooms' coverage, 2026-11-27)
 WALK_LEN = (0.8, 4.5)         # m a walk between two narrow doors travels (longer: no matched chain)
 THROUGH_NEAR = 0.45           # m: a flight through a door may pass its frame no closer than this
@@ -241,6 +245,8 @@ BACKOUT_NEAR = 0.35            # m: its near-lens radius (a bathroom's side wall
 DOOR_PAN_IN = (0.3, 0.6)      # m in from the door it stands
 DOOR_PAN_SWEEP = (15.0, 40.0)  # deg it pans, within the turn budget
 DOOR_PAN_ROOMS = ("bath", "powder", "ensuite", "closet", "laundry", "pantry")   # the rooms looked into from their door
+DOOR_PAN_CLUSTER_M = 1.5     # fittings this near the one nearest the door are what it ends on
+DOOR_PAN_SIGHT_TOL = 0.3     # m short of them the floor plan's clear line may stop
 DOOR_PAN_FRONT = 0.6          # m in front at both ends (it stands still: a back-out's 0.8 m end lost the pan one way)
 # what a small room is about: its pan ends on these (the green house bathroom's first door pan swept the
 # middle of its floor - a shower screen and a wall, user 2026-11-27)
@@ -2252,6 +2258,8 @@ class RoomMoves:
                     # the previous shot's pace kept (item 4), then a deep view ahead, then the room framed
                     score = 1.0 - abs(L / dur - pace) / pace + 0.1 * min(
                         sp.view_depth(path[-1], math.atan2(*(tgt[-1][:2] - path[-1])[::-1]), HFOV), 6.0) + 1.0 * core
+                    if through:                      # its first and last views not walled up beside the lens
+                        score -= NEAR_WALL_W * self.wall_share(path, tgt)
                     if through:                    # the room's opening shot: never looking up (AIM_Z_MAX)
                         tgt = tgt.copy()
                         tgt[:, 2] = np.minimum(tgt[:, 2], AIM_Z_MAX)
@@ -2513,15 +2521,38 @@ class RoomMoves:
         w = u * u * (3 - 2 * u)
         sweep = math.radians(float(np.clip(0.6 * self.turn_budget * dur, *DOOR_PAN_SWEEP)))
         out = []
-        fit = [np.asarray(o["centre"][:2], float) for o in sp.room_objects(room, DOOR_PAN_ON)]
-        for d_in in DOOR_PAN_IN:
-            at = sp.snap(door + d_in * into, BACKOUT_CLEAR, 0.3)
+        # what it ends on: the fittings nearest its door (a room's floor can run on past them - the
+        # green house bathroom's reached a counter 4 m off in the hall, and the pan aimed between
+        # the two, at a shower screen, 2026-11-27)
+        objs = sp.room_objects(room, DOOR_PAN_ON)
+        fit = [np.asarray(o["centre"][:2], float) for o in objs]
+        # (a fitting is solid: a clear line reaches its near face, half its footprint short of its centre)
+        size = [0.5 * float(np.linalg.norm(np.asarray(o["max"][:2], float) - np.asarray(o["min"][:2], float)))
+                if o.get("min") is not None and o.get("max") is not None else 0.3 for o in objs]
+        on, near = None, []
+        if fit:
+            f0 = min(fit, key=lambda f: float(np.linalg.norm(f - door)))
+            near = [(f, r) for f, r in zip(fit, size) if float(np.linalg.norm(f - f0)) <= DOOR_PAN_CLUSTER_M]
+            on = np.mean([f for f, _ in near], axis=0)
+        # where it stands: just in from the door, toward the room or toward its fittings - only
+        # where the floor plan has a clear line to them (the deeper point stood behind the screen)
+        spots = [door + d_in * into for d_in in DOOR_PAN_IN]
+        if on is not None and float(np.linalg.norm(on - door)) > 0.6:
+            toward = (on - door) / float(np.linalg.norm(on - door))
+            spots += [door + d_in * toward for d_in in DOOR_PAN_IN]
+        for d_in, spot in zip(list(DOOR_PAN_IN) * 2, spots):
+            at = sp.snap(spot, BACKOUT_CLEAR, 0.3)
             if at is None or sp.room_at(at) != room:
                 continue
+            if near:                                  # at least one of them in clear sight
+                seen_ = [float(sp.rays(at, np.array([math.atan2(f[1] - at[1], f[0] - at[0])]))[0])
+                         >= float(np.linalg.norm(f - at)) - r - DOOR_PAN_SIGHT_TOL for f, r in near]
+                if not any(seen_):
+                    continue
             h_mid = math.atan2(*(mid - at)[::-1])
             # onto its fittings when it has any: the pan ends on them, from either side; else across
             # the middle of the room
-            h_on = math.atan2(*(np.mean(fit, axis=0) - at)[::-1]) if fit else None
+            h_on = math.atan2(*(on - at)[::-1]) if on is not None else None
             for sgn in (1.0, -1.0):                  # across the room, either way
                 heads = (h_on + sgn * sweep * (w - 1.0)) if h_on is not None else (h_mid + sgn * sweep * (w - 0.5))
                 eye = np.repeat(np.asarray(at, float)[None], SAMPLES, 0)
@@ -2918,12 +2949,20 @@ class RoomMoves:
             keep = min(keep, prev * PACE_CUT_RATIO / s0)
         # ... and its peak turn / travel well under the caps (the fitted curve runs a little over the
         # samples: a walkway planned under 9 deg/s played 10.1, 2026-11-27)
-        turn_pk, move_pk = trial_speeds(m.eye, m.tgt, dur, m.zs, "linear")
+        turn_pk, move_pk = self.peaks(m, dur)
         if turn_pk * keep > PACE_PEAK_SHARE * MAX_TURN_DPS:
             keep = min(keep, PACE_PEAK_SHARE * MAX_TURN_DPS / turn_pk)
         if move_pk * keep > PACE_PEAK_SHARE * MAX_MOVE_MPS:
             keep = min(keep, PACE_PEAK_SHARE * MAX_MOVE_MPS / move_pk)
         if keep < 0.98:
+            # never below being seen to move (moves_enough: travel and turn add up) - the pace and
+            # that floor are one number (2.5 deg/s), and a slow shot before pulled pans under it
+            travel = float(np.linalg.norm(np.diff(m.eye3, axis=0), axis=1).sum())
+            d0, d1 = _dir(m.eye[0], m.tgt[0]), _dir(m.eye[-1], m.tgt[-1])
+            turn = math.degrees(math.acos(max(-1.0, min(1.0, float(d0 @ d1)))))
+            seen = travel / (MIN_TRAVEL_PS * dur) + turn / (MIN_TURN_PS * dur)
+            if seen > 1e-6 and m.kind in PACE_SEEN_KINDS:
+                least = max(least, min(1.0, PACE_SEEN_MARGIN / seen))
             keep = max(least, keep)
             trim_move_start(m, keep)
             m.why["paced_keep"] = round(keep, 2)
@@ -2934,6 +2973,36 @@ class RoomMoves:
             m.score -= PACE_SLOW_W * (1.0 - rep / target)
         if prev and s0 < prev / PACE_CUT_RATIO:      # slower in than the cut allows: the band would slow
             m.score -= PACE_SLOW_W * (1.0 - s0 * PACE_CUT_RATIO / prev)    # the shot before it
+
+    def peaks(self, m: Move, dur: float) -> tuple[float, float]:
+        """(peak turn deg/s, peak travel m/s) of a move as the renderer plays it (steady along its
+        arc), from its samples - over 3 samples, so one kink does not read as a peak. (trial_speeds
+        fits the curve first: on every candidate that was 38 s of a green-house plan, 2026-11-27.)"""
+        from tour_worker.scene.camera import TARGET_WEIGHT
+        eye3, tgt = m.eye3, np.asarray(m.tgt, float)
+        de = np.linalg.norm(np.diff(eye3, axis=0), axis=1)
+        step = de + TARGET_WEIGHT * np.linalg.norm(np.diff(tgt, axis=0), axis=1)
+        total = float(step.sum())
+        if total < 1e-9 or len(step) < 3:
+            return 0.0, 0.0
+        d = tgt - eye3
+        d /= np.maximum(np.linalg.norm(d, axis=1, keepdims=True), 1e-9)
+        ang = np.degrees(np.arccos(np.clip(np.sum(d[1:] * d[:-1], axis=1), -1.0, 1.0)))
+        k = np.ones(3)
+        dt = np.convolve(dur * step / total, k, "valid")
+        return (float(np.max(np.convolve(ang, k, "valid") / np.maximum(dt, 1e-6))),
+                float(np.max(np.convolve(de, k, "valid") / np.maximum(dt, 1e-6))))
+
+    def wall_share(self, path, tgt) -> float:
+        """The share of a move's first and last views (across the frame) a wall or tall thing
+        fills within NEAR_WALL_M of the lens (user 2026-11-27: the green house bedroom walk-in started
+        on a plain wall and kept one over the right half of the frame all the way in)."""
+        half = math.radians(HFOV) / 2
+        out = []
+        for e, t in ((path[0], tgt[0]), (path[-1], tgt[-1])):
+            h = math.atan2(t[1] - e[1], t[0] - e[0])
+            out.append(float(np.mean(self.space.rays(e, h + np.linspace(-half, half, 11)) < NEAR_WALL_M)))
+        return float(np.mean(out))
 
     def pace_ends(self, m: Move, dur: float) -> tuple[float, float]:
         """A move's on-screen speed (%fw/s) entering and leaving its shot - the speed band's measure
