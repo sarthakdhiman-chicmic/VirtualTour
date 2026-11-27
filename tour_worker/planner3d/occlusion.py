@@ -85,26 +85,24 @@ class Occlusion:
         self.backend = "gpu" if self._gpu is not None else "cpu"
         L = space.local
         self._keep = np.nonzero((L[:, 2] > 0.08) & (L[:, 2] < space.room_height - CEILING_GAP))[0]
-        self._xy = L[self._keep, :2]
-        self._area: tuple | None = None
+        self._tree = None              # built on the first check (Occlusion.cover)
 
-    def focus(self, centre, radius: float) -> None:
-        """Work on the splats within radius (m, on the floor plan) of centre - one room's worth."""
-        sel = np.nonzero(np.linalg.norm(self._xy - np.asarray(centre, np.float32)[:2], axis=1) < radius)[0]
-        self._area = (np.asarray(centre, np.float32)[:2], radius, self._keep[sel])
-
-    def _candidates(self, eye, near):
-        if self._area is not None:
-            c, r, idx = self._area
-            if np.linalg.norm(np.asarray(eye)[:2] - c) + near <= r:
-                return idx
-        return self._keep
+    def _near(self, eye, near: float) -> np.ndarray:
+        """The kept splats within `near` m of eye (planner coords), by a KD-tree over them: the
+        distance to every splat of a dense scan on each check cost the Home Scan's planning ~220 s
+        of CPU for ~1,200 checks (2026-11-27 profile; the renders themselves are milliseconds).
+        Same splats as the full scan; the exact d < near test is still applied by the caller."""
+        if self._tree is None:
+            from scipy.spatial import cKDTree
+            self._tree = cKDTree(np.asarray(self.space.local[self._keep], np.float32))
+        hit = self._tree.query_ball_point(np.asarray(eye, np.float64)[:3], near * 1.0001, workers=-1)
+        return self._keep[np.sort(np.asarray(hit, np.int64))]
 
     def cover(self, eye, target, hfov: float, piece=None, near: float = 2.0, region: str = "centre") -> float:
         """eye, target: planner points (z above the floor). region: "centre" (the subject's part of
         the frame) or "full" (a door frame at the edge counts too)."""
         from tour_worker.render.splat_cpu import CpuSplatRenderer
-        idx = self._candidates(eye, near)
+        idx = self._near(eye, near)
         L = self.space.local[idx]
         d = np.linalg.norm(L - np.asarray(eye, np.float32), axis=1)
         sel = d < near

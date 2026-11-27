@@ -889,12 +889,6 @@ class RoomMoves:
             else:                                                     # pulling back, the view widening
                 f0, f1 = m.why["front_m"]
                 m.score += WIDE_W * float(np.clip(f1 - f0, -1.0, 1.5))
-        if self.occ is not None:                      # occlusion renders work on this room's splats
-            mask = sp.space_mask(room, RMIN_LADDER[-1])
-            ys, xs = np.nonzero(mask)
-            cells = np.c_[sp.lo[0] + (xs + .5) * 0.05, sp.lo[1] + (ys + .5) * 0.05]
-            c = cells.mean(0)
-            self.occ.focus(c, float(np.linalg.norm(cells - c, axis=1).max()) + OCC_NEAR + 0.5)
         # one budget of rendered checks for the shot, over all its tiers: a weak scan's room has
         # dozens of tiers (preference x clearance x fallbacks), each once allowed OCC_CHECK_KIND a
         # kind - Home Scan planning went from 6 to 30+ minutes
@@ -1504,10 +1498,6 @@ class RoomMoves:
                     "hall_share": round(hall_share, 2), "turn_dps": round(turn, 1), "move_mps": round(move, 2)}))
         if not cands:
             return None, [f"link_no_move:{hall}"]
-        if self.occ is not None:                      # occlusion renders around where the link stands
-            pts_ = np.concatenate([m.eye for m in cands] + [m.tgt[-1:, :2] for m in cands])
-            c = pts_.mean(0)
-            self.occ.focus(c, float(np.linalg.norm(pts_ - c, axis=1).max()) + OCC_NEAR + 0.5)
         cands = self.keep_direction(cands)
         best, least = self._check(hall, cands, dur)
         if best is None:
@@ -2028,10 +2018,6 @@ class RoomMoves:
         if not cands:
             return None, [f"exit_no_move:{room}"]
         cands = self.keep_direction(cands)
-        if self.occ is not None:
-            pts_ = np.concatenate([m.eye for m in cands])
-            c = pts_.mean(0)
-            self.occ.focus(c, float(np.linalg.norm(pts_ - c, axis=1).max()) + OCC_NEAR + EXIT_AHEAD)
         best, least = self._check(room, cands, dur)
         if best is None:
             # why (2026-11-17: every exit "blocked", no reason): too fast, clutter at the lens, the
@@ -2202,10 +2188,6 @@ class RoomMoves:
             return None, [f"{kind}_no_move:{room}:" + "/".join(f"{k}{v}" for k, v in st.items() if v)]
         if geometry_only:
             return max(cands, key=lambda m: m.score), []
-        if self.occ is not None:
-            pts_ = np.concatenate([m.eye for m in cands])
-            c = pts_.mean(0)
-            self.occ.focus(c, float(np.linalg.norm(pts_ - c, axis=1).max()) + OCC_NEAR + EXIT_AHEAD)
         # _check's speed test takes one length: the longest leg's (each passed its own above); the
         # flight's own render budget
         self._budget = {"kinds": {}, "left": FLIGHT_CHECKS}
