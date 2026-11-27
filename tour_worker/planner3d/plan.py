@@ -27,7 +27,8 @@ from tour_worker.planner.captions import apply_captions
 from tour_worker.planner.config import PlannerConfig
 from tour_worker.planner.schemas import (BezierSegment, Branding, CameraParams, OutputParams, PlanProvenance,
                                          RoomLabels, Scene, Shot, ShotPlan, TransitionParams, Voiceover)
-from tour_worker.planner3d.moves import HFOV, MAX_MOVE_MPS, MAX_TURN_DPS, Move, RoomMoves, fit_pair, move_motion, speeds_of
+from tour_worker.planner3d.moves import (HFOV, MAX_MOVE_MPS, MAX_TURN_DPS, Move, RoomMoves, ends_backward, fit_pair,
+                                         move_motion, speeds_of)
 from tour_worker.planner3d.occlusion import Occlusion
 from tour_worker.planner3d.space import Space
 from tour_worker.scoring.config import ScoringConfig
@@ -357,6 +358,15 @@ def plan_tour_3d(model, scene: dict, rooms: list[dict], listing_id: str, cfg: Pl
         mover._last_exit_pct = (mover.pace_ends(b[1], float(b[0].final_duration))[1]
                                 if b is not None and getattr(mover, "pace_target", None) else None)
 
+    def _own_scene_needed(ms, mv) -> bool:
+        """Dropping mv would leave its room shown only by walking into it (user 2026-11-27: "the
+        bedroom needs another shot, it doesn't even get shown at all") - it stays."""
+        if mv is None:
+            return False
+        room = next((sel.room_key for sel, m in ms if m is mv), None)
+        rest = [m for sel, m in ms if sel.room_key == room and m is not mv]
+        return bool(rest) and all(m.kind in ("through", "bridge", "exit", "walk") for m in rest)
+
     def _cover_room(room: str, i: int, prev):
         """Further wide shots of `room` while its walls are not covered (COVER_ENOUGH), at most
         MAX_WIDE in all, each showing walls the earlier ones did not (RoomMoves.best covered=)."""
@@ -517,6 +527,30 @@ def plan_tour_3d(model, scene: dict, rooms: list[dict], listing_id: str, cfg: Pl
             return v
         return id(nxt) in enters
 
+    def _last_toward(flight) -> None:
+        """The room's last shot against the flight on as planned (its dry run started on another
+        line - green house: the primary bedroom's pan swept left into a walk drifting right): when
+        it breaks that cut and reads the same both ways (REVERSIBLE), it is played in reverse - if
+        that passes the render checks and the cut into it."""
+        import dataclasses
+        from tour_worker.planner3d.moves import MAX_OCC, REVERSIBLE, VOID_MAX, breaks_into
+        sel_l, last = moves[-1]
+        if last.kind not in REVERSIBLE or not breaks_into(last, move_motion(flight, end=False)):
+            return
+        rev = dataclasses.replace(last, eye=last.eye[::-1].copy(), tgt=last.tgt[::-1].copy(),
+                                  z=None if last.z is None else last.z[::-1].copy(), occ=None,
+                                  why={**last.why, "reversed_into_next": True})
+        if breaks_into(rev, move_motion(flight, end=False)):
+            return
+        if len(moves) > 1 and moves[-2][0].room_key == sel_l.room_key and breaks_into(moves[-2][1], move_motion(rev, end=False)):
+            return
+        if mover.occ is not None and (mover._cover(rev) > MAX_OCC or mover._void(rev) > VOID_MAX):
+            return
+        moves[-1] = (sel_l, rev)
+        lst = poses.get(sel_l.room_key, [])
+        if lst:
+            lst[-1] = (rev.first, rev.last)
+
     def _fly_on(room: str, i: int, prev, dry: bool = False):
         """The room change after `room` (client review item 6; user 2026-11-26, option c): along the
         walking route, cut only at narrow doors (Space doorways under THROUGH_MIN_W, not open plan),
@@ -532,6 +566,8 @@ def plan_tour_3d(model, scene: dict, rooms: list[dict], listing_id: str, cfg: Pl
         nxt = selected[i + 1] if i + 1 < len(selected) else None
         if nxt is None or id(nxt) in links or nxt.kind == "detail":
             return prev
+        if not dry and moves and moves[-1][1].kind == "backout" and ends_backward(moves[-1][1]):
+            return prev          # (backed out of: a walk on would reverse at the cut - the next room by a cut)
         dst = nxt.room_key
         lead_s = 0.0          # (the room's first scene follows the walk-in with its own time; was the opening's)
         r = space.route(room, dst)
@@ -642,6 +678,8 @@ def plan_tour_3d(model, scene: dict, rooms: list[dict], listing_id: str, cfg: Pl
             p_ = mv.last
         if dry:
             return chain[0][1] if chain else None
+        if chain and moves and moves[-1][0].room_key == room:
+            _last_toward(chain[0][1])
         if not chain:
             log["legs"] = []
             log["crossed"] = "as_before"
@@ -736,9 +774,12 @@ def plan_tour_3d(model, scene: dict, rooms: list[dict], listing_id: str, cfg: Pl
                 lead, lw = mover.best(sel.room_key, sel.final_duration, earlier=earlier, prev=None, piece_rank=0,
                                       kind=sel.kind, next_room=nxt, final=sel.room_key == last_room,
                                       then_forward=_leaves_flying(i), last_shot=False,
-                                      join_from=(mv.eye[-1], mv.tgt[-1]))     # (prev None: no jump-cut test against it)
+                                      join_from=(mv.eye[-1], mv.tgt[-1], mover.walk_dir(mv)))   # (prev None: no jump-cut test)
                 br = mover.bridge(mv, lead) if lead is not None else None
-                if br is not None and br.why["dur_s"] <= JOIN_MAX_S and br.why["turn_deg"] <= JOIN_MAX_TURN_DEG:
+                # carried on only forward: never back along its way, rotating and on again (user 2026-11-27)
+                if (br is not None and br.why["dur_s"] <= JOIN_MAX_S and br.why["turn_deg"] <= JOIN_MAX_TURN_DEG
+                        and mover.ahead_of((mv.eye[-1], mv.tgt[-1], mover.walk_dir(mv)), lead)
+                        and mover.joins_forward(mv, br)):
                     mv.why["seamless_out"] = True
                     br.why.update(seamless_in=True, seamless_out=True)
                     lead.why["seamless_in"] = True
@@ -890,6 +931,8 @@ def plan_tour_3d(model, scene: dict, rooms: list[dict], listing_id: str, cfg: Pl
     for _, pair in sorted(extras, key=lambda e: e[0]):
         if sum(s_.final_duration - handle for s_, _ in moves) <= cap_drop:
             break
+        if _own_scene_needed(moves, pair[1]):
+            continue                                     # (the room's only scene besides its walk-in)
         moves = [m for m in moves if m[1] is not pair[1]]   # (the same move: the tuples differ)
         warnings.append(f"coverage_shot_dropped_for_length:{pair[0].room_key}")
     for chain in exits[::-1]:                     # then the flights on, from the tour's end, whole
@@ -1200,7 +1243,8 @@ def plan_tour_3d(model, scene: dict, rooms: list[dict], listing_id: str, cfg: Pl
         for c in bad:
             for sid in (c["from"], c["to"]):
                 n = at.get(sid)
-                if n is not None and stitched[n][1].why.get("coverage_shot"):
+                if (n is not None and stitched[n][1].why.get("coverage_shot")
+                        and not _own_scene_needed(moves, next((m[1] for m in moves if id(m[1]) == stitched[n][1].why.get("base_id")), None))):
                     votes[n] = votes.get(n, 0) + 1
         if not votes:
             break

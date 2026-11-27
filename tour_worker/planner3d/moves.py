@@ -195,6 +195,8 @@ THROUGH_TURN_DPS = 3.0        # deg/s its turn onto the room may reach
 BRIDGE_MPS = 0.22             # m/s it walks (the 3D pace: 3.6 %fw/s at the 3 m reference depth)
 BRIDGE_DPS = 6.0              # deg/s it turns at most (a walk turning onto the next move)
 BRIDGE_CLEAR = 0.15           # m: its walking route keeps this off the walls (moves end near them)
+JOIN_BACK_M = 0.1             # m a join may fall back along the walk-in's way (else it walks back)
+JOIN_BACK_SHARE = 0.3         # a first scene setting off this much backward does not carry a walk-in on
 JOIN_EST_MAX_S = 6.0          # s: a first scene this short a bridge from the walk-in is tried first
 BRIDGE_MIN_S = 3.0            # s at least (no piece of the tour under 3 s, client item 9)
 BRIDGE_MAX_M = 6.0            # m: a longer walk between two moves is a cut (a transition) instead
@@ -254,7 +256,8 @@ BACKOUT_NEAR = 0.35            # m: its near-lens radius (a bathroom's side wall
 # cut - a pan leaves the room sideways, so the walk on follows)
 DOOR_PAN_IN = (0.3, 0.6)      # m in from the door it stands
 DOOR_PAN_SWEEP = (15.0, 40.0)  # deg it pans, within the turn budget
-DOOR_PAN_ROOMS = ("bath", "powder", "ensuite", "closet", "laundry", "pantry")   # the rooms looked into from their door
+DOOR_PAN_ROOMS = ()           # the rooms looked into from their door: none (user 2026-11-27: the bathroom's
+                              # door pan stared at its glass screen - "the walk back we had was better")
 DOOR_PAN_CLUSTER_M = 1.5     # fittings this near the one nearest the door are what it ends on
 DOOR_PAN_SIGHT_TOL = 0.3     # m short of them the floor plan's clear line may stop
 DOOR_PAN_FRONT = 0.6          # m in front at both ends (it stands still: a back-out's 0.8 m end lost the pan one way)
@@ -380,6 +383,9 @@ def breaks_into(m, nxt) -> bool:
     continuity units - a dry run of the flight on, user 2026-11-27: the primary bedroom's last pan
     swept left into a walk heading forward-right, a 157 deg turn), or True - a move forward of
     unknown heading (a walk in from the next room's door): m ends moving backward."""
+    if m.kind == "backout":
+        return False          # (a small room is backed out of - user 2026-11-27; the next room is then
+                              # entered by a cut, not walked into: plan._fly_on)
     if nxt is True:
         return ends_backward(m)
     from tour_worker.render.continuity import MAX_TURN_DEG, _axial_reversal, _turn_deg
@@ -953,7 +959,8 @@ class RoomMoves:
                 # the room's first scene carried on from the walk-in (join_from: its last pose):
                 # the moves a short bridge reaches first (user 2026-11-27: walk-out, walk-in and the
                 # first scene one move; chosen on their own they started 140 deg round from it)
-                near_ = [m for t in tiers for m in t if self.join_s(join_from, m) <= JOIN_EST_MAX_S]
+                near_ = [m for t in tiers for m in t if self.join_s(join_from, m) <= JOIN_EST_MAX_S
+                         and self.ahead_of(join_from, m)]
                 if near_:
                     n_ids = {id(m) for m in near_}
                     tiers = [near_] + [[m for m in t if id(m) not in n_ids] for t in tiers]
@@ -3010,6 +3017,30 @@ class RoomMoves:
         dt = np.convolve(dur * step / total, k, "valid")
         return (float(np.max(np.convolve(ang, k, "valid") / np.maximum(dt, 1e-6))),
                 float(np.max(np.convolve(de, k, "valid") / np.maximum(dt, 1e-6))))
+
+    def ahead_of(self, pose, m: Move) -> bool:
+        """m carries a walk-in on forward (pose: its (eye, aim, walking direction)): m starts ahead of
+        where it ends (not behind it by more than JOIN_BACK_M) and does not set off backward (user
+        2026-11-27: "the effect where the camera goes back, rotates and goes ahead looks horrible")."""
+        e0, d = np.asarray(pose[0], float)[:2], np.asarray(pose[2], float)[:2]
+        if float(np.dot(np.asarray(m.eye[0], float) - e0, d)) < -JOIN_BACK_M:
+            return False
+        mo = move_motion(m, end=False)
+        sp_ = math.sqrt(mo.x ** 2 + mo.y ** 2 + mo.f ** 2)
+        return not (sp_ > 1e-9 and mo.f < -JOIN_BACK_SHARE * sp_)
+
+    def joins_forward(self, walk: Move, br: Move) -> bool:
+        """The bridge from a walk-in never walks back along the way it came (its eye's progress along
+        the walk-in's last direction never falls by more than JOIN_BACK_M)."""
+        d = self.walk_dir(walk)
+        proj = (np.asarray(br.eye, float) - np.asarray(br.eye[0], float)) @ d
+        return float(np.min(proj - np.maximum.accumulate(proj))) >= -JOIN_BACK_M
+
+    def walk_dir(self, walk: Move) -> np.ndarray:
+        v = np.asarray(walk.eye[-1], float) - np.asarray(walk.eye[max(0, len(walk.eye) - 6)], float)
+        if float(np.linalg.norm(v)) < 1e-6:
+            v = np.asarray(walk.tgt[-1][:2], float) - np.asarray(walk.eye[-1], float)
+        return v / max(float(np.linalg.norm(v)), 1e-9)
 
     def join_s(self, pose, m: Move) -> float:
         """The time (s) a bridge (RoomMoves.bridge) from pose (eye, aim) to m's first pose would
