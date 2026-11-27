@@ -133,7 +133,9 @@ def test_every_shot_keeps_the_rules(planned):
         cam = s.camera
         assert cam.type == "bezier_path" and cam.hfov_deg == [HFOV, HFOV]       # no zoom
         assert cam.time_warp is None and cam.punches is None                    # no ramps or pulses
-        turn, move = speeds_of([x.model_dump() for x in cam.segments], s.duration_s)
+        # as it plays: its easing (continuous cuts: steady between the tour's ends) over its path_s
+        turn, move = speeds_of([x.model_dump() for x in cam.segments], s.duration_s,
+                               getattr(cam.easing, "value", cam.easing), path_s=cam.path_s)
         assert turn <= MAX_TURN_DPS + 0.05 and move <= MAX_MOVE_MPS + 0.005
         for eye, tgt, _ in _poses(s):
             d = np.asarray(tgt) - np.asarray(eye)

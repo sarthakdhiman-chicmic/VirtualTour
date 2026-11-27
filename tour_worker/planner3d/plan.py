@@ -26,7 +26,7 @@ from tour_worker.planner.captions import apply_captions
 from tour_worker.planner.config import PlannerConfig
 from tour_worker.planner.schemas import (BezierSegment, Branding, CameraParams, OutputParams, PlanProvenance,
                                          RoomLabels, Scene, Shot, ShotPlan, TransitionParams, Voiceover)
-from tour_worker.planner3d.moves import HFOV, MAX_MOVE_MPS, MAX_TURN_DPS, RoomMoves, fit_pair, speeds_of
+from tour_worker.planner3d.moves import HFOV, MAX_MOVE_MPS, MAX_TURN_DPS, Move, RoomMoves, fit_pair, move_motion, speeds_of
 from tour_worker.planner3d.occlusion import Occlusion
 from tour_worker.planner3d.space import Space
 from tour_worker.scoring.config import ScoringConfig
@@ -43,6 +43,7 @@ LOOK_BACK = {"balcony", "patio", "outdoor_patio", "terrace", "deck", "porch", "g
 MAX_WIDE = 3                  # wide shots a room at most (coverage: user 2026-11-16)
 PLAN_BUDGET_S = 240.0         # s of planning before each shot settles for its best within LATE_CHECKS renders
 SYNC_REACH = 0.85            # with music: shots planned at this share of their lengths (the sync lengthens)
+DOOR_LEAD = 0.6               # m before a room's door a walk in through it always starts
 SYNC_HEADROOM = 0.88          # the cap is met before the sync with this share of it
 COVER_ENOUGH = 0.85           # a room whose walls are this covered gets no further shot
 MAX_DETAILS = 0                # 3D close-ups off (user 2026-11-16, Home Scan: a painting rendered as a black
@@ -82,7 +83,7 @@ def _door_shares(moves, space) -> dict[int, tuple[float, float]]:
         if not k or s_[-1] < 1e-6:
             continue
         a = float(max(0.0, s_[k] - DOOR_LEAD) / s_[-1])
-        out[n] = (a, 1.0 - a)
+        out[n] = (a, 0.0)
     return out
 
 
@@ -323,6 +324,9 @@ def plan_tour_3d(model, scene: dict, rooms: list[dict], listing_id: str, cfg: Pl
     mover = RoomMoves(space, Occlusion(model, space) if check_occlusion else None)
     mover.deadline = time.perf_counter() + PLAN_BUDGET_S      # past it: each shot's best within a few checks
     mover.continuous = continuous
+    if continuous and getattr(c3, "speed_band", False):    # every candidate planned at the 3D pace
+        from tour_worker.planner.speed_band import target_speed_3d
+        mover.pace_target = target_speed_3d(c3.pacing)
     mover.tour_shots = len(selected)               # the moving-in cap: a third of the tour's shots
     last_room = selected[-1].room_key if selected else None
     moves, plan_rows, prev = [], [], None
@@ -403,6 +407,39 @@ def plan_tour_3d(model, scene: dict, rooms: list[dict], listing_id: str, cfg: Pl
 
     can_fly: dict = {}
 
+    def _last_into_next(sel, i: int, prev, earlier):
+        """A room filmed by its opening shot alone (no coverage shot followed it): that shot is the
+        room's last, so it is chosen again - when it would break the cut into the next room's move
+        (breaks_into) - by the rule a room's last shot keeps (user 2026-11-27: the green house
+        bathroom backed out into the bedroom's walk-in). The first choice stays if nothing passes."""
+        from tour_worker.planner3d.moves import breaks_into
+        nxt_in = _leaves_flying(i)
+        if not nxt_in or not moves or moves[-1][0] is not sel or not breaks_into(moves[-1][1], nxt_in):
+            return prev
+        old = moves[-1][1]
+        before = moves[-2][1] if len(moves) > 1 else None
+        hist = mover.__dict__.get("_history", [])
+        if hist:
+            hist.pop()                                 # (the first choice, chosen again)
+        mover._last_exit = move_motion(before, end=True) if before is not None else None
+        mover._last_exit_pct = (mover.pace_ends(before, float(before.why.get("dur_s") or moves[-2][0].final_duration))[1]
+                                if before is not None and getattr(mover, "pace_target", None) else None)
+        earlier_ = [p for p in earlier if p[0] is not old.first[0]]
+        mv, _ = mover.best(sel.room_key, sel.final_duration, earlier=earlier_,
+                           prev=before.last if before is not None else None, piece_rank=0, kind=sel.kind,
+                           enter_route=enters.get(id(sel)), final=sel.room_key == last_room,
+                           then_forward=nxt_in, last_shot=True)
+        if mv is None or breaks_into(mv, nxt_in):
+            mover.record(old, sel.final_duration)       # (as it was)
+            return prev
+        mv.why["rechosen_into_next"] = True
+        moves[-1] = (sel, mv)
+        lst = poses.get(sel.room_key, [])
+        if lst:
+            lst[-1] = (mv.first, mv.last)
+        covered[sel.room_key] = mover.walls_seen(sel.room_key, mv)
+        return mv.last
+
     def _hall_walk(hall: str, route, prev):
         """A walk along the hallway's stretch of the walking route: from just inside it (past the
         door the tour came through) to EXIT_STOP short of where it leaves for the next room."""
@@ -424,18 +461,22 @@ def plan_tour_3d(model, scene: dict, rooms: list[dict], listing_id: str, cfg: Pl
                             (max(s_in + 1.0, s_out - EXIT_STOP - 0.6), max(s_in + 1.2, s_out - EXIT_STOP + 0.4)),
                             pace, handle, prev, earlier_, end_room=hall, look_max_s=s_out + 0.5)
 
-    def _leaves_flying(i: int) -> bool:
-        """selected[i] is its room's last planned shot and a move forward follows it: a flight on,
-        or the next room's walk in from its door (user 2026-11-27, green house: the bathroom backed
-        out, then the bedroom was walked into - a reversal at the cut)."""
+    def _leaves_flying(i: int):
+        """What follows selected[i], its room's last planned shot, when that is a move on: the flight
+        on's start motion (a dry run - its last shot is chosen to cut into it, user 2026-11-27), True
+        for the next room's walk in from its door (forward, heading unknown), else False."""
         nxt = selected[i + 1] if i + 1 < len(selected) else None
         if not (nxt is not None and nxt.room_key != selected[i].room_key and id(nxt) not in links
                 and nxt.kind != "detail" and id(selected[i]) not in links):
             return False
         key = (selected[i].room_key, nxt.room_key)
         if key not in can_fly:                     # a dry run of the flight (geometry only, no renders)
-            can_fly[key] = bool(_fly_on(selected[i].room_key, i, None, dry=True))
-        return can_fly[key] or id(nxt) in enters
+            mv_ = _fly_on(selected[i].room_key, i, None, dry=True)
+            can_fly[key] = move_motion(mv_, end=False) if isinstance(mv_, Move) else bool(mv_)
+        v = can_fly[key]
+        if v is not None and v is not False:
+            return v
+        return id(nxt) in enters
 
     def _fly_on(room: str, i: int, prev, dry: bool = False):
         """The room change after `room` (client review item 6; user 2026-11-26, option c): along the
@@ -506,7 +547,7 @@ def plan_tour_3d(model, scene: dict, rooms: list[dict], listing_id: str, cfg: Pl
                                      look_fixed_s=entry["s"] + THROUGH_AFTER_LEAD[1] + 1.0, min_s=lead_s)
             if mv is not None:
                 if dry:
-                    return True
+                    return mv
                 dur = round(mv.why["dur_s"] + handle, 2)
                 sel = dataclasses.replace(nxt, final_duration=dur, raw_duration=dur)     # the room's opening shot
                 chain = [(sel, mv)]
@@ -561,7 +602,7 @@ def plan_tour_3d(model, scene: dict, rooms: list[dict], listing_id: str, cfg: Pl
             log["legs"].append({"kind": kind, "room": rk, "travel_m": mv.why["travel_m"], "dur_s": mv.why["dur_s"]})
             p_ = mv.last
         if dry:
-            return bool(chain)
+            return chain[0][1] if chain else None
         if not chain:
             log["legs"] = []
             log["crossed"] = "as_before"
@@ -619,7 +660,7 @@ def plan_tour_3d(model, scene: dict, rooms: list[dict], listing_id: str, cfg: Pl
                                after_exit=id(sel) in after_exit,
                                final=sel.room_key == last_room and i > 0,
                                follows_link=i > 0 and id(selected[i - 1]) in links,
-                               then_forward=_leaves_flying(i))
+                               then_forward=_leaves_flying(i), last_shot=False)   # (its coverage may follow)
         if mv is None and poses.get(sel.room_key) and sel.kind != "detail":
             w = [f"second_angle_dropped:{sel.room_key}"]      # no angle with room to breathe: the first keeps the time
         if mv is not None:
@@ -643,6 +684,7 @@ def plan_tour_3d(model, scene: dict, rooms: list[dict], listing_id: str, cfg: Pl
         if last_of_room and sel.room_key in first_s and id(sel) not in links \
                 and canon(rtype.get(sel.room_key)) not in LOOK_BACK:
             prev = _cover_room(sel.room_key, i, prev)
+            prev = _last_into_next(sel, i, prev, earlier)
             prev = _fly_on(sel.room_key, i, prev)
     if not moves:
         raise ValueError("no room allows a camera move")
@@ -651,7 +693,9 @@ def plan_tour_3d(model, scene: dict, rooms: list[dict], listing_id: str, cfg: Pl
     moves = [(s, mv) for s, mv in moves if s.room_key in room_filmed]
     # the closing length (allocate gave it to the last room's first shot) goes with the shot that now
     # closes the tour, when a coverage shot follows it
-    if moves and moves[-1][1].why.get("coverage_shot"):
+    # (not when planned at the 3D pace: a path played in another length plays at another speed - the
+    # closing walk-in took a coverage shot's 4 s, ran at 3x and left the sync no solution, 2026-11-27)
+    if moves and moves[-1][1].why.get("coverage_shot") and not getattr(mover, "pace_target", None):
         lead_ = first_s.get(moves[-1][0].room_key)
         if lead_ is not None and lead_.final_duration > moves[-1][0].final_duration:
             moves[-1][0].final_duration, lead_.final_duration = lead_.final_duration, moves[-1][0].final_duration
@@ -674,6 +718,14 @@ def plan_tour_3d(model, scene: dict, rooms: list[dict], listing_id: str, cfg: Pl
         lo = max(hi, MIN_KIND_S.get(mv.kind, 0.0) + handle, s_.final_duration - over)
         if lo >= s_.final_duration:
             continue
+        if getattr(mover, "pace_target", None):
+            # planned at the 3D pace: the way in goes with its time, the pace and the end it frames
+            # kept (shortened in time alone a move sped up past the cut it was matched to)
+            from tour_worker.planner3d.moves import trim_move_start
+            trim_move_start(mv, lo / s_.final_duration)
+            mv.why["trimmed_from_s"] = round(s_.final_duration, 2)
+            s_.final_duration = round(lo, 2)
+            continue
         ok = s_.final_duration
         for d in np.linspace(lo, s_.final_duration, 8):         # the shortest the speed limits allow
             turn, move_ = trial_speeds(mv.eye, mv.tgt, float(d), mv.zs, "linear" if continuous else mv.easing)
@@ -683,28 +735,32 @@ def plan_tour_3d(model, scene: dict, rooms: list[dict], listing_id: str, cfg: Pl
         if ok < s_.final_duration:
             mv.why["trimmed_from_s"] = round(s_.final_duration, 2)
             s_.final_duration = round(ok, 2)
-    # then flights through doors give back the time their band pace took (THROUGH_PACE), down to the
-    # shortest their speed limits allow - before a room loses a coverage angle. The walk through the
-    # door is always played whole (speed_band keep_from), the cut's speed match giving way (user
-    # 2026-11-27: "allow speed jumps" over dropping angles or stopping at the door)
-    from tour_worker.planner3d.moves import FLIGHT_S
+    # then flights through doors give back time by starting nearer their door - the way there goes
+    # with its time, the pace kept (shortened in time alone they sped up, and the speed band then cut
+    # their start away: the study walk-in played from its door frame, 2026-11-27); never past
+    # DOOR_LEAD before the room's door - before a room loses a coverage angle
+    from tour_worker.planner3d.moves import trim_move_start
     for s_, mv in sorted(moves, key=lambda m: -m[0].final_duration):
         over = sum(x.final_duration - handle for x, _ in moves) - cap
         if over <= 0:
             break
-        # (a through flight is its room's opening shot: never under a room shot's length)
-        floor = max(FLIGHT_S[0], length_range("room", c3.pacing)[0] * reach) + handle
-        if mv.kind != "through" or s_.final_duration <= floor:
+        if mv.kind != "through":
             continue
-        ok = s_.final_duration
-        for d in np.linspace(max(floor, s_.final_duration - over), s_.final_duration, 8):
-            turn, move_ = trial_speeds(mv.eye, mv.tgt, float(d), mv.zs, "linear" if continuous else mv.easing)
-            if turn <= MAX_TURN_DPS * 0.95 and move_ <= MAX_MOVE_MPS * 0.95:
-                ok = float(d)
-                break
-        if ok < s_.final_duration:
+        at = [space.room_at(q) for q in mv.eye]
+        k = next((j for j in range(len(at)) if at[j] == s_.room_key), None)
+        s_arc = np.r_[0.0, np.cumsum(np.linalg.norm(np.diff(mv.eye, axis=0), axis=1))]
+        if not k or s_arc[-1] < 1e-6:
+            continue
+        least = 1.0 - max(0.0, s_arc[k] - DOOR_LEAD) / s_arc[-1]
+        # (the room's opening shot: never under a room shot's length - the tour's closing walk-in cut
+        # to 4 s left the music sync no solution, 2026-11-27)
+        kind_len = "hero" if (s_.kind == "hero" or mv is moves[-1][1]) else "room"   # (the closing shot: a hero's)
+        floor = (length_range(kind_len, c3.pacing)[0] * reach + handle) / max(s_.final_duration, 1e-6)
+        keep = max(least, floor, 1.0 - over / max(s_.final_duration, 1e-6))
+        if keep < 0.98:
+            trim_move_start(mv, keep)
             mv.why["trimmed_from_s"] = round(s_.final_duration, 2)
-            s_.final_duration = round(ok, 2)
+            s_.final_duration = round(s_.final_duration * keep, 2)
     for _, pair in sorted(extras, key=lambda e: e[0]):
         if sum(s_.final_duration - handle for s_, _ in moves) <= cap:
             break
@@ -859,9 +915,25 @@ def plan_tour_3d(model, scene: dict, rooms: list[dict], listing_id: str, cfg: Pl
         scene=Scene(uri=scene["uri"], sha256=scene["sha256"], format=scene["format"], up_axis=up,
                     json_uri=scene.get("json_uri"), json_sha256=scene.get("json_sha256"),
                     motion_uri=scene.get("motion_uri"), motion_sha256=scene.get("motion_sha256")))
+    # QA (user 2026-11-27: "only 7 of 11 cuts in the limit - that will cause QA issues"): the plan
+    # checks its own cuts as the render will (render/continuity.py) - each cut outside the limits is
+    # named in the plan's warnings, with what broke
+    cut_rows, cut_summary = [], None
+    if continuous and len(shots) > 1:
+        from tour_worker.render import continuity
+        try:
+            cut_rows = continuity.report(plan)
+            cut_summary = continuity.summary(cut_rows)
+            bad = [f"cut_out_of_limits:{c['cut']}:{c['from']}-{c['to']}:{'+'.join(c['breaks'])}"
+                   for c in cut_rows if c.get("judged") and c.get("breaks")]
+            if bad:
+                plan.warnings = sorted(set(plan.warnings) | set(bad))
+        except Exception as e:                       # noqa: BLE001 - the check never fails a plan
+            plan.warnings = sorted(set(plan.warnings) | {f"cut_check_failed:{type(e).__name__}"})
     from tour_worker.planner.planner import _compute_plan_hash
     plan.provenance.plan_hash = _compute_plan_hash(plan.model_dump(mode="json"))
     rep = {
+        "cuts": cut_summary,
         "scene": {"up": [round(float(x), 4) for x in space.up_scene], "up_source": space.frame.source,
                   "room_height_m": round(space.room_height, 2), "pieces": len(space.pieces),
                   "labels": labels is not None, "objects": len(space.objects),

@@ -37,6 +37,17 @@ def target_speed(pacing: str | None) -> float:
     return BAND.get(pacing or "normal", BAND["normal"])
 
 
+# 3D tours (user 2026-11-27): the photo band's 2.6 %fw/s is a 1.8 deg/s pan and a 0.16 m/s walk - under
+# the planner's own "seen to move" floor (MIN_TURN_PS 2.5 deg/s, MIN_TRAVEL_PS 0.12 m/s), so pans read
+# as stills and every 3D move was planned 3-4x faster than it played. 3.6 %fw/s normal: a 2.5 deg/s
+# pan, a 0.22 m/s walk; slow / fast in the photo band's proportions
+BAND_3D = {"slow": 2.6, "normal": 3.6, "fast": 4.7}
+
+
+def target_speed_3d(pacing: str | None) -> float:
+    return BAND_3D.get(pacing or "normal", BAND_3D["normal"])
+
+
 def _speed(path: KeyframePath, u0: float, u1: float, dt: float, src_w: int, src_h: int, out_w: int, out_h: int,
            easing: str | None = "linear") -> float:
     """On-screen speed (%fw/s) between path times u0 and u1 (through the shot's easing), dt s apart."""
@@ -272,8 +283,8 @@ def apply_speed_band_3d(shots, pacing: str | None, fps: float = 30.0, up=None, k
     onto the room always play (user 2026-11-27, green house: the walk
     through the study door was trimmed away and the shot stood at the door frame)."""
     keep_from = keep_from or {}
+    target = target_speed_3d(pacing)
     up = tuple(up) if up else (0.0, 0.0, 1.0)
-    target = target_speed(pacing)
     idx = [i for i, s in enumerate(shots) if s.camera.type == "bezier_path" and getattr(s.camera, "path_s", None)
            and s.camera.segments]
     if not idx:

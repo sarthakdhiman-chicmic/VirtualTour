@@ -118,6 +118,14 @@ FLOOR_MARGIN = 0.04          # ... and the floor under it this far above the fra
 MIN_SCALE_PS = 0.035          # or a push's subject grows (ln of its distance ratio) this much a second
 MIN_TRAVEL_PS = 0.12         # m/s: a room shot travels at least this much for its length ...
 MIN_TURN_PS = 2.5            # ... or turns this much (deg/s) - else it reads as a still (user 2026-11-16, Krk)
+# planning at the tour's 3D pace (RoomMoves.to_pace, speed_band.BAND_3D)
+PACE_MIN_KEEP = 0.25          # a move keeps at least this share of its path when slowed to the pace
+PACE_SLOW_RATIO = 1.2         # slower than pace / this: it holds the next cut down ...
+PACE_SLOW_W = 4.0             # ... and loses this score at no speed at all (1.5 let slow pans win, 2026-11-27)
+ON_PIECE_W = 0.3              # a room's first shot walking / arcing on its bed or sofa
+PACE_PEAK_SHARE = 0.85        # a paced move's peak turn / travel under this share of the caps
+PACE_CUT_RATIO = 1.2          # a move enters within this of the previous shot's exit speed (the band's PLAN_RATIO)
+DOOR_LEAD = 0.6               # m before a room's door a walk in through it always starts (paced or shortened)
 TILT_MAX = 12.0              # deg: a push may tilt down this far at its end to frame its subject with floor
 KEEP_PER_KIND = 40            # a room's arcs / pans judged further: the best by their own score
 OWN_POINTS = 16              # candidate points spread over a room's own floor, besides the space's
@@ -175,13 +183,13 @@ FLIGHT_PACE = (0.25, 0.45)    # m/s: a leg flies at the previous shot's pace, wi
 # 0.2 m/s is ~3.3 % frame width/s at the 3 m reference depth) and turns onto the room gently - planned
 # faster, the speed band kept only a quarter of it and the walk through the door was lost (user
 # 2026-11-27, green house study); the room's next shot shows the room
-THROUGH_PACE = 0.2            # m/s
-THROUGH_S_MAX = 8.0           # s a through flight may last (other legs: FLIGHT_S)
+THROUGH_PACE = 0.18           # m/s: under the 3D band's 0.22 m/s walk, its turn onto the room on top
+THROUGH_S_MAX = 14.0          # s a through flight may last at THROUGH_PACE (a longer way there: the band trims its start)
 THROUGH_TURN_DPS = 3.0        # deg/s its turn onto the room may reach
 # the flight through a door is the room's opening shot - one move: under the doorway, on into the
 # room and onto what it holds, never cut to another angle of the room just past the door (user
 # 2026-11-27); it walks this far past the door (m) and takes the room's opening time
-THROUGH_AFTER_LEAD = (1.2, 3.5)
+THROUGH_AFTER_LEAD = (0.9, 2.2)     # (1.2-3.5 m at the 3D pace: 9-14 s walk-ins took three rooms' coverage, 2026-11-27)
 WALK_LEN = (0.8, 4.5)         # m a walk between two narrow doors travels (longer: no matched chain)
 THROUGH_NEAR = 0.45           # m: a flight through a door may pass its frame no closer than this
 DOOR_PASS_CLEAR = 0.14        # m clear a flight needs in a doorway it passes through
@@ -232,7 +240,11 @@ BACKOUT_NEAR = 0.35            # m: its near-lens radius (a bathroom's side wall
 # cut - a pan leaves the room sideways, so the walk on follows)
 DOOR_PAN_IN = (0.3, 0.6)      # m in from the door it stands
 DOOR_PAN_SWEEP = (15.0, 40.0)  # deg it pans, within the turn budget
+DOOR_PAN_ROOMS = ("bath", "powder", "ensuite", "closet", "laundry", "pantry")   # the rooms looked into from their door
 DOOR_PAN_FRONT = 0.6          # m in front at both ends (it stands still: a back-out's 0.8 m end lost the pan one way)
+# what a small room is about: its pan ends on these (the green house bathroom's first door pan swept the
+# middle of its floor - a shower screen and a wall, user 2026-11-27)
+DOOR_PAN_ON = ("sink", "toilet", "bathtub", "counter", "mirror", "shower", "bed", "desk", "wardrobe")
 COVER_FEATURE_MIN = 0.5       # a further angle ends on something (FEATURES weight in view), not bare wall
 WALL_PAN = 30.0               # deg a coverage pan turns across the unseen wall
 SWEEP_LEN = (1.0, 1.4, 1.8)   # m a corner sweep travels toward the room's middle ...
@@ -312,6 +324,23 @@ def move_motion(m, end: bool):
                   float(v @ fwd) / REF_DEPTH_M * 0.5)
 
 
+def trim_move_start(m, keep: float) -> None:
+    """In place: m with only the last `keep` share of its path (by the renderer's arc measure: the
+    eye's travel + TARGET_WEIGHT x the aim's), resampled to its sample count."""
+    from tour_worker.scene.camera import TARGET_WEIGHT
+    eye3, tgt = m.eye3, np.asarray(m.tgt, float)
+    step = np.linalg.norm(np.diff(eye3, axis=0), axis=1) + TARGET_WEIGHT * np.linalg.norm(np.diff(tgt, axis=0), axis=1)
+    arc = np.r_[0.0, np.cumsum(step)]
+    if arc[-1] < 1e-9:
+        return
+    u = np.linspace((1.0 - keep) * arc[-1], arc[-1], len(m.eye))
+    m.eye = np.c_[[np.interp(u, arc, m.eye[:, j]) for j in range(2)]].T
+    m.tgt = np.c_[[np.interp(u, arc, tgt[:, j]) for j in range(3)]].T
+    if m.z is not None:
+        m.z = np.interp(u, arc, m.z)
+    m.why["travel_m"] = round(float(np.linalg.norm(np.diff(m.eye3, axis=0), axis=1).sum()), 2)
+
+
 def _route_point(poly: np.ndarray, s_: np.ndarray, s: float) -> np.ndarray:
     """The point s m along a route; past its end, straight on along its last stretch (a look ahead
     does not stop on the eye where the route ends)."""
@@ -328,6 +357,19 @@ def ends_backward(m) -> bool:
     forward move): the shot before a forward flight out of the room would reverse into it."""
     from tour_worker.render.continuity import Motion, _axial_reversal
     return _axial_reversal(_unit(move_motion(m, end=True)), Motion(0.0, 0.0, 10.0))
+
+
+def breaks_into(m, nxt) -> bool:
+    """m's exit breaks the cut into what follows it: nxt the next move's start motion (render/
+    continuity units - a dry run of the flight on, user 2026-11-27: the primary bedroom's last pan
+    swept left into a walk heading forward-right, a 157 deg turn), or True - a move forward of
+    unknown heading (a walk in from the next room's door): m ends moving backward."""
+    if nxt is True:
+        return ends_backward(m)
+    from tour_worker.render.continuity import MAX_TURN_DEG, _axial_reversal, _turn_deg
+    a, b = _unit(move_motion(m, end=True)), _unit(nxt)
+    turn = _turn_deg(a, b)
+    return _axial_reversal(a, b) or (turn is not None and turn > MAX_TURN_DEG)
 
 
 def _unit(mo):
@@ -636,7 +678,7 @@ class RoomMoves:
              opening: bool = False, closing: bool = False, kind: str = "room",
              next_room: str | None = None, enter_route=None, after_exit: bool = False,
              final: bool = False, follows_link: bool = False, covered: np.ndarray | None = None,
-             then_forward: bool = False) -> tuple[Move | None, list[str]]:
+             then_forward=False, last_shot: bool = True) -> tuple[Move | None, list[str]]:
         """The best move for a shot of `room` lasting dur s. earlier: (first, last) poses of the
         room's earlier shots; prev: the previous shot's last pose; next_room: the tour's next room
         (an opening reveal turns onto it). Returns (move, warnings).
@@ -737,6 +779,7 @@ class RoomMoves:
                 if drop:
                     m.tgt[:, 2] -= drop * np.linalg.norm(m.tgt[:, :2] - m.eye, axis=1)
                 m.tgt[:, 2] = np.minimum(m.tgt[:, 2], AIM_Z_MAX)
+                self.to_pace(m, dur)
         # a move that would turn back across the cut (or end moving backward before a flight out of
         # the room) is offered played in reverse too, when its kind reads the same both ways - judged
         # by every rule like the rest (client review item 5; the green house's in-room cuts)
@@ -856,7 +899,7 @@ class RoomMoves:
             vr = self.sequence_cost(m) + (ROOM_REPEAT_W if m.kind in used else 0.0)
             if kind == "hero" and m.kind in TRAVELS:
                 pr += HERO_TRAVEL_W
-            if then_forward and ends_backward(m):    # the room is left flying forward (item 5)
+            if then_forward and breaks_into(m, then_forward):   # the room's next move (item 5)
                 vr += CUT_AXIAL_W
             if m.kind not in FLIGHT and m.kind != "detail" and self.ends_on_door(m):
                 vr += DOOR_END_W                     # (item 17: not a door to end on)
@@ -890,11 +933,11 @@ class RoomMoves:
             if breaks:
                 b_ids = {id(m) for m in breaks}
                 tiers = [[m for m in t if id(m) not in b_ids] for t in tiers] + [breaks]
-            if then_forward:
+            if then_forward and last_shot:
                 # the room is left moving forward: a shot ending backward reverses at that cut, so it
                 # comes only when no other move will do - whatever its tier (user 2026-11-27: the green
                 # house bathroom backed out, then the bedroom was walked into; a door pan instead)
-                back = [m for t in tiers for m in t if ends_backward(m)]
+                back = [m for t in tiers for m in t if breaks_into(m, then_forward)]
                 if back:
                     k_ids = {id(m) for m in back}
                     tiers = [[m for m in t if id(m) not in k_ids] for t in tiers] + [back]
@@ -905,6 +948,11 @@ class RoomMoves:
         for m in {id(m): m for t in tiers for m in t}.values():
             if m.kind == "detail" or "front_m" not in m.why:
                 continue
+            if (piece_rank == 0 and covered is None and m.kind in ("walkway", "arc") and m.piece is not None
+                    and (m.piece.cls in TYPE_WHOLE or m.piece.cls is None)):     # (unlabelled: its main piece)
+                # a room's first shot: the walk / arc on its bed or sofa (user 2026-11-18 liked the walk;
+                # it held by a 0.01 score margin, which pacing its path to the 3D pace undid, 2026-11-27)
+                m.score += ON_PIECE_W
             if opening:
                 # the tour's first shot moves into the home, toward what it shows (user 2026-11-16:
                 # "in the first shot we should pan in instead of zoom out")
@@ -941,7 +989,7 @@ class RoomMoves:
                     type_warn = [f"room_type_not_in_view:{room}"]
                 best.why.update(candidates=len(cands), occlusion=round(best.occ, 3))
                 self._kinds.setdefault(room, []).append(best.kind)
-                self.record(best)
+                self.record(best, dur)
                 return best, type_warn
         if least is None:
             return None, [f"room_no_move:{room}"]
@@ -955,7 +1003,7 @@ class RoomMoves:
             bad = self._cover(hold) >= 1.0 or self._void(hold) > VOID_MAX
             if bad:
                 return None, [f"room_only_bad_hold:{room}"] + type_warn
-        self.record(hold)
+        self.record(hold, dur)
         return hold, [f"view_partly_blocked:{room}"] + type_warn
 
     def front(self, e, t, past=None) -> float:
@@ -1744,12 +1792,15 @@ class RoomMoves:
                 return 0
         return 1 if c > 0 else -1
 
-    def record(self, m: Move) -> None:
+    def record(self, m: Move, dur: float | None = None) -> None:
         """A shot the tour plays: its kind and side, for the next shots' sequence costs, and the way
-        it leaves the frame (continuous cuts: the next shot carries it on)."""
+        it leaves the frame (continuous cuts: the next shot carries it on) - its direction and its
+        speed (%fw/s, the next shot is planned to it: to_pace)."""
         self.__dict__.setdefault("_history", []).append((m.kind, self.side(m)))
         self._last_kind = m.kind
         self._last_exit = move_motion(m, end=True)
+        dur = dur or m.why.get("dur_s")
+        self._last_exit_pct = self.pace_ends(m, float(dur))[1] if dur else None
 
     def keep_direction(self, cands: list) -> list:
         """Continuous cuts: the candidates that carry the previous shot's move on (cut_cost <= 0),
@@ -1784,7 +1835,7 @@ class RoomMoves:
             if m.kind not in REVERSIBLE or m.why.get("reversed"):
                 continue
             breaks = self.__dict__.get("_last_exit") is not None and self.cut_cost(m) > 0
-            if not (breaks or (then_forward and ends_backward(m))):
+            if not (breaks or (then_forward and breaks_into(m, then_forward))):
                 continue
             out.append(dataclasses.replace(m, eye=m.eye[::-1].copy(), tgt=m.tgt[::-1].copy(),
                                            z=None if m.z is None else m.z[::-1].copy(), occ=None,
@@ -1879,7 +1930,8 @@ class RoomMoves:
         from tour_worker.scoring.rooms import canon
         if "bath" in (canon(sp.room_types.get(room)) or "") or area < 8.0:
             prior["backout"] = 1.0                          # a small room: back out of it
-            prior["door_pan"] = 0.8                         # ... or look in from its door
+            if any(k in (canon(sp.room_types.get(room)) or "") for k in DOOR_PAN_ROOMS):
+                prior["door_pan"] = 0.8                     # ... or look in from its door
         if area < 14.0 or spread >= 0.6:
             prior["panorama"] = 0.5                         # a small room, or things all round it
         if (open_plan or area >= RISE_AREA) and any(c in ("table", "bed", "kitchen island", "sofa") for c in pieces):
@@ -2224,6 +2276,15 @@ class RoomMoves:
                 break
         if not cands:
             return None, [f"{kind}_no_move:{room}:" + "/".join(f"{k}{v}" for k, v in st.items() if v)]
+        for m in cands:                         # at the 3D pace, into the cut before (to_pace) ...
+            least = PACE_MIN_KEEP
+            if through and end_room is not None:  # ... never past DOOR_LEAD before its room's door
+                at_ = [sp.room_at(q) for q in m.eye]
+                k_ = next((j for j in range(len(at_)) if at_[j] == end_room), None)
+                arc_ = np.r_[0.0, np.cumsum(np.linalg.norm(np.diff(m.eye, axis=0), axis=1))]
+                if k_ and arc_[-1] > 1e-6:
+                    least = max(least, 1.0 - max(0.0, arc_[k_] - DOOR_LEAD) / arc_[-1])
+            self.to_pace(m, m.why["dur_s"] + extra_s, least=least)
         if geometry_only:
             return max(cands, key=lambda m: m.score), []
         # _check's speed test takes one length: the longest leg's (each passed its own above); the
@@ -2433,9 +2494,8 @@ class RoomMoves:
         moving sideways - the move for a room left by walking on forward (then_forward)."""
         sp = self.space
         from tour_worker.scoring.rooms import canon
-        foot = float((sp.room_fill == sp.room_keys.index(room)).sum()) * 0.05 * 0.05 if room in sp.room_keys else 0.0
         kind_ = canon(sp.room_types.get(room)) or ""
-        if foot > BACKOUT_SMALL_M2 and "bath" not in kind_ and "bedroom" not in kind_:
+        if not any(k in kind_ for k in DOOR_PAN_ROOMS):     # (a bedroom or kitchen is walked into)
             return []
         door = self._room_door(room)
         if door is None:
@@ -2453,13 +2513,17 @@ class RoomMoves:
         w = u * u * (3 - 2 * u)
         sweep = math.radians(float(np.clip(0.6 * self.turn_budget * dur, *DOOR_PAN_SWEEP)))
         out = []
+        fit = [np.asarray(o["centre"][:2], float) for o in sp.room_objects(room, DOOR_PAN_ON)]
         for d_in in DOOR_PAN_IN:
             at = sp.snap(door + d_in * into, BACKOUT_CLEAR, 0.3)
             if at is None or sp.room_at(at) != room:
                 continue
             h_mid = math.atan2(*(mid - at)[::-1])
+            # onto its fittings when it has any: the pan ends on them, from either side; else across
+            # the middle of the room
+            h_on = math.atan2(*(np.mean(fit, axis=0) - at)[::-1]) if fit else None
             for sgn in (1.0, -1.0):                  # across the room, either way
-                heads = h_mid + sgn * sweep * (w - 0.5)
+                heads = (h_on + sgn * sweep * (w - 1.0)) if h_on is not None else (h_mid + sgn * sweep * (w - 0.5))
                 eye = np.repeat(np.asarray(at, float)[None], SAMPLES, 0)
                 tgt = np.c_[eye + 3.0 * np.c_[np.cos(heads), np.sin(heads)], np.full(SAMPLES, EYE - 0.25)]
                 first, last = (eye[0], tgt[0]), (eye[-1], tgt[-1])
@@ -2832,6 +2896,64 @@ class RoomMoves:
                  why={"held_because": "every move is blocked near the lens", "occlusion": round(least.occ, 3),
                       "sweep_deg": HOLD_SWEEP})
         return m
+
+    def to_pace(self, m: Move, dur: float, least: float = PACE_MIN_KEEP) -> None:
+        """In place: a candidate at the tour's 3D pace (pace_target, %fw/s; speed_band.BAND_3D) before
+        anything judges it - the speed band would play only the last share of a faster move, and the
+        rules (framing, the lens and void checks, the walls it shows, the cut) judged the whole of it
+        (user 2026-11-27: pans planned at 5-8 deg/s played at ~1, a walk through a door lost its door).
+        Faster: its start goes, the end it frames kept (as the band trims). Slower than the band by
+        more than its cut ratio: it loses score - one slow shot holds every later cut down."""
+        target = getattr(self, "pace_target", None)
+        if not target or m.kind in ("detail", "link") or len(m.eye) < 8:
+            return
+        prev = self.__dict__.get("_last_exit_pct")       # the cut into it: within PACE_CUT_RATIO
+        s0, s1 = self.pace_ends(m, dur)
+        rep = (s0 + s1) / 2
+        m.why["pace_pct"] = round(rep, 2)
+        keep = 1.0
+        if rep > target * 1.02:
+            keep = target / rep
+        if prev and s0 * keep > prev * PACE_CUT_RATIO:
+            keep = min(keep, prev * PACE_CUT_RATIO / s0)
+        # ... and its peak turn / travel well under the caps (the fitted curve runs a little over the
+        # samples: a walkway planned under 9 deg/s played 10.1, 2026-11-27)
+        turn_pk, move_pk = trial_speeds(m.eye, m.tgt, dur, m.zs, "linear")
+        if turn_pk * keep > PACE_PEAK_SHARE * MAX_TURN_DPS:
+            keep = min(keep, PACE_PEAK_SHARE * MAX_TURN_DPS / turn_pk)
+        if move_pk * keep > PACE_PEAK_SHARE * MAX_MOVE_MPS:
+            keep = min(keep, PACE_PEAK_SHARE * MAX_MOVE_MPS / move_pk)
+        if keep < 0.98:
+            keep = max(least, keep)
+            trim_move_start(m, keep)
+            m.why["paced_keep"] = round(keep, 2)
+            m.why.pop("front_m", None)               # (measured again on what plays)
+            s0, s1 = self.pace_ends(m, dur)
+            rep = (s0 + s1) / 2
+        if rep < target / PACE_SLOW_RATIO:
+            m.score -= PACE_SLOW_W * (1.0 - rep / target)
+        if prev and s0 < prev / PACE_CUT_RATIO:      # slower in than the cut allows: the band would slow
+            m.score -= PACE_SLOW_W * (1.0 - s0 * PACE_CUT_RATIO / prev)    # the shot before it
+
+    def pace_ends(self, m: Move, dur: float) -> tuple[float, float]:
+        """A move's on-screen speed (%fw/s) entering and leaving its shot - the speed band's measure
+        (render/continuity.py units), its samples taken as evenly spread in time."""
+        from tour_worker.scene.camera import TARGET_WEIGHT
+        n = len(m.eye)
+        k = min(4, n - 1)
+        # the renderer plays a path at an even pace along its arc (the eye's travel + TARGET_WEIGHT x
+        # the aim's), not its samples: an eased pan's ends play as fast as its middle (spread evenly
+        # in sample time they read 3-4x slow - wall pans estimated 1.5 played 7-12 %fw/s, 2026-11-27)
+        step = (np.linalg.norm(np.diff(m.eye3, axis=0), axis=1)
+                + TARGET_WEIGHT * np.linalg.norm(np.diff(np.asarray(m.tgt, float), axis=0), axis=1))
+        total = float(step.sum())
+        if total < 1e-9:
+            return 0.0, 0.0
+        t0 = max(dur * float(step[:k].sum()) / total, 1e-6)
+        t1 = max(dur * float(step[-k:].sum()) / total, 1e-6)
+        a, b = (math.sqrt(mo.x ** 2 + mo.y ** 2 + mo.f ** 2) * 100.0 / t
+                for mo, t in ((move_motion(m, end=False), t0), (move_motion(m, end=True), t1)))
+        return float(a), float(b)
 
     def pitch_room(self, m: Move) -> float:
         """Degrees the move may still tilt down before PITCH_MAX_ROOM (PITCH_MAX_RISE for a rise /
